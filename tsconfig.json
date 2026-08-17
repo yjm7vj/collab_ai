@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Deliberately NOT setting experimentalDecorators — the Agents SDK relies on
+    // standard TC39 decorators and legacy decorator emit breaks @callable.
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowJs": false,
+    "noEmit": true,
+    "types": ["./worker-configuration.d.ts", "vite/client"]
+  },
+  "include": ["src", "vite.config.ts", "worker-configuration.d.ts"]
+}

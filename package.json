@@ -1,0 +1,48 @@
+{
+  "name": "collab-ai",
+  "version": "1.0.0",
+  "description": "Multiplayer AI: many people, one shared agent.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && wrangler deploy -c dist/collab_ai/wrangler.json",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "check": "esbuild scripts/check-settings.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check.mjs --log-level=warning && node node_modules/.cache/check.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yjm7vj/collab_ai.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/yjm7vj/collab_ai/issues"
+  },
+  "homepage": "https://github.com/yjm7vj/collab_ai#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "agents": "^0.20.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.52.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "wrangler": "^4.123.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260811.1": true
+  },
+  "private": true
+}
