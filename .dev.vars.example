@@ -1,0 +1,3 @@
+# Copy to `.dev.vars` and fill in. `.dev.vars` is gitignored.
+# For a deployed Worker use `npx wrangler secret put ANTHROPIC_API_KEY` instead.
+ANTHROPIC_API_KEY=sk-ant-...
