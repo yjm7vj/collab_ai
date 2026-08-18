@@ -5,12 +5,14 @@ import {
   type AgentBlock,
   type Entry,
   type InviteSummary,
+  type MemberSummary,
   type PendingTool,
   type Presence as PresenceUser,
   type Vote,
   type WorkerStatus,
 } from "../shared/protocol";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
+import { ROLES, outranks, type Role } from "../shared/access";
 
 /* --------------------------------------------------- context + spend */
 
@@ -184,8 +186,9 @@ export function Presence({ users, me }: { users: PresenceUser[]; me: string | nu
       {users.map((u) => (
         <span
           key={u.uid}
-          className={`chip ${u.uid === me ? "chip-me" : ""}`}
+          className={`chip chip-${u.role} ${u.uid === me ? "chip-me" : ""}`}
           style={{ borderColor: u.color, color: u.color }}
+          title={`${u.name} · ${u.role}`}
         >
           {u.name}
         </span>
@@ -410,11 +413,13 @@ export function DocPanel({ doc, revision }: { doc: string; revision: number }) {
 export function Composer({
   disabled,
   busy,
+  readOnly,
   onSend,
   onInterrupt,
 }: {
   disabled: boolean;
   busy: boolean;
+  readOnly?: boolean;
   onSend: (text: string) => void;
   onInterrupt: () => void;
 }) {
@@ -431,12 +436,14 @@ export function Composer({
     <div className="composer">
       <textarea
         value={value}
-        disabled={disabled}
+        disabled={disabled || readOnly}
         rows={2}
         placeholder={
-          busy
-            ? "The agent is working — anything you send now joins its next turn"
-            : "Say something to the room"
+          readOnly
+            ? "You're a viewer in this room — you can read along, but can't post."
+            : busy
+              ? "The agent is working — anything you send now joins its next turn"
+              : "Say something to the room"
         }
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -446,16 +453,18 @@ export function Composer({
           }
         }}
       />
-      <div className="composer-actions">
-        {busy && (
-          <button className="stop" onClick={onInterrupt} title="Stop the current turn">
-            Stop
+      {!readOnly && (
+        <div className="composer-actions">
+          {busy && (
+            <button className="stop" onClick={onInterrupt} title="Stop the current turn">
+              Stop
+            </button>
+          )}
+          <button className="send" onClick={submit} disabled={disabled || !value.trim()}>
+            Send
           </button>
-        )}
-        <button className="send" onClick={submit} disabled={disabled || !value.trim()}>
-          Send
-        </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -635,6 +644,110 @@ export function InvitePanel({
               </div>
             )}
           </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------- members */
+
+/**
+ * Whether `myRole` may change or remove this member. False when the target is
+ * the acting person, the room's owner, or simply not outranked.
+ */
+function canActOn(myRole: Role, m: MemberSummary, me: string | null): boolean {
+  if (m.uid === me) return false;
+  if (m.role === "owner") return false;
+  if (!outranks(myRole, m.role)) return false;
+  return true;
+}
+
+function memberRowTitle(myRole: Role, m: MemberSummary, me: string | null): string | undefined {
+  if (m.uid === me) return "This is you.";
+  if (m.role === "owner") return "The room's owner can't be changed here.";
+  if (!outranks(myRole, m.role)) return "You can only manage people below your own role.";
+  return undefined;
+}
+
+export function MembersPanel({
+  members,
+  myRole,
+  me,
+  onSetRole,
+  onRemove,
+  onClose,
+}: {
+  members: MemberSummary[];
+  myRole: Role;
+  me: string | null;
+  onSetRole: (uid: string, role: Role) => void;
+  onRemove: (uid: string) => void;
+  onClose: () => void;
+}) {
+  // An admin can offer editor and viewer but not admin: owner is never
+  // selectable here, and neither is any role the acting person doesn't outrank.
+  const selectableRoles = ROLES.filter((r) => r !== "owner" && outranks(myRole, r));
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-label="Members"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <h2>Members</h2>
+          <button className="icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        <div className="modal-body">
+          <p className="field-note">
+            Roles decide what someone can do here. Changes take effect
+            immediately, even for people already connected.
+          </p>
+
+          {members.length === 0 ? (
+            <p className="invite-empty">Nobody here yet.</p>
+          ) : (
+            <div className="member-list">
+              {members.map((m) => {
+                const actionable = canActOn(myRole, m, me);
+                const title = memberRowTitle(myRole, m, me);
+                return (
+                  <div key={m.uid} className="member-row" title={title}>
+                    <span
+                      className={m.online ? "dot-online" : "dot-offline"}
+                      title={m.online ? "online" : "offline"}
+                    />
+                    <span className="member-name">
+                      {m.name}
+                      {m.uid === me ? " (you)" : ""}
+                    </span>
+                    <select
+                      value={m.role}
+                      disabled={!actionable}
+                      onChange={(e) => onSetRole(m.uid, e.target.value as Role)}
+                    >
+                      {(actionable ? selectableRoles : [m.role]).map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                    {actionable && (
+                      <button className="mini" onClick={() => onRemove(m.uid)}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

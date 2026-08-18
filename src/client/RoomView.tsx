@@ -6,17 +6,20 @@ import {
   type ClientMsg,
   type Entry,
   type InviteSummary,
+  type MemberSummary,
   type RoomState,
   type ServerMsg,
   type Vote,
 } from "../shared/protocol";
 import type { RoomSettings } from "../shared/models";
+import { asRole, can, type Role } from "../shared/access";
 import {
   ApprovalCard,
   Composer,
   ContextGauge,
   DocPanel,
   InvitePanel,
+  MembersPanel,
   Presence,
   Transcript,
   WorkerStrip,
@@ -41,7 +44,9 @@ export function RoomView({
   const [state, setState] = useState<RoomState>(INITIAL_ROOM_STATE);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [me, setMe] = useState<string | null>(null);
-  const [myRole, setMyRole] = useState<string | null>(null);
+  // Defaulting to "viewer" before the handshake arrives is deliberate — the UI
+  // should start with the fewest powers and gain them, never the reverse.
+  const [myRole, setMyRole] = useState<Role>("viewer");
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -49,15 +54,27 @@ export function RoomView({
   const [copied, setCopied] = useState(false);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
   const [showInvites, setShowInvites] = useState(false);
+  const [members, setMembers] = useState<MemberSummary[]>([]);
+  const [showMembers, setShowMembers] = useState(false);
+
+  // These hide controls the server would refuse anyway; the server is the
+  // boundary, this is only so nobody clicks into a refusal.
+  const maySpeak = can(myRole, "speak");
+  const maySettings = can(myRole, "settings");
+  const mayInvite = can(myRole, "invite");
+  const mayManage = can(myRole, "manage_members");
 
   const applyServerMessage = useCallback((msg: ServerMsg) => {
     switch (msg.t) {
       case "you":
         setMe(msg.uid);
-        setMyRole(msg.role);
+        setMyRole(asRole(msg.role));
         break;
       case "invites":
         setInvites(msg.invites);
+        break;
+      case "members":
+        setMembers(msg.members);
         break;
       case "history":
         setEntries(msg.entries);
@@ -167,6 +184,15 @@ export function RoomView({
     setShowInvites(true);
     send({ t: "invite.list" });
   }, [send]);
+  const openMembers = useCallback(() => {
+    setShowMembers(true);
+    send({ t: "member.list" });
+  }, [send]);
+  const setMemberRole = useCallback(
+    (uid: string, role: Role) => send({ t: "member.role", uid, role }),
+    [send],
+  );
+  const removeMember = useCallback((uid: string) => send({ t: "member.remove", uid }), [send]);
 
   const copyLink = useCallback(() => {
     void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`).then(() => {
@@ -233,12 +259,22 @@ export function RoomView({
           />
           <span className={`status status-${state.status}`}>{statusLabel}</span>
           <Presence users={state.users} me={me} />
+          {mayManage && (
+            <button
+              className="icon"
+              onClick={openMembers}
+              title="Members"
+              aria-label="Members"
+            >
+              👥
+            </button>
+          )}
           {/*
             This check is only a UI courtesy — it hides the button so people who
             can't mint invites don't see one. The server re-checks the role on
             every invite.* message; a hidden button is not a permission.
           */}
-          {(myRole === "owner" || myRole === "admin") && (
+          {mayInvite && (
             <button
               className="icon"
               onClick={openInvites}
@@ -248,14 +284,16 @@ export function RoomView({
               🔗
             </button>
           )}
-          <button
-            className="icon"
-            onClick={() => setShowSettings(true)}
-            title="Room setup"
-            aria-label="Room setup"
-          >
-            ⚙
-          </button>
+          {maySettings && (
+            <button
+              className="icon"
+              onClick={() => setShowSettings(true)}
+              title="Room setup"
+              aria-label="Room setup"
+            >
+              ⚙
+            </button>
+          )}
         </div>
       </header>
 
@@ -286,6 +324,17 @@ export function RoomView({
         />
       )}
 
+      {showMembers && (
+        <MembersPanel
+          members={members}
+          myRole={myRole}
+          me={me}
+          onSetRole={setMemberRole}
+          onRemove={removeMember}
+          onClose={() => setShowMembers(false)}
+        />
+      )}
+
       <div className="columns">
         <section className="chat">
           <Transcript entries={entries} me={me} />
@@ -310,6 +359,7 @@ export function RoomView({
           <Composer
             disabled={!connected}
             busy={state.status !== "idle"}
+            readOnly={!maySpeak}
             onSend={say}
             onInterrupt={interrupt}
           />

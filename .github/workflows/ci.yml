@@ -1,0 +1,50 @@
+name: CI
+
+# Every push to a branch and every pull request. The point of this workflow is
+# narrow and worth stating: it must fail if a change breaks the product that
+# already works, not merely if a change is untidy.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same PR cancels the first — no value in finishing a run
+# for a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Types first: it is the cheapest check and the one most likely to catch a
+      # protocol change that the client and server disagree about.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The guard suites. `check` covers settings sanitisation and the voting
+      # threshold; `check:auth` covers token forgery, expiry and id generation.
+      - name: Guard checks
+        run: npm test
+
+      # Exercises the Worker and the Durable Object in workerd: room creation,
+      # admission, and the token gate on the WebSocket upgrade.
+      - name: Integration tests
+        run: npm run test:integration
+
+      # A green typecheck does not prove the bundle builds.
+      - name: Build
+        run: npm run build

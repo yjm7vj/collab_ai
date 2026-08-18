@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // cloudflare:test (SELF, env, etc.) comes from this package's ambient
+    // module declaration (its "." export's types condition resolves to
+    // types/cloudflare-test.d.ts), not from worker-configuration.d.ts. This
+    // "types" array replaces (rather than adds to) the base config's array,
+    // so worker-configuration.d.ts is repeated here.
+    // "vite/client" is what types the `?raw` import used in
+    // test/config.test.ts to read wrangler.jsonc's literal contents.
+    "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-pool-workers", "vite/client"]
+  },
+  "include": ["test", "vitest.config.ts", "worker-configuration.d.ts"]
+}

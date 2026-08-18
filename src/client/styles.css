@@ -603,3 +603,29 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   opacity: 0.55;
 }
 .invite-dead .invite-url { text-decoration: line-through; text-decoration-color: var(--ink-faint); }
+
+/* --------------------------------------------------------------- members */
+
+.member-list { display: grid; gap: 8px; }
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 8px 12px;
+}
+.member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.member-row select { width: auto; flex: none; }
+
+.dot-online, .dot-offline {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.dot-online { background: var(--ok); }
+.dot-offline { background: var(--ink-faint); }
+
+/* Viewers are read-only — mark their chip subtly rather than shouting it. */
+.chip-viewer { opacity: 0.6; border-style: dashed; }
