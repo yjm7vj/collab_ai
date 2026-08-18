@@ -20,6 +20,7 @@ import type {
 
 import {
   INITIAL_ROOM_STATE,
+  UID_RE,
   colorFor,
   tally,
   thresholdFor,
@@ -49,6 +50,7 @@ import {
   type WorkerTask,
 } from "./model";
 import { GATED, execute, summarize as summarizeCall, type ToolCtx } from "./tools";
+import { constantTimeEqual } from "./auth";
 
 /** In-flight turn bookkeeping. Persisted, because a turn can outlive this instance. */
 type Turn = {
@@ -76,6 +78,19 @@ export class Room extends Agent<Env, RoomState> {
       id TEXT PRIMARY KEY, ts INTEGER NOT NULL, json TEXT NOT NULL
     )`;
     this.sql`CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL)`;
+    this.sql`CREATE TABLE IF NOT EXISTS members (
+      uid TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      joined_at INTEGER NOT NULL,
+      last_seen INTEGER NOT NULL
+    )`;
+    // Added after the members table shipped, so it has to be tolerated as a
+    // no-op on a room that already has the column.
+    try {
+      this.sql`ALTER TABLE members ADD COLUMN role TEXT NOT NULL DEFAULT 'editor'`;
+    } catch {
+      /* column already present */
+    }
     this.#schemaReady = true;
   }
 
@@ -157,14 +172,63 @@ export class Room extends Agent<Env, RoomState> {
     this.broadcast(JSON.stringify(msg));
   }
 
+  /** The member this socket joined as, or null if it hasn't joined yet. */
+  #uidOf(connection: Connection): string | null {
+    const s = connection.state as { uid?: string } | null;
+    return s?.uid ?? null;
+  }
+
+  /** The display name on record for a member, or null if there is no such member. */
+  #memberName(uid: string): string | null {
+    const rows = this.sql<{ name: string }>`SELECT name FROM members WHERE uid = ${uid}`;
+    return rows.length ? rows[0]!.name : null;
+  }
+
+  /** The name behind a socket, or null if it hasn't joined. */
+  #nameOf(connection: Connection): string | null {
+    const uid = this.#uidOf(connection);
+    return uid ? this.#memberName(uid) : null;
+  }
+
+  /** The room's own record, or null if this room was never created. */
+  #room(): { title: string; visibility: string; createdAt: number } | null {
+    return this.#kvGet<{ title: string; visibility: string; createdAt: number } | null>(
+      "room",
+      null,
+    );
+  }
+
+  /** The role on record for a member, or null if they are not a member. */
+  #memberRole(uid: string): string | null {
+    const rows = this.sql<{ role: string }>`SELECT role FROM members WHERE uid = ${uid}`;
+    return rows.length ? rows[0]!.role : null;
+  }
+
   // ---------------------------------------------------------------- presence
 
-  #presence(): Presence[] {
-    const out: Presence[] = [];
+  /**
+   * Who is in the room, one entry per person rather than one per socket.
+   *
+   * `exclude` drops a single connection id from the count. `onClose` needs it
+   * because the closing socket may still be listed when the handler runs.
+   */
+  #presence(exclude?: string): Presence[] {
+    const counts = new Map<string, number>();
     for (const conn of this.getConnections()) {
-      const name = this.#kvGet<string | null>(`user:${conn.id}`, null);
-      if (name) out.push({ id: conn.id, name, color: colorFor(conn.id) });
+      if (exclude !== undefined && conn.id === exclude) continue;
+      const uid = this.#uidOf(conn);
+      if (!uid) continue;
+      counts.set(uid, (counts.get(uid) ?? 0) + 1);
     }
+
+    const out: Presence[] = [];
+    for (const [uid, connections] of counts) {
+      const name = this.#memberName(uid);
+      if (!name) continue;
+      out.push({ uid, name, color: colorFor(uid), connections });
+    }
+    // Stable order, so the presence strip doesn't reshuffle on every update.
+    out.sort((a, b) => (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
     return out;
   }
 
@@ -172,15 +236,15 @@ export class Room extends Agent<Env, RoomState> {
    * Recompute who is here. Thresholds on open votes move with the headcount —
    * otherwise a vote raised in a busy room becomes undecidable once people leave.
    */
-  async #refreshPresence() {
-    const users = this.#presence();
+  async #refreshPresence(exclude?: string) {
+    const users = this.#presence(exclude);
     const threshold = thresholdFor(users.length);
-    const present = new Set(users.map((u) => u.id));
+    const present = new Set(users.map((u) => u.uid));
 
     const pending = this.state.pending.map((p) => {
       // Drop votes from people who have left, so tallies match the new threshold.
       const votes = Object.fromEntries(
-        Object.entries(p.votes).filter(([id]) => present.has(id)),
+        Object.entries(p.votes).filter(([uid]) => present.has(uid)),
       );
       return { ...p, votes, threshold };
     });
@@ -189,22 +253,127 @@ export class Room extends Agent<Env, RoomState> {
     if (pending.length > 0) await this.#settleIfDecided();
   }
 
+  /**
+   * The room's internal HTTP surface, called by the Worker and by nothing else.
+   *
+   * Admission is decided here rather than in the Worker because it depends on
+   * state only this object holds: whether the room exists, who is already a
+   * member, and what the room's visibility is set to.
+   */
+  override async onRequest(request: Request): Promise<Response> {
+    this.#ready();
+    const url = new URL(request.url);
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+
+    // `/init` hands out ownership, so this surface is restricted to the Worker
+    // by proof rather than by assumption. A request that arrives from outside
+    // carries the `/agents/room/:id` prefix and would miss the exact pathname
+    // matches below — but that is a property of how the router happens to
+    // forward paths, and ownership of a room is too much to stake on it.
+    const caller = request.headers.get("x-internal-auth") ?? "";
+    if (!constantTimeEqual(caller, this.env.ROOM_SECRET ?? "")) {
+      return json({ error: "not_found" }, 404);
+    }
+
+    let body: { uid?: string; name?: string; title?: string; code?: string };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return json({ error: "bad_request" }, 400);
+    }
+
+    const uid = String(body.uid ?? "");
+    const name = String(body.name ?? "").trim().slice(0, 32) || "anon";
+    if (!UID_RE.test(uid)) return json({ error: "bad_request" }, 400);
+
+    const now = Date.now();
+
+    if (url.pathname === "/init") {
+      // Creating a room that already exists would silently hand ownership to
+      // whoever asked second, so it is refused outright.
+      if (this.#room() !== null) return json({ error: "bad_request" }, 409);
+      this.#kvSet("room", {
+        title: String(body.title ?? "").trim().slice(0, 64) || "Untitled room",
+        visibility: "invite",
+        createdAt: now,
+      });
+      this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
+               VALUES (${uid}, ${name}, ${now}, ${now}, 'owner')`;
+      return json({ role: "owner" });
+    }
+
+    if (url.pathname === "/admit") {
+      const room = this.#room();
+      if (room === null) return json({ error: "not_found" }, 404);
+
+      // An existing member keeps the role they already have; re-joining is not
+      // a way to be re-graded.
+      const existing = this.#memberRole(uid);
+      if (existing !== null) {
+        this.sql`UPDATE members SET name = ${name}, last_seen = ${now} WHERE uid = ${uid}`;
+        return json({ role: existing });
+      }
+
+      if (room.visibility === "locked") return json({ error: "locked" }, 403);
+
+      // Invite codes are not implemented yet, so only an open room admits a
+      // stranger. An invite-only room refuses everyone it does not already know.
+      if (room.visibility !== "open") return json({ error: "invite_required" }, 403);
+
+      this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
+               VALUES (${uid}, ${name}, ${now}, ${now}, 'editor')`;
+      return json({ role: "editor" });
+    }
+
+    return json({ error: "not_found" }, 404);
+  }
+
   // ------------------------------------------------------------ connections
 
-  override async onConnect(connection: Connection, _ctx: ConnectionContext) {
+  /**
+   * Bind a verified identity to the socket.
+   *
+   * The Worker has already checked the token's signature and expiry before this
+   * runs, and passes the result in headers a client cannot forge. What is
+   * re-checked here is everything the token cannot know: whether that member
+   * still exists. A token stays cryptographically valid after someone is
+   * removed, so membership — not the token — is the authority.
+   */
+  override async onConnect(connection: Connection, ctx: ConnectionContext) {
     this.#ready();
-    connection.send(JSON.stringify({ t: "you", id: connection.id } satisfies ServerMsg));
+
+    const uid = ctx.request.headers.get("x-room-uid");
+    const role = ctx.request.headers.get("x-room-role");
+    if (!uid || !role) {
+      connection.close(4401, "unauthorized");
+      return;
+    }
+    if (this.#memberRole(uid) === null) {
+      connection.close(4403, "not a member of this room");
+      return;
+    }
+
+    connection.setState({ uid, role });
+    connection.send(JSON.stringify({ t: "you", uid } satisfies ServerMsg));
     connection.send(
       JSON.stringify({ t: "history", entries: this.#entries() } satisfies ServerMsg),
     );
+    await this.#refreshPresence();
   }
 
   override async onClose(connection: Connection) {
     this.#ready();
-    const name = this.#kvGet<string | null>(`user:${connection.id}`, null);
-    this.#kvDel(`user:${connection.id}`);
-    if (name) this.#system(`${name} left`);
-    await this.#refreshPresence();
+    const uid = this.#uidOf(connection);
+    const name = uid ? this.#memberName(uid) : null;
+    // Membership rows are deliberately not deleted — a member who closes a tab
+    // is still a member. Only announce a departure when their last socket goes.
+    const remaining = this.#presence(connection.id);
+    if (name && !remaining.some((u) => u.uid === uid)) this.#system(`${name} left`);
+    await this.#refreshPresence(connection.id);
   }
 
   override async onMessage(connection: Connection, raw: string | ArrayBuffer) {
@@ -217,8 +386,8 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     switch (msg.t) {
-      case "join":
-        return this.#onJoin(connection, msg.name);
+      case "rename":
+        return this.#onRename(connection, msg.name);
       case "say":
         return this.#onSay(connection, msg.text);
       case "vote":
@@ -241,7 +410,7 @@ export class Room extends Agent<Env, RoomState> {
    * or the spend policy shift under them.
    */
   async #onSettings(connection: Connection, incoming: unknown) {
-    const name = this.#kvGet<string | null>(`user:${connection.id}`, null);
+    const name = this.#nameOf(connection);
     if (!name) return;
 
     // Changing models mid-turn would swap the model underneath a running tool
@@ -266,7 +435,7 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onCompact(connection: Connection) {
-    const name = this.#kvGet<string | null>(`user:${connection.id}`, null);
+    const name = this.#nameOf(connection);
     if (!name) return;
     if (this.state.status !== "idle") {
       connection.send(
@@ -280,27 +449,38 @@ export class Room extends Agent<Env, RoomState> {
     await this.#compact(`${name} compacted it manually`);
   }
 
-  async #onJoin(connection: Connection, rawName: string) {
+  /**
+   * Change a display name. Identity is fixed by the token, so this only ever
+   * relabels an existing member — it can never create one.
+   */
+  async #onRename(connection: Connection, rawName: string) {
+    const uid = this.#uidOf(connection);
+    if (!uid) return;
+    const previous = this.#memberName(uid);
+    if (previous === null) return;
+
     const name = rawName.trim().slice(0, 32) || "anon";
-    const existing = this.#kvGet<string | null>(`user:${connection.id}`, null);
-    this.#kvSet(`user:${connection.id}`, name);
-    if (existing !== name) this.#system(`${name} joined`);
+    if (name === previous) return;
+
+    this.sql`UPDATE members SET name = ${name}, last_seen = ${Date.now()} WHERE uid = ${uid}`;
+    this.#system(`${previous} is now ${name}`);
     await this.#refreshPresence();
   }
 
   async #onSay(connection: Connection, rawText: string) {
     const text = rawText.trim();
     if (!text) return;
-    const name = this.#kvGet<string | null>(`user:${connection.id}`, null);
-    if (!name) return; // must join before speaking
+    const uid = this.#uidOf(connection);
+    const name = uid ? this.#memberName(uid) : null;
+    if (!uid || !name) return; // must join before speaking
 
     this.#append({
       id: crypto.randomUUID(),
       ts: Date.now(),
       kind: "user",
-      authorId: connection.id,
+      authorUid: uid,
       authorName: name,
-      color: colorFor(connection.id),
+      color: colorFor(uid),
       text,
     });
 
@@ -312,8 +492,8 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onVote(connection: Connection, toolUseId: string, vote: "approve" | "deny") {
-    const name = this.#kvGet<string | null>(`user:${connection.id}`, null);
-    if (!name) return;
+    const uid = this.#uidOf(connection);
+    if (!uid || !this.#memberName(uid)) return;
 
     // Ignore votes for calls that are no longer open — a stale click from a
     // client whose view hadn't caught up yet.
@@ -321,7 +501,7 @@ export class Room extends Agent<Env, RoomState> {
 
     const pending = this.state.pending.map((p) =>
       p.toolUseId === toolUseId
-        ? { ...p, votes: { ...p.votes, [connection.id]: vote } }
+        ? { ...p, votes: { ...p.votes, [uid]: vote } }
         : p,
     );
     this.setState({ ...this.state, pending });
@@ -329,7 +509,7 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onInterrupt(connection: Connection) {
-    const name = this.#kvGet<string | null>(`user:${connection.id}`, null);
+    const name = this.#nameOf(connection);
     if (this.state.status === "idle") return;
     this.#setTurn(null);
     this.#setInbox([]);

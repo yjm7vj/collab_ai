@@ -9,6 +9,8 @@
 interface SecretBindings {
   /** Set via `.dev.vars` locally, `wrangler secret put` when deployed. */
   ANTHROPIC_API_KEY: string;
+  /** Set via `.dev.vars` locally, `wrangler secret put` when deployed. */
+  ROOM_SECRET: string;
 }
 
 // wrangler emits `Cloudflare.Env` and a global `Env` as siblings — the global
