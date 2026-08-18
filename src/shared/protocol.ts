@@ -14,7 +14,7 @@ import {
   type CostLedger,
   type RoomSettings,
 } from "./models";
-import type { Role } from "./access";
+import { DEFAULT_POLICY, type AccessPolicy, type Role } from "./access";
 
 export type Vote = "approve" | "deny";
 
@@ -57,6 +57,8 @@ export type RoomState = {
   pending: PendingTool[];
   /** Model, workflow and scaling config. Shared — everyone sees the same setup. */
   settings: RoomSettings;
+  /** What the agent may do unattended. Independent of what people may do. */
+  policy: AccessPolicy;
   /** Live worker activity, for the manager workflow. Empty when nothing is running. */
   workers: WorkerStatus[];
   /** Size of the conversation as last sent, for the context gauge. */
@@ -80,6 +82,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   docRevision: 0,
   pending: [],
   settings: DEFAULT_SETTINGS,
+  policy: DEFAULT_POLICY,
   workers: [],
   context: { messages: 0, tokens: 0 },
   cost: EMPTY_LEDGER,
@@ -140,6 +143,8 @@ export type ClientMsg =
   | { t: "interrupt" }
   /** Replace the room's configuration. Server re-validates before applying. */
   | { t: "settings"; settings: RoomSettings }
+  /** Replace the room's agent-permission policy. Server re-validates. */
+  | { t: "policy"; policy: AccessPolicy }
   /** Compact the conversation now, rather than waiting for a threshold. */
   | { t: "compact" }
   /** Mint an invite. Owners and admins only; the server re-checks. */

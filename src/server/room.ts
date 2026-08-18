@@ -24,7 +24,6 @@ import {
   UID_RE,
   colorFor,
   tally,
-  thresholdFor,
   type AgentBlock,
   type ClientMsg,
   type Entry,
@@ -36,7 +35,19 @@ import {
   type ServerMsg,
   type WorkerStatus,
 } from "../shared/protocol";
-import { asRole, can, isVoter, outranks, type Capability, type Role } from "../shared/access";
+import {
+  DEFAULT_POLICY,
+  approvalThreshold,
+  asRole,
+  can,
+  describePolicy,
+  isVoter,
+  outranks,
+  sanitizeAccessPolicy,
+  type AccessPolicy,
+  type Capability,
+  type Role,
+} from "../shared/access";
 import {
   DEFAULT_SETTINGS,
   addUsage,
@@ -53,7 +64,14 @@ import {
   type Usage,
   type WorkerTask,
 } from "./model";
-import { GATED, execute, summarize as summarizeCall, type ToolCtx } from "./tools";
+import {
+  execute,
+  gatedFor,
+  summarize as summarizeCall,
+  toolsFor,
+  workerToolsFor,
+  type ToolCtx,
+} from "./tools";
 import { constantTimeEqual, newInviteCode } from "./auth";
 
 /** In-flight turn bookkeeping. Persisted, because a turn can outlive this instance. */
@@ -349,7 +367,10 @@ export class Room extends Agent<Env, RoomState> {
   async #refreshPresence(exclude?: string) {
     const users = this.#presence(exclude);
     // Viewers are present but cannot vote, so they must not raise the bar.
-    const threshold = thresholdFor(users.filter((u) => isVoter(u.role)).length);
+    const threshold = approvalThreshold(
+      this.#policy().approval,
+      users.filter((u) => isVoter(u.role)).length,
+    );
     const present = new Set(users.map((u) => u.uid));
 
     const pending = this.state.pending.map((p) => {
@@ -524,6 +545,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onInterrupt(connection);
       case "settings":
         return this.#onSettings(connection, msg.settings);
+      case "policy":
+        return this.#onPolicy(connection, msg.policy);
       case "compact":
         return this.#onCompact(connection);
       case "invite.create":
@@ -573,6 +596,27 @@ export class Room extends Agent<Env, RoomState> {
     this.#system(
       `${name} changed the setup — ${describeSettings(settings, this.state.users.length)}`,
     );
+  }
+
+  /**
+   * Replace the agent-permission policy.
+   *
+   * Held until the agent is idle for the same reason settings are: the tool
+   * list is part of the request, and swapping it mid-turn would change what the
+   * agent is allowed to do between one round and the next.
+   */
+  async #onPolicy(connection: Connection, incoming: unknown) {
+    if (!this.#allow(connection, "policy", "Only the room's owner and admins can change what the agent may do.")) return;
+    if (this.state.status !== "idle") {
+      this.#refuse(connection, "Permissions can only change while the agent is idle.");
+      return;
+    }
+    const policy = sanitizeAccessPolicy(incoming);
+    this.setState({ ...this.state, policy });
+    this.#system(
+      `${this.#nameOf(connection) ?? "someone"} changed what the agent may do — ${describePolicy(policy)}`,
+    );
+    await this.#refreshPresence();
   }
 
   async #onCompact(connection: Connection) {
@@ -801,6 +845,13 @@ export class Room extends Agent<Env, RoomState> {
 
   async #onVote(connection: Connection, toolUseId: string, vote: "approve" | "deny") {
     if (!this.#allow(connection, "vote", "You're a viewer in this room, so you can't vote.")) return;
+
+    // Not a threshold but a restriction on who may vote at all.
+    if (this.#policy().approval === "owner_only" && this.#roleOf(connection) !== "owner") {
+      this.#refuse(connection, "Only the room's owner can approve actions here.");
+      return;
+    }
+
     const uid = this.#uidOf(connection);
     if (!uid || !this.#memberName(uid)) return;
 
@@ -835,6 +886,11 @@ export class Room extends Agent<Env, RoomState> {
 
   #settings(): RoomSettings {
     return this.state.settings ?? DEFAULT_SETTINGS;
+  }
+
+  /** The room's agent-permission policy, defaulted for rooms created before it existed. */
+  #policy(): AccessPolicy {
+    return this.state.policy ?? DEFAULT_POLICY;
   }
 
   /** Fold one response's token counts into the room's running ledger. */
@@ -1004,7 +1060,7 @@ export class Room extends Agent<Env, RoomState> {
       accepted.map(async (task, i) => {
         const id = statuses[i]!.id;
         try {
-          const r = await runWorker(this.#config(), settings, task, ctx);
+          const r = await runWorker(this.#config(), settings, task, ctx, workerToolsFor(this.#policy()));
           r.usage.forEach((u) => this.#recordUsage(u));
           settle(id, "done");
           return `## ${task.title}\n\n${r.text}`;
@@ -1075,7 +1131,7 @@ export class Room extends Agent<Env, RoomState> {
         // Map API content-block index -> index in the entry we render.
         const slots = new Map<number, number>();
 
-        const { message, usage } = await runModel(this.#config(), this.#settings(), this.#convo(), {
+        const { message, usage } = await runModel(this.#config(), this.#settings(), this.#convo(), toolsFor(this.#policy(), this.#settings().workflow), {
           onBlockStart: (index, type) => {
             if (type !== "text" && type !== "thinking") return;
             entry.blocks.push({ type, text: "" } as AgentBlock);
@@ -1127,7 +1183,11 @@ export class Room extends Agent<Env, RoomState> {
         const calls = message.content.filter((b) => b.type === "tool_use");
         const results: ToolResultBlockParam[] = [...turn.carried];
         const gated: PendingTool[] = [];
-        const threshold = thresholdFor(this.state.users.filter((u) => isVoter(u.role)).length);
+        const gatedNames = gatedFor(this.#policy());
+        const threshold = approvalThreshold(
+          this.#policy().approval,
+          this.state.users.filter((u) => isVoter(u.role)).length,
+        );
         const docs = this.#docBuffer();
 
         for (const call of calls) {
@@ -1139,7 +1199,7 @@ export class Room extends Agent<Env, RoomState> {
             status: "running",
           });
 
-          if (GATED.has(call.name)) {
+          if (gatedNames.has(call.name)) {
             gated.push({
               toolUseId: call.id,
               name: call.name,

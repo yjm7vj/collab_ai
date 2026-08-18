@@ -10,6 +10,7 @@
  * — the kind that once made every /api/* request bypass the Worker in
  * production — fails here even if nothing else caught it.
  */
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 // Read as a raw string at build time (Vite's `?raw` loader) rather than via
 // `node:fs` at runtime. `node:fs`'s file-URL handling in this test runtime
@@ -140,5 +141,28 @@ describe("wrangler.jsonc routing config", () => {
     expect(Array.isArray(config.migrations)).toBe(true);
     expect(config.migrations?.length ?? 0).toBeGreaterThan(0);
     expect(config.migrations?.[0]?.tag).toBe("v1");
+  });
+});
+
+/**
+ * Tests must never be able to reach the real Anthropic API.
+ *
+ * The pool loads the local secrets file when it reads wrangler.jsonc, and on a
+ * developer's machine that file holds a real, billable API key. The fake
+ * bindings in vitest.config.ts exist to shadow it. If that shadowing ever stops
+ * working, a future test that triggers an agent turn would spend real money
+ * silently — and would behave differently in CI, where no such file exists.
+ *
+ * This asserts the shadowing holds rather than trusting it.
+ */
+describe("test secrets are fake", () => {
+  it("uses the fake Anthropic key, never a real one", () => {
+    expect(env.ANTHROPIC_API_KEY).toBe("test-key-not-real");
+    // A real key looks like `sk-ant-...`. Anything of that shape is live.
+    expect(env.ANTHROPIC_API_KEY.startsWith("sk-ant-")).toBe(false);
+  });
+
+  it("uses the fake room secret, so local and CI sign identically", () => {
+    expect(env.ROOM_SECRET).toBe("test-secret-not-real-but-long-enough-to-sign-with");
   });
 });
