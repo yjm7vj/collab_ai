@@ -8,10 +8,12 @@
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
-    // The Worker owns routing: it answers /agents/* itself and hands
+    // The Worker owns routing: it answers /agents/* and /api/* itself and hands
     // everything else to the asset server, which is also the SPA fallback.
+    // /api/* must be listed here — room creation and joining are Worker routes,
+    // and without it the asset server answers them and no room can ever be made.
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/agents/*"]
+    "run_worker_first": ["/agents/*", "/api/*"]
   },
 
   "durable_objects": {

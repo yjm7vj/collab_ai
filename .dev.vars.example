@@ -1,3 +1,8 @@
 # Copy to `.dev.vars` and fill in. `.dev.vars` is gitignored.
 # For a deployed Worker use `npx wrangler secret put ANTHROPIC_API_KEY` instead.
 ANTHROPIC_API_KEY=sk-ant-...
+
+# Signs room access tokens. Anyone who has this can mint a token for any room,
+# so treat it like a password. Changing it invalidates every existing session
+# — everyone currently connected gets kicked back to the join screen.
+ROOM_SECRET=change-me-to-a-long-random-string

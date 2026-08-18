@@ -76,15 +76,66 @@ export function WorkerStrip({ workers }: { workers: WorkerStatus[] }) {
   );
 }
 
+/* -------------------------------------------------------------- landing */
+
+export function Landing({
+  initialName,
+  busy,
+  problem,
+  onCreate,
+}: {
+  initialName: string;
+  busy: boolean;
+  problem: string | null;
+  onCreate: (name: string) => void;
+}) {
+  const [value, setValue] = useState(initialName);
+  return (
+    <div className="gate">
+      <form
+        className="gate-card"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onCreate(value);
+        }}
+      >
+        <h1>collab_ai</h1>
+        <p className="gate-sub">
+          One agent, many people. Make a room and share the link.
+        </p>
+        <input
+          autoFocus
+          value={value}
+          maxLength={32}
+          placeholder="Your name"
+          onChange={(e) => setValue(e.target.value)}
+          aria-label="Your name"
+        />
+        <button type="submit" disabled={!value.trim() || busy}>
+          {busy ? "creating…" : "Create a room"}
+        </button>
+        {problem && <p className="gate-error">{problem}</p>}
+        <p className="gate-foot">
+          Rooms are private. Only people you send the link to can get in.
+        </p>
+      </form>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ join */
 
 export function JoinGate({
-  room,
+  roomId,
   initialName,
+  busy,
+  problem,
   onJoin,
 }: {
-  room: string;
+  roomId: string;
   initialName: string;
+  busy: boolean;
+  problem: string | null;
   onJoin: (name: string) => void;
 }) {
   const [value, setValue] = useState(initialName);
@@ -99,7 +150,9 @@ export function JoinGate({
       >
         <h1>collab_ai</h1>
         <p className="gate-sub">
-          One agent, many people. You're joining <strong>#{room}</strong>.
+          You've been invited to a room.
+          <br />
+          room {roomId.slice(0, 6)}…
         </p>
         <input
           autoFocus
@@ -109,11 +162,12 @@ export function JoinGate({
           onChange={(e) => setValue(e.target.value)}
           aria-label="Your name"
         />
-        <button type="submit" disabled={!value.trim()}>
-          Join room
+        <button type="submit" disabled={!value.trim() || busy}>
+          {busy ? "joining…" : "Join room"}
         </button>
+        {problem && <p className="gate-error">{problem}</p>}
         <p className="gate-foot">
-          Share this page's URL to bring someone else into the same room.
+          Your name is how the room and the agent will refer to you.
         </p>
       </form>
     </div>
@@ -127,8 +181,8 @@ export function Presence({ users, me }: { users: PresenceUser[]; me: string | nu
     <div className="presence" title={`${users.length} in the room`}>
       {users.map((u) => (
         <span
-          key={u.id}
-          className={`chip ${u.id === me ? "chip-me" : ""}`}
+          key={u.uid}
+          className={`chip ${u.uid === me ? "chip-me" : ""}`}
           style={{ borderColor: u.color, color: u.color }}
         >
           {u.name}
@@ -189,7 +243,7 @@ const EntryView = memo(function EntryView({
 
   if (entry.kind === "user") {
     return (
-      <div className={`msg user ${entry.authorId === me ? "mine" : ""}`}>
+      <div className={`msg user ${entry.authorUid === me ? "mine" : ""}`}>
         <div className="who" style={{ color: entry.color }}>
           {entry.authorName}
         </div>
