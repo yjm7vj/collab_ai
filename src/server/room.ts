@@ -29,12 +29,14 @@ import {
   type ClientMsg,
   type Entry,
   type InviteSummary,
+  type MemberSummary,
   type PendingTool,
   type Presence,
   type RoomState,
   type ServerMsg,
   type WorkerStatus,
 } from "../shared/protocol";
+import { asRole, can, isVoter, outranks, type Capability, type Role } from "../shared/access";
 import {
   DEFAULT_SETTINGS,
   addUsage,
@@ -204,9 +206,26 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   /** The role bound to this socket at connect time. */
-  #roleOf(connection: Connection): string | null {
+  #roleOf(connection: Connection): Role {
     const s = connection.state as { role?: string } | null;
-    return s?.role ?? null;
+    return asRole(s?.role);
+  }
+
+  /**
+   * Gate one action. Returns true when the socket may proceed.
+   *
+   * Every handler that changes anything calls this first. The client hides
+   * controls it knows are unavailable, but that is cosmetic — this is the
+   * boundary, and it is the only one that counts.
+   */
+  #allow(connection: Connection, cap: Capability, refusal: string): boolean {
+    const uid = this.#uidOf(connection);
+    if (!uid || this.#memberRole(uid) === null) return false;
+    if (!can(this.#roleOf(connection), cap)) {
+      this.#refuse(connection, refusal);
+      return false;
+    }
+    return true;
   }
 
   /** The room's own record, or null if this room was never created. */
@@ -221,11 +240,6 @@ export class Room extends Agent<Env, RoomState> {
   #memberRole(uid: string): string | null {
     const rows = this.sql<{ role: string }>`SELECT role FROM members WHERE uid = ${uid}`;
     return rows.length ? rows[0]!.role : null;
-  }
-
-  /** Whether a role may mint and revoke invites. */
-  #canInvite(role: string | null): boolean {
-    return role === "owner" || role === "admin";
   }
 
   /**
@@ -284,6 +298,22 @@ export class Room extends Agent<Env, RoomState> {
     }));
   }
 
+  /** Everyone who has ever joined, with whether they are connected right now. */
+  #members(): MemberSummary[] {
+    const online = new Set(this.#presence().map((u) => u.uid));
+    const rows = this.sql<{
+      uid: string; name: string; role: string; joined_at: number; last_seen: number;
+    }>`SELECT uid, name, role, joined_at, last_seen FROM members ORDER BY joined_at ASC`;
+    return rows.map((r) => ({
+      uid: r.uid,
+      name: r.name,
+      role: asRole(r.role),
+      joinedAt: r.joined_at,
+      lastSeen: r.last_seen,
+      online: online.has(r.uid),
+    }));
+  }
+
   // ---------------------------------------------------------------- presence
 
   /**
@@ -305,7 +335,7 @@ export class Room extends Agent<Env, RoomState> {
     for (const [uid, connections] of counts) {
       const name = this.#memberName(uid);
       if (!name) continue;
-      out.push({ uid, name, color: colorFor(uid), connections });
+      out.push({ uid, name, color: colorFor(uid), connections, role: asRole(this.#memberRole(uid)) });
     }
     // Stable order, so the presence strip doesn't reshuffle on every update.
     out.sort((a, b) => (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
@@ -318,7 +348,8 @@ export class Room extends Agent<Env, RoomState> {
    */
   async #refreshPresence(exclude?: string) {
     const users = this.#presence(exclude);
-    const threshold = thresholdFor(users.length);
+    // Viewers are present but cannot vote, so they must not raise the bar.
+    const threshold = thresholdFor(users.filter((u) => isVoter(u.role)).length);
     const present = new Set(users.map((u) => u.uid));
 
     const pending = this.state.pending.map((p) => {
@@ -497,6 +528,12 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onInviteRevoke(connection, msg.code);
       case "invite.list":
         return this.#onInviteList(connection);
+      case "member.list":
+        return this.#onMemberList(connection);
+      case "member.role":
+        return this.#onMemberRole(connection, msg.uid, msg.role);
+      case "member.remove":
+        return this.#onMemberRemove(connection, msg.uid);
     }
   }
 
@@ -509,6 +546,7 @@ export class Room extends Agent<Env, RoomState> {
    * or the spend policy shift under them.
    */
   async #onSettings(connection: Connection, incoming: unknown) {
+    if (!this.#allow(connection, "settings", "Only the room's owner and admins can change the setup.")) return;
     const name = this.#nameOf(connection);
     if (!name) return;
 
@@ -534,6 +572,7 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onCompact(connection: Connection) {
+    if (!this.#allow(connection, "compact", "You're a viewer in this room, so you can't compact the conversation.")) return;
     const name = this.#nameOf(connection);
     if (!name) return;
     if (this.state.status !== "idle") {
@@ -578,10 +617,7 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onInviteList(connection: Connection) {
-    if (!this.#canInvite(this.#roleOf(connection))) {
-      this.#refuse(connection, "Only the room's owner and admins can see invites.");
-      return;
-    }
+    if (!this.#allow(connection, "invite", "Only the room's owner and admins can see invites.")) return;
     this.#sendInvites(connection);
   }
 
@@ -589,11 +625,9 @@ export class Room extends Agent<Env, RoomState> {
     connection: Connection,
     msg: { role: string; maxUses: number; expiresInHours: number; label: string },
   ) {
+    if (!this.#allow(connection, "invite", "Only the room's owner and admins can create invites.")) return;
     const uid = this.#uidOf(connection);
-    if (!uid || !this.#canInvite(this.#roleOf(connection))) {
-      this.#refuse(connection, "Only the room's owner and admins can create invites.");
-      return;
-    }
+    if (!uid) return;
 
     // An invite can never hand out ownership: a room has exactly one owner, and
     // transferring it is a deliberate act, not a side effect of sharing a link.
@@ -620,11 +654,9 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onInviteRevoke(connection: Connection, rawCode: string) {
+    if (!this.#allow(connection, "invite", "Only the room's owner and admins can revoke invites.")) return;
     const uid = this.#uidOf(connection);
-    if (!uid || !this.#canInvite(this.#roleOf(connection))) {
-      this.#refuse(connection, "Only the room's owner and admins can revoke invites.");
-      return;
-    }
+    if (!uid) return;
     const code = String(rawCode ?? "");
     // Revoking is idempotent: the first revocation time is the one that counts.
     this.sql`UPDATE invites SET revoked_at = ${Date.now()}
@@ -633,7 +665,113 @@ export class Room extends Agent<Env, RoomState> {
     this.#sendInvites(connection);
   }
 
+  #sendMembers(connection: Connection) {
+    connection.send(
+      JSON.stringify({ t: "members", members: this.#members() } satisfies ServerMsg),
+    );
+  }
+
+  async #onMemberList(connection: Connection) {
+    if (!this.#allow(connection, "manage_members", "Only the room's owner and admins can manage members.")) return;
+    this.#sendMembers(connection);
+  }
+
+  /**
+   * Re-bind a member's live sockets after their role changes.
+   *
+   * Role is pinned to the socket at connect time, so without this a demotion
+   * would not take effect until the person reconnected — exactly backwards for
+   * a demotion.
+   */
+  #rebind(uid: string, role: Role) {
+    for (const conn of this.getConnections()) {
+      if (this.#uidOf(conn) !== uid) continue;
+      conn.setState({ uid, role });
+      conn.send(JSON.stringify({ t: "you", uid, role } satisfies ServerMsg));
+    }
+  }
+
+  async #onMemberRole(connection: Connection, targetUid: string, rawRole: unknown) {
+    if (!this.#allow(connection, "manage_members", "Only the room's owner and admins can change roles.")) return;
+    const actorUid = this.#uidOf(connection);
+    if (!actorUid) return;
+
+    const actorRole = this.#roleOf(connection);
+    const currentRaw = this.#memberRole(targetUid);
+    if (currentRaw === null) {
+      this.#refuse(connection, "That person isn't a member of this room.");
+      return;
+    }
+    const current = asRole(currentRaw);
+    const next = asRole(rawRole);
+
+    if (targetUid === actorUid) {
+      this.#refuse(connection, "You can't change your own role.");
+      return;
+    }
+    if (current === "owner") {
+      this.#refuse(connection, "The room's owner can't be demoted.");
+      return;
+    }
+    if (next === "owner") {
+      this.#refuse(connection, "Ownership can't be handed over this way.");
+      return;
+    }
+    // You may only act on someone below you, and only grant something below
+    // you. Without the second check an admin could promote a peer to admin.
+    if (!outranks(actorRole, current) || !outranks(actorRole, next)) {
+      this.#refuse(connection, "You can only change roles below your own.");
+      return;
+    }
+    if (current === next) {
+      this.#sendMembers(connection);
+      return;
+    }
+
+    this.sql`UPDATE members SET role = ${next} WHERE uid = ${targetUid}`;
+    this.#rebind(targetUid, next);
+    this.#system(
+      `${this.#memberName(actorUid) ?? "someone"} made ` +
+        `${this.#memberName(targetUid) ?? "someone"} a ${next}`,
+    );
+    await this.#refreshPresence();
+    this.#sendMembers(connection);
+  }
+
+  async #onMemberRemove(connection: Connection, targetUid: string) {
+    if (!this.#allow(connection, "manage_members", "Only the room's owner and admins can remove people.")) return;
+    const actorUid = this.#uidOf(connection);
+    if (!actorUid) return;
+
+    const currentRaw = this.#memberRole(targetUid);
+    if (currentRaw === null) {
+      this.#refuse(connection, "That person isn't a member of this room.");
+      return;
+    }
+    if (targetUid === actorUid) {
+      this.#refuse(connection, "You can't remove yourself.");
+      return;
+    }
+    if (!outranks(this.#roleOf(connection), asRole(currentRaw))) {
+      this.#refuse(connection, "You can only remove people below your own role.");
+      return;
+    }
+
+    const name = this.#memberName(targetUid);
+    this.sql`DELETE FROM members WHERE uid = ${targetUid}`;
+    // Close their sockets now. The membership check in onConnect would refuse a
+    // reconnect anyway, but leaving a live socket open would let them keep
+    // reading the room until they happened to disconnect.
+    for (const conn of this.getConnections()) {
+      if (this.#uidOf(conn) === targetUid) conn.close(4403, "removed from this room");
+    }
+    this.#system(`${this.#memberName(actorUid) ?? "someone"} removed ${name ?? "someone"}`);
+    await this.#refreshPresence();
+    this.#sendMembers(connection);
+  }
+
   async #onSay(connection: Connection, rawText: string) {
+    if (!this.#allow(connection, "speak", "You're a viewer in this room, so you can't talk to the agent.")) return;
     const text = rawText.trim();
     if (!text) return;
     const uid = this.#uidOf(connection);
@@ -658,6 +796,7 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onVote(connection: Connection, toolUseId: string, vote: "approve" | "deny") {
+    if (!this.#allow(connection, "vote", "You're a viewer in this room, so you can't vote.")) return;
     const uid = this.#uidOf(connection);
     if (!uid || !this.#memberName(uid)) return;
 
@@ -675,6 +814,7 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onInterrupt(connection: Connection) {
+    if (!this.#allow(connection, "speak", "You're a viewer in this room, so you can't stop the agent.")) return;
     const name = this.#nameOf(connection);
     if (this.state.status === "idle") return;
     this.#setTurn(null);
@@ -983,7 +1123,7 @@ export class Room extends Agent<Env, RoomState> {
         const calls = message.content.filter((b) => b.type === "tool_use");
         const results: ToolResultBlockParam[] = [...turn.carried];
         const gated: PendingTool[] = [];
-        const threshold = thresholdFor(this.state.users.length);
+        const threshold = thresholdFor(this.state.users.filter((u) => isVoter(u.role)).length);
         const docs = this.#docBuffer();
 
         for (const call of calls) {
