@@ -148,9 +148,14 @@ export const DEFAULT_DENY: readonly string[] = [
   // SSH key files, by their conventional names, regardless of algorithm.
   "**/id_rsa*", "**/id_dsa*", "**/id_ecdsa*", "**/id_ed25519*",
 
-  // Whole directories that only ever hold credentials, or — for .git — the
-  // entire project history rather than just the current working tree.
-  "**/.ssh/**", "**/.aws/**", "**/.gnupg/**", "**/.kube/**", "**/.git/**",
+  // Whole directories that only ever hold credentials.
+  "**/.ssh/**", "**/.aws/**", "**/.gnupg/**", "**/.kube/**",
+
+  // .git itself is readable — history, refs and branches are legitimately
+  // useful — but not the files that carry credentials. A remote URL of the
+  // form https://user:token@host lives in .git/config, and
+  // `credential.helper store` writes plaintext tokens to .git-credentials.
+  "**/.git/config", "**/.git/credentials", "**/.git-credentials",
 
   // Package manager and other tool credential files.
   "**/.npmrc", "**/.netrc", "**/.pypirc",
@@ -170,9 +175,6 @@ export const DEFAULT_DENY: readonly string[] = [
   // on the command line (curl with a bearer token, export KEY=..., etc).
   "**/.bash_history", "**/.zsh_history", "**/.python_history", "**/.psql_history",
 
-  // Not a secret, but enormous, untrusted third-party code the agent has no
-  // reason to read or write.
-  "**/node_modules/**",
 ];
 
 export const DEFAULT_PATH_POLICY: PathPolicy = {
