@@ -13,6 +13,17 @@ import {
 } from "../shared/protocol";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { ROLES, outranks, type Role } from "../shared/access";
+import {
+  MODE_PRESETS,
+  TOOL_NAMES,
+  describePolicy,
+  resolveTools,
+  type AccessPolicy,
+  type ApprovalPolicy,
+  type PermissionMode,
+  type ToolDecision,
+  type ToolName,
+} from "../shared/access";
 
 /* --------------------------------------------------- context + spend */
 
@@ -749,6 +760,178 @@ export function MembersPanel({
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- permissions */
+
+const MODE_OPTIONS: { mode: PermissionMode; label: string; desc: string }[] = [
+  {
+    mode: "read_only",
+    label: "Read-only",
+    desc:
+      "The agent can read, search and discuss, but cannot change the document at all. " +
+      "Editing tools are withheld entirely, so it proposes in words instead.",
+  },
+  {
+    mode: "ask",
+    label: "Ask first",
+    desc: "The agent can propose edits, and the room votes on each one before it takes effect.",
+  },
+  {
+    mode: "auto",
+    label: "Auto-accept",
+    desc: "The agent edits the document without asking. Every change is still recorded in the transcript.",
+  },
+  {
+    mode: "custom",
+    label: "Custom",
+    desc: "Choose tool by tool below.",
+  },
+];
+
+const TOOL_DECISIONS: { value: ToolDecision; label: string }[] = [
+  { value: "allow", label: "always" },
+  { value: "ask", label: "vote" },
+  { value: "deny", label: "never" },
+];
+
+/**
+ * What the agent may do, unattended. Independent of `MembersPanel`, which
+ * governs what people may do — this is the second axis, gating tool calls
+ * rather than roles.
+ */
+export function PermissionsPanel({
+  policy,
+  busy,
+  onApply,
+  onClose,
+}: {
+  policy: AccessPolicy;
+  busy: boolean;
+  onApply: (next: AccessPolicy) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<AccessPolicy>(policy);
+  const custom = draft.mode === "custom";
+  // Resolved matrix for display: the stored one in custom mode, else whatever
+  // the chosen preset actually grants — so the rows below never lie about
+  // what's in effect.
+  const effective = resolveTools(draft);
+
+  const chooseMode = (mode: PermissionMode) => {
+    setDraft((d) => (mode === "custom" ? { ...d, mode } : { ...d, mode, tools: MODE_PRESETS[mode] }));
+  };
+
+  const chooseTool = (name: ToolName, decision: ToolDecision) => {
+    setDraft((d) => ({ ...d, tools: { ...d.tools, [name]: decision } }));
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-label="What the agent may do"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <h2>What the agent may do</h2>
+          <button className="icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        {busy && (
+          <div className="notice">
+            The agent is working. Permissions can only change while it's idle.
+          </div>
+        )}
+
+        <div className="modal-body">
+          <p className="field-note">
+            This is separate from what people may do. It controls how much the agent can change
+            on its own.
+          </p>
+
+          <section>
+            <h3>Mode</h3>
+            <div className="policy-modes">
+              {MODE_OPTIONS.map((opt) => (
+                <label
+                  key={opt.mode}
+                  className={`policy-mode-opt ${draft.mode === opt.mode ? "on" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="policy-mode"
+                    checked={draft.mode === opt.mode}
+                    onChange={() => chooseMode(opt.mode)}
+                  />
+                  <span>
+                    <span className="policy-mode-name">{opt.label}</span>
+                    <span className="field-note">{opt.desc}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3>Tools</h3>
+            <div className="policy-tools">
+              {TOOL_NAMES.map((name) => (
+                <div key={name} className="policy-tool-row">
+                  <code>{name}</code>
+                  <div className="policy-tool-options">
+                    {TOOL_DECISIONS.map((d) => (
+                      <label key={d.value} className="policy-tool-opt">
+                        <input
+                          type="radio"
+                          name={`policy-tool-${name}`}
+                          disabled={!custom}
+                          checked={effective[name] === d.value}
+                          onChange={() => chooseTool(name, d.value)}
+                        />
+                        {d.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3>Approval rule</h3>
+            <label className="field">
+              <span className="field-label">When a vote is needed</span>
+              <select
+                value={draft.approval}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, approval: e.target.value as ApprovalPolicy }))
+                }
+              >
+                <option value="majority">Majority of eligible voters</option>
+                <option value="unanimous">Everyone must agree</option>
+                <option value="any_editor">Any one editor can approve</option>
+                <option value="owner_only">Only the owner can approve</option>
+              </select>
+              <span className="field-note">Viewers are never counted, because they cannot vote.</span>
+            </label>
+          </section>
+
+          <p className="field-note policy-summary">{describePolicy(draft)}</p>
+        </div>
+
+        <footer className="modal-foot">
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={busy} onClick={() => onApply(draft)}>
+            Apply
+          </button>
+        </footer>
       </div>
     </div>
   );
