@@ -5,6 +5,7 @@ import {
   INITIAL_ROOM_STATE,
   type ClientMsg,
   type Entry,
+  type InviteSummary,
   type RoomState,
   type ServerMsg,
   type Vote,
@@ -15,6 +16,7 @@ import {
   Composer,
   ContextGauge,
   DocPanel,
+  InvitePanel,
   Presence,
   Transcript,
   WorkerStrip,
@@ -39,16 +41,23 @@ export function RoomView({
   const [state, setState] = useState<RoomState>(INITIAL_ROOM_STATE);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [me, setMe] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [invites, setInvites] = useState<InviteSummary[]>([]);
+  const [showInvites, setShowInvites] = useState(false);
 
   const applyServerMessage = useCallback((msg: ServerMsg) => {
     switch (msg.t) {
       case "you":
         setMe(msg.uid);
+        setMyRole(msg.role);
+        break;
+      case "invites":
+        setInvites(msg.invites);
         break;
       case "history":
         setEntries(msg.entries);
@@ -143,6 +152,21 @@ export function RoomView({
     [send],
   );
   const compactNow = useCallback(() => send({ t: "compact" }), [send]);
+  const createInvite = useCallback(
+    (role: string, maxUses: number, expiresInHours: number, label: string) =>
+      send({ t: "invite.create", role, maxUses, expiresInHours, label }),
+    [send],
+  );
+  const revokeInvite = useCallback(
+    (code: string) => send({ t: "invite.revoke", code }),
+    [send],
+  );
+  // Fetched on open rather than kept live, because only owners and admins
+  // may see the invite list.
+  const openInvites = useCallback(() => {
+    setShowInvites(true);
+    send({ t: "invite.list" });
+  }, [send]);
 
   const copyLink = useCallback(() => {
     void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`).then(() => {
@@ -209,6 +233,21 @@ export function RoomView({
           />
           <span className={`status status-${state.status}`}>{statusLabel}</span>
           <Presence users={state.users} me={me} />
+          {/*
+            This check is only a UI courtesy — it hides the button so people who
+            can't mint invites don't see one. The server re-checks the role on
+            every invite.* message; a hidden button is not a permission.
+          */}
+          {(myRole === "owner" || myRole === "admin") && (
+            <button
+              className="icon"
+              onClick={openInvites}
+              title="Invite people"
+              aria-label="Invite people"
+            >
+              🔗
+            </button>
+          )}
           <button
             className="icon"
             onClick={() => setShowSettings(true)}
@@ -234,6 +273,16 @@ export function RoomView({
           onApply={applySettings}
           onCompactNow={compactNow}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showInvites && (
+        <InvitePanel
+          invites={invites}
+          roomId={roomId}
+          onCreate={createInvite}
+          onRevoke={revokeInvite}
+          onClose={() => setShowInvites(false)}
         />
       )}
 

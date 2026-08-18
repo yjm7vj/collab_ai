@@ -82,10 +82,13 @@ ANTHROPIC_API_KEY=sk-ant-...
 npm run dev
 ```
 
-Open http://localhost:5173, pick a name, and **open the same URL in a second
-window** with a different name — that's the whole point. The URL fragment is the
-room, so `#design-review` is a different room from `#lobby`, and sharing the link
-is how you invite someone.
+Open http://localhost:5173, pick a name, and create a room. To bring someone
+else in, open the invite panel (🔗 in the header), create an invite link, and
+send it to them — or just open the room URL in a second window to see the
+multiplayer behaviour yourself.
+
+Rooms have unguessable ids and are invite-only by default, so there is no
+lobby to wander into and no room name to guess.
 
 ### No API key handy
 
@@ -250,6 +253,27 @@ Not yet exercised:
   but a genuine hibernation between proposal and vote hasn't been forced.
 - **Load.** One room, a couple of people, short documents.
 
+## Access control
+
+Rooms are private. A room id is 22 random characters, so it cannot be guessed,
+and the link alone is not enough unless the room is set to `open`.
+
+Membership is decided over HTTP before any socket exists, so the WebSocket is
+authenticated from its first byte. The Worker verifies an HMAC-SHA-256 token in
+`onBeforeConnect` and passes the result to the Durable Object in headers a
+client cannot forge. A token proves only that this server issued it and that it
+has not expired — the room re-checks membership on every connect, so removing
+someone takes effect immediately rather than when their token runs out.
+
+Invite links carry a role, an optional expiry, and an optional use limit, and
+can be revoked at any time. An invite can never grant ownership: a room has one
+owner, and handing that over is a deliberate act rather than a side effect of
+sharing a link.
+
+Invite codes are never put in room state and never broadcast. Room state syncs
+to every connected client, so a code placed there would be a code handed to
+everyone in the room.
+
 ## Known limits
 
 - `write_doc` sends the whole document as tool input, so it scales badly on large
@@ -258,6 +282,12 @@ Not yet exercised:
   will drift; `keepRecentMessages` is the dial that trades context for fidelity.
 - `delegate` is not approval-gated. Workers cannot change anything, but they do
   cost money — the worker cap is the control, not a vote.
-- Anyone who can reach a room can join it, vote, and change its model. There is
-  no authentication; put Cloudflare Access in front of it before it holds
-  anything real.
+- Identity is bound to a browser, not to a person. Clearing site data loses your
+  membership until someone re-invites you. Cloudflare Access or an OIDC provider
+  is the upgrade path, and `src/server/auth.ts` is the only file that would
+  change.
+- A room's access token travels in the WebSocket URL, because browsers cannot
+  set headers on a WebSocket upgrade. With observability enabled that URL may be
+  logged. A short-lived single-use connect ticket is the fix.
+- `POST /api/rooms` is unauthenticated, so room creation is unbounded. It costs
+  nothing but a Durable Object, and rate limiting is the control.

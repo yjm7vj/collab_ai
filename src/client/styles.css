@@ -562,3 +562,44 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   padding: 3px 9px;
   font-size: 12px;
 }
+
+/* --------------------------------------------------------------- invites */
+
+.invite-empty { font-size: 13px; color: var(--ink-faint); margin: 0; }
+
+.invite-list { display: grid; gap: 10px; }
+
+.invite-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.invite-url {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  display: block;
+}
+
+.invite-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.invite-actions { display: flex; gap: 6px; flex: none; }
+
+.invite-dead {
+  opacity: 0.55;
+}
+.invite-dead .invite-url { text-decoration: line-through; text-decoration-color: var(--ink-faint); }

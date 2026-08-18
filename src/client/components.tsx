@@ -1,8 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  INVITABLE_ROLES,
   tally,
   type AgentBlock,
   type Entry,
+  type InviteSummary,
   type PendingTool,
   type Presence as PresenceUser,
   type Vote,
@@ -453,6 +455,187 @@ export function Composer({
         <button className="send" onClick={submit} disabled={disabled || !value.trim()}>
           Send
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- invites */
+
+/**
+ * Plain-English status line for one invite. If the invite has no use limit
+ * and nobody has used it yet, "0 used" reads oddly next to "unlimited", so
+ * that case collapses to "unlimited" on its own.
+ */
+function describeInvite(i: InviteSummary): string {
+  if (i.revoked) return "Revoked";
+
+  const parts: string[] = [`Joins as ${i.role}`];
+
+  // With no cap, "3 used" alone reads as if a limit exists and is unmet, so
+  // the absence of one is stated outright rather than implied by omission.
+  parts.push(
+    i.maxUses > 0 ? `${i.uses} of ${i.maxUses} used` : `${i.uses} used · no limit`,
+  );
+
+  if (i.expiresAt === 0) {
+    parts.push("never expires");
+  } else if (i.expiresAt <= Date.now()) {
+    parts.push("expired");
+  } else {
+    const hoursLeft = (i.expiresAt - Date.now()) / (1000 * 60 * 60);
+    if (hoursLeft > 48) {
+      parts.push(`expires in ${Math.round(hoursLeft / 24)} days`);
+    } else if (hoursLeft < 1) {
+      parts.push("expires soon");
+    } else {
+      parts.push(`expires in ${Math.round(hoursLeft)} hours`);
+    }
+  }
+
+  return parts.join(" · ");
+}
+
+export function InvitePanel({
+  invites,
+  roomId,
+  onCreate,
+  onRevoke,
+  onClose,
+}: {
+  invites: InviteSummary[];
+  roomId: string;
+  onCreate: (role: string, maxUses: number, expiresInHours: number, label: string) => void;
+  onRevoke: (code: string) => void;
+  onClose: () => void;
+}) {
+  const [role, setRole] = useState<string>("editor");
+  const [maxUses, setMaxUses] = useState(1);
+  const [expiresInHours, setExpiresInHours] = useState(168);
+  const [label, setLabel] = useState("");
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
+
+  const copy = (code: string, url: string) => {
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode((c) => (c === code ? null : c)), 1500);
+    });
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-label="Invite people"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <h2>Invite people</h2>
+          <button className="icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        <div className="modal-body">
+          <p className="field-note">
+            Anyone with an invite link can join this room at the role you choose.
+            Revoking a link stops it working immediately.
+          </p>
+
+          <section>
+            <h3>Create an invite</h3>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onCreate(role, maxUses, expiresInHours, label);
+                setLabel("");
+              }}
+            >
+              <label className="field">
+                <span className="field-label">Joins as</span>
+                <select value={role} onChange={(e) => setRole(e.target.value)}>
+                  {INVITABLE_ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">Uses</span>
+                <select value={maxUses} onChange={(e) => setMaxUses(Number(e.target.value))}>
+                  <option value={1}>one person</option>
+                  <option value={5}>5 people</option>
+                  <option value={25}>25 people</option>
+                  <option value={0}>no limit</option>
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">Expires</span>
+                <select
+                  value={expiresInHours}
+                  onChange={(e) => setExpiresInHours(Number(e.target.value))}
+                >
+                  <option value={24}>24 hours</option>
+                  <option value={168}>7 days</option>
+                  <option value={720}>30 days</option>
+                  <option value={0}>never</option>
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">Label</span>
+                <input
+                  value={label}
+                  maxLength={48}
+                  placeholder="What's this link for? (optional)"
+                  onChange={(e) => setLabel(e.target.value)}
+                />
+              </label>
+
+              <button type="submit" className="primary">
+                Create invite link
+              </button>
+            </form>
+          </section>
+
+          <section>
+            <h3>Active links</h3>
+            {invites.length === 0 ? (
+              <p className="invite-empty">
+                No invite links yet. Create one to let someone in.
+              </p>
+            ) : (
+              <div className="invite-list">
+                {invites.map((i) => {
+                  const url = `${location.origin}/#/j/${roomId}/${i.code}`;
+                  const dead = i.revoked || (i.expiresAt !== 0 && i.expiresAt <= Date.now());
+                  return (
+                    <div key={i.code} className={`invite-row ${dead ? "invite-dead" : ""}`}>
+                      <code className="invite-url">{url}</code>
+                      <div className="invite-meta">
+                        <span>{describeInvite(i)}</span>
+                        <div className="invite-actions">
+                          <button className="mini" onClick={() => copy(i.code, url)}>
+                            {copiedCode === i.code ? "copied" : "copy"}
+                          </button>
+                          {!i.revoked && (
+                            <button className="mini" onClick={() => onRevoke(i.code)}>
+                              revoke
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );
