@@ -14,6 +14,7 @@ import {
   type CostLedger,
   type RoomSettings,
 } from "./models";
+import type { Role } from "./access";
 
 export type Vote = "approve" | "deny";
 
@@ -23,6 +24,8 @@ export type Presence = {
   uid: string;
   name: string;
   color: string;
+  /** What this person may do. Enforced on the server; carried here for the UI. */
+  role: Role;
   /** How many sockets this person currently has open. */
   connections: number;
 };
@@ -125,7 +128,9 @@ export type ServerMsg =
   | { t: "you"; uid: string; role: string }
   | { t: "error"; message: string }
   /** Sent only to the connection that asked. Never broadcast. */
-  | { t: "invites"; invites: InviteSummary[] };
+  | { t: "invites"; invites: InviteSummary[] }
+  /** Sent only to the connection that asked. */
+  | { t: "members"; members: MemberSummary[] };
 
 export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */
@@ -140,7 +145,12 @@ export type ClientMsg =
   /** Mint an invite. Owners and admins only; the server re-checks. */
   | { t: "invite.create"; role: string; maxUses: number; expiresInHours: number; label: string }
   | { t: "invite.revoke"; code: string }
-  | { t: "invite.list" };
+  | { t: "invite.list" }
+  | { t: "member.list" }
+  /** Change someone's role. The server re-checks that the actor outranks them. */
+  | { t: "member.role"; uid: string; role: Role }
+  /** Remove someone from the room and close their sockets. */
+  | { t: "member.remove"; uid: string };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [
@@ -167,7 +177,7 @@ export function colorFor(id: string): string {
 }
 
 /**
- * Votes needed to decide, given how many distinct people are in the room.
+ * Votes needed to decide, given how many voting-eligible people are present.
  *
  * Strict majority — more than half, not half. With two people present that means
  * both must agree, so nobody can push a change through over a colleague's
@@ -239,6 +249,17 @@ export type InviteSummary = {
   revoked: boolean;
   /** Free-text note, e.g. "design team". */
   label: string;
+};
+
+/** A member of the room, present or not. Sent only to whoever manages members. */
+export type MemberSummary = {
+  uid: string;
+  name: string;
+  role: Role;
+  joinedAt: number;
+  lastSeen: number;
+  /** Whether they have at least one socket open right now. */
+  online: boolean;
 };
 
 /** Roles an invite may grant. Owner is deliberately not one of them. */
