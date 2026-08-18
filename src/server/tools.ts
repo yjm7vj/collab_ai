@@ -5,8 +5,10 @@
  * side effect. Web search and fetch are Anthropic's server-side tools — they
  * resolve inside the API call and never reach this file.
  *
- * `GATED` is the security boundary: those tools do not run until the room votes.
+ * `gatedFor` is the security boundary: those tools do not run until the room votes.
  */
+
+import { resolveTools, type AccessPolicy, type ToolName } from "../shared/access";
 
 export type ToolCtx = {
   getDoc(): string;
@@ -15,8 +17,19 @@ export type ToolCtx = {
 
 export type ToolOutcome = { ok: boolean; text: string };
 
-/** Tools whose effects the room must approve before they run. */
-export const GATED = new Set(["write_doc", "edit_doc"]);
+/**
+ * Tools the room must vote on, under this policy.
+ *
+ * This used to be a fixed set of two names. It is now a function of the room's
+ * configuration, which is what lets a room choose to auto-accept edits or to
+ * put delegation to a vote.
+ */
+export function gatedFor(policy: AccessPolicy): Set<string> {
+  const decisions = resolveTools(policy);
+  return new Set(
+    (Object.keys(decisions) as ToolName[]).filter((n) => decisions[n] === "ask"),
+  );
+}
 
 const DELEGATE_DEF = {
   name: "delegate",
@@ -133,9 +146,44 @@ export const MANAGER_TOOLS = [...TOOL_DEFS, DELEGATE_DEF];
  * delegate, so a worker cannot spawn workers of its own. This is why worker
  * output never needs the room's approval: it cannot change anything.
  */
+// Not derived from a policy: workers are read-only unconditionally, by
+// construction, regardless of what the room's agent permission policy allows.
+const WORKER_EXCLUDED = new Set(["write_doc", "edit_doc"]);
 export const WORKER_TOOLS = TOOL_DEFS.filter(
-  (t) => !("name" in t) || !GATED.has(t.name as string),
+  (t) => !("name" in t) || !WORKER_EXCLUDED.has(t.name as string),
 );
+
+/** The name a tool definition is known by, whether custom or server-side. */
+function toolName(def: unknown): string {
+  return (def as { name?: string }).name ?? "";
+}
+
+/**
+ * The tool definitions this room's agent actually gets.
+ *
+ * A denied tool is removed from the list rather than gated: the agent should
+ * not spend a turn proposing something the room has already refused. Order is
+ * preserved so the cached prompt prefix stays stable for a given policy.
+ */
+export function toolsFor(policy: AccessPolicy, workflow: "solo" | "manager"): unknown[] {
+  const decisions = resolveTools(policy);
+  const base = workflow === "manager" ? MANAGER_TOOLS : AGENT_TOOLS;
+  return base.filter((def) => {
+    const name = toolName(def);
+    const decision = decisions[name as ToolName];
+    return decision === undefined ? true : decision !== "deny";
+  });
+}
+
+/** Worker tools under this policy. Workers can never write, gated or not. */
+export function workerToolsFor(policy: AccessPolicy): unknown[] {
+  const decisions = resolveTools(policy);
+  return WORKER_TOOLS.filter((def) => {
+    const name = toolName(def);
+    const decision = decisions[name as ToolName];
+    return decision === undefined ? true : decision !== "deny";
+  });
+}
 
 /** One-line description of what a gated call will do, shown on the vote card. */
 export function summarize(name: string, input: any): string {

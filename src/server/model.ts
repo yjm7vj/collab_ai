@@ -14,7 +14,7 @@ import type {
   ToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
 import { modelInfo, type RoomSettings } from "../shared/models";
-import { AGENT_TOOLS, MANAGER_TOOLS, WORKER_TOOLS, execute, type ToolCtx } from "./tools";
+import { execute, type ToolCtx } from "./tools";
 
 export const SYSTEM_PROMPT = `You are the shared agent of a live room that several people are talking to at the same time. This is not a private one-to-one chat, and that changes how you should behave.
 
@@ -148,6 +148,7 @@ export async function runModel(
   cfg: ModelConfig,
   settings: RoomSettings,
   messages: MessageParam[],
+  tools: unknown[],
   hooks: StreamHooks,
 ): Promise<ModelResult> {
   if (cfg.apiKey === "mock") return mockTurn(settings, messages, hooks);
@@ -158,7 +159,7 @@ export async function runModel(
     settings.effort,
     settings.temperature,
     manager ? SYSTEM_PROMPT + MANAGER_ADDENDUM : SYSTEM_PROMPT,
-    manager ? MANAGER_TOOLS : AGENT_TOOLS,
+    tools,
     messages,
   );
 
@@ -195,6 +196,7 @@ export async function runWorker(
   settings: RoomSettings,
   task: WorkerTask,
   ctx: ToolCtx,
+  tools: unknown[],
   maxRounds = 6,
 ): Promise<WorkerResult> {
   if (cfg.apiKey === "mock") {
@@ -218,7 +220,7 @@ export async function runWorker(
       "medium",
       settings.temperature,
       WORKER_SYSTEM,
-      WORKER_TOOLS,
+      tools,
       messages,
     );
     const message = (await api.messages.create(params as never)) as Message;

@@ -13,13 +13,17 @@ import {
 import { thresholdFor } from "../src/shared/protocol";
 import {
   ROLE_CAPS,
+  approvalThreshold,
   asRole,
   can,
   isVoter,
   outranks,
+  resolveTools,
+  sanitizeAccessPolicy,
   type Capability,
   type Role,
 } from "../src/shared/access";
+import { gatedFor, toolsFor } from "../src/server/tools";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail?: unknown) {
@@ -173,6 +177,96 @@ check("asRole('') is viewer", asRole("") === "viewer", asRole(""));
 check("asRole('OWNER') is viewer", asRole("OWNER") === "viewer", asRole("OWNER"));
 check("asRole('superuser') is viewer", asRole("superuser") === "viewer", asRole("superuser"));
 check("asRole(42) is viewer", asRole(42) === "viewer", asRole(42));
+
+console.log("\nagent permission policy");
+
+const basePolicy = { mode: "ask" as const, tools: {} as never, approval: "majority" as const };
+
+const readOnlyDecisions = resolveTools({ ...basePolicy, mode: "read_only" });
+check("read_only denies write_doc", readOnlyDecisions.write_doc === "deny", readOnlyDecisions.write_doc);
+check("read_only denies edit_doc", readOnlyDecisions.edit_doc === "deny", readOnlyDecisions.edit_doc);
+check("read_only allows read_doc", readOnlyDecisions.read_doc === "allow", readOnlyDecisions.read_doc);
+
+const askDecisions = resolveTools({ ...basePolicy, mode: "ask" });
+check("ask marks write_doc as ask", askDecisions.write_doc === "ask", askDecisions.write_doc);
+check("ask marks edit_doc as ask", askDecisions.edit_doc === "ask", askDecisions.edit_doc);
+
+const autoDecisions = resolveTools({ ...basePolicy, mode: "auto" });
+check(
+  "auto allows everything",
+  Object.values(autoDecisions).every((d) => d === "allow"),
+  autoDecisions,
+);
+
+const gatedAuto = gatedFor({ ...basePolicy, mode: "auto" });
+check("gatedFor is empty under auto", gatedAuto.size === 0, [...gatedAuto]);
+
+const gatedAsk = gatedFor({ ...basePolicy, mode: "ask" });
+check(
+  "gatedFor under ask is exactly write_doc and edit_doc",
+  gatedAsk.size === 2 && gatedAsk.has("write_doc") && gatedAsk.has("edit_doc"),
+  [...gatedAsk],
+);
+
+const readOnlyTools = toolsFor({ ...basePolicy, mode: "read_only" }, "solo") as { name?: string }[];
+const readOnlyNames = readOnlyTools.map((t) => t.name);
+check("toolsFor(read_only) excludes write_doc", !readOnlyNames.includes("write_doc"), readOnlyNames);
+check("toolsFor(read_only) excludes edit_doc", !readOnlyNames.includes("edit_doc"), readOnlyNames);
+check("toolsFor(read_only) includes read_doc", readOnlyNames.includes("read_doc"), readOnlyNames);
+
+// The distinction the whole phase rests on: gated is not the same as removed.
+// Under "ask", write_doc is still offered to the model — it is voted on only
+// once the model actually calls it — whereas under "read_only" it is withheld
+// entirely so the agent never proposes a call it cannot make.
+const askTools = toolsFor({ ...basePolicy, mode: "ask" }, "solo") as { name?: string }[];
+const askNames = askTools.map((t) => t.name);
+check("toolsFor(ask) still includes write_doc (gated, not removed)", askNames.includes("write_doc"), askNames);
+
+const managerTools = toolsFor({ ...basePolicy, mode: "ask" }, "manager") as { name?: string }[];
+const soloTools = toolsFor({ ...basePolicy, mode: "ask" }, "solo") as { name?: string }[];
+check(
+  "toolsFor manager includes delegate",
+  managerTools.some((t) => t.name === "delegate"),
+  managerTools.map((t) => t.name),
+);
+check(
+  "toolsFor solo excludes delegate",
+  !soloTools.some((t) => t.name === "delegate"),
+  soloTools.map((t) => t.name),
+);
+
+check("majority of 4 is 3", approvalThreshold("majority", 4) === 3, approvalThreshold("majority", 4));
+check("unanimous of 4 is 4", approvalThreshold("unanimous", 4) === 4, approvalThreshold("unanimous", 4));
+check("unanimous of 0 is 1", approvalThreshold("unanimous", 0) === 1, approvalThreshold("unanimous", 0));
+check("any_editor of 9 is 1", approvalThreshold("any_editor", 9) === 1, approvalThreshold("any_editor", 9));
+check("owner_only of 9 is 1", approvalThreshold("owner_only", 9) === 1, approvalThreshold("owner_only", 9));
+
+// Unknown values must fall back to the most restrictive option, never the
+// most permissive — a malformed frame must not be a way to turn approval off.
+const p1 = sanitizeAccessPolicy({});
+check("sanitizeAccessPolicy({}) mode is ask", p1.mode === "ask", p1.mode);
+check("sanitizeAccessPolicy({}) approval is majority", p1.approval === "majority", p1.approval);
+
+const p2 = sanitizeAccessPolicy(null);
+check("sanitizeAccessPolicy(null) mode is ask", p2.mode === "ask", p2.mode);
+check("sanitizeAccessPolicy(null) approval is majority", p2.approval === "majority", p2.approval);
+
+const p3 = sanitizeAccessPolicy({ mode: "nonsense" });
+check("sanitizeAccessPolicy({mode:'nonsense'}) mode is ask", p3.mode === "ask", p3.mode);
+check("sanitizeAccessPolicy({mode:'nonsense'}) approval is majority", p3.approval === "majority", p3.approval);
+
+const p4 = sanitizeAccessPolicy({ approval: "whatever" });
+check("sanitizeAccessPolicy({approval:'whatever'}) mode is ask", p4.mode === "ask", p4.mode);
+check("sanitizeAccessPolicy({approval:'whatever'}) approval is majority", p4.approval === "majority", p4.approval);
+
+// A malformed per-tool decision must never resolve to "allow" — that would be
+// a way to switch approval off by sending garbage instead of a real value.
+const p5 = sanitizeAccessPolicy({ tools: { write_doc: "banana" } });
+check(
+  "sanitizeAccessPolicy({tools:{write_doc:'banana'}}) does not yield allow",
+  p5.tools.write_doc !== "allow",
+  p5.tools.write_doc,
+);
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);
