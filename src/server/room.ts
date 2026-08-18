@@ -20,6 +20,7 @@ import type {
 
 import {
   INITIAL_ROOM_STATE,
+  INVITABLE_ROLES,
   UID_RE,
   colorFor,
   tally,
@@ -27,6 +28,7 @@ import {
   type AgentBlock,
   type ClientMsg,
   type Entry,
+  type InviteSummary,
   type PendingTool,
   type Presence,
   type RoomState,
@@ -50,7 +52,7 @@ import {
   type WorkerTask,
 } from "./model";
 import { GATED, execute, summarize as summarizeCall, type ToolCtx } from "./tools";
-import { constantTimeEqual } from "./auth";
+import { constantTimeEqual, newInviteCode } from "./auth";
 
 /** In-flight turn bookkeeping. Persisted, because a turn can outlive this instance. */
 type Turn = {
@@ -91,6 +93,17 @@ export class Room extends Agent<Env, RoomState> {
     } catch {
       /* column already present */
     }
+    this.sql`CREATE TABLE IF NOT EXISTS invites (
+      code TEXT PRIMARY KEY,
+      role TEXT NOT NULL,
+      max_uses INTEGER NOT NULL,
+      uses INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      revoked_at INTEGER NOT NULL DEFAULT 0,
+      label TEXT NOT NULL DEFAULT ''
+    )`;
     this.#schemaReady = true;
   }
 
@@ -190,6 +203,12 @@ export class Room extends Agent<Env, RoomState> {
     return uid ? this.#memberName(uid) : null;
   }
 
+  /** The role bound to this socket at connect time. */
+  #roleOf(connection: Connection): string | null {
+    const s = connection.state as { role?: string } | null;
+    return s?.role ?? null;
+  }
+
   /** The room's own record, or null if this room was never created. */
   #room(): { title: string; visibility: string; createdAt: number } | null {
     return this.#kvGet<{ title: string; visibility: string; createdAt: number } | null>(
@@ -202,6 +221,67 @@ export class Room extends Agent<Env, RoomState> {
   #memberRole(uid: string): string | null {
     const rows = this.sql<{ role: string }>`SELECT role FROM members WHERE uid = ${uid}`;
     return rows.length ? rows[0]!.role : null;
+  }
+
+  /** Whether a role may mint and revoke invites. */
+  #canInvite(role: string | null): boolean {
+    return role === "owner" || role === "admin";
+  }
+
+  /**
+   * Decide whether an invite code admits its holder, and why not if it doesn't.
+   *
+   * Ordering matters: a revoked code reports as revoked even after it expires,
+   * because "we took that link away" and "that link aged out" are different
+   * things to tell someone, and the first is the one an admin acted on.
+   */
+  #checkInvite(code: string):
+    | { ok: true; role: string }
+    | { ok: false; reason: "bad_code" | "code_revoked" | "code_expired" | "code_used_up" } {
+    const rows = this.sql<{
+      code: string;
+      role: string;
+      max_uses: number;
+      uses: number;
+      expires_at: number;
+      revoked_at: number;
+    }>`SELECT code, role, max_uses, uses, expires_at, revoked_at FROM invites WHERE code = ${code}`;
+
+    const row = rows[0];
+    if (!row) return { ok: false, reason: "bad_code" };
+    if (row.revoked_at > 0) return { ok: false, reason: "code_revoked" };
+    if (row.expires_at > 0 && row.expires_at <= Date.now()) {
+      return { ok: false, reason: "code_expired" };
+    }
+    if (row.max_uses > 0 && row.uses >= row.max_uses) {
+      return { ok: false, reason: "code_used_up" };
+    }
+    return { ok: true, role: row.role };
+  }
+
+  /** Every invite for this room, newest first. Only ever sent to one connection. */
+  #invites(): InviteSummary[] {
+    const rows = this.sql<{
+      code: string;
+      role: string;
+      max_uses: number;
+      uses: number;
+      expires_at: number;
+      created_at: number;
+      revoked_at: number;
+      label: string;
+    }>`SELECT code, role, max_uses, uses, expires_at, created_at, revoked_at, label
+       FROM invites ORDER BY created_at DESC`;
+    return rows.map((r) => ({
+      code: r.code,
+      role: r.role,
+      maxUses: r.max_uses,
+      uses: r.uses,
+      expiresAt: r.expires_at,
+      createdAt: r.created_at,
+      revoked: r.revoked_at > 0,
+      label: r.label,
+    }));
   }
 
   // ---------------------------------------------------------------- presence
@@ -320,8 +400,21 @@ export class Room extends Agent<Env, RoomState> {
 
       if (room.visibility === "locked") return json({ error: "locked" }, 403);
 
-      // Invite codes are not implemented yet, so only an open room admits a
-      // stranger. An invite-only room refuses everyone it does not already know.
+      // A code is checked even in an open room: it is how someone arrives at a
+      // role other than the default, so honouring it matters either way.
+      const code = String(body.code ?? "");
+      if (code) {
+        const verdict = this.#checkInvite(code);
+        if (!verdict.ok) return json({ error: verdict.reason }, 403);
+
+        this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
+                 VALUES (${uid}, ${name}, ${now}, ${now}, ${verdict.role})`;
+        // Counted only after the member row lands, so a failed insert cannot
+        // burn a use of a single-use invite.
+        this.sql`UPDATE invites SET uses = uses + 1 WHERE code = ${code}`;
+        return json({ role: verdict.role });
+      }
+
       if (room.visibility !== "open") return json({ error: "invite_required" }, 403);
 
       this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
@@ -358,7 +451,7 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     connection.setState({ uid, role });
-    connection.send(JSON.stringify({ t: "you", uid } satisfies ServerMsg));
+    connection.send(JSON.stringify({ t: "you", uid, role } satisfies ServerMsg));
     connection.send(
       JSON.stringify({ t: "history", entries: this.#entries() } satisfies ServerMsg),
     );
@@ -398,6 +491,12 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onSettings(connection, msg.settings);
       case "compact":
         return this.#onCompact(connection);
+      case "invite.create":
+        return this.#onInviteCreate(connection, msg);
+      case "invite.revoke":
+        return this.#onInviteRevoke(connection, msg.code);
+      case "invite.list":
+        return this.#onInviteList(connection);
     }
   }
 
@@ -465,6 +564,73 @@ export class Room extends Agent<Env, RoomState> {
     this.sql`UPDATE members SET name = ${name}, last_seen = ${Date.now()} WHERE uid = ${uid}`;
     this.#system(`${previous} is now ${name}`);
     await this.#refreshPresence();
+  }
+
+  /** Reply to one connection with the room's invites. Never broadcast. */
+  #sendInvites(connection: Connection) {
+    connection.send(
+      JSON.stringify({ t: "invites", invites: this.#invites() } satisfies ServerMsg),
+    );
+  }
+
+  #refuse(connection: Connection, message: string) {
+    connection.send(JSON.stringify({ t: "error", message } satisfies ServerMsg));
+  }
+
+  async #onInviteList(connection: Connection) {
+    if (!this.#canInvite(this.#roleOf(connection))) {
+      this.#refuse(connection, "Only the room's owner and admins can see invites.");
+      return;
+    }
+    this.#sendInvites(connection);
+  }
+
+  async #onInviteCreate(
+    connection: Connection,
+    msg: { role: string; maxUses: number; expiresInHours: number; label: string },
+  ) {
+    const uid = this.#uidOf(connection);
+    if (!uid || !this.#canInvite(this.#roleOf(connection))) {
+      this.#refuse(connection, "Only the room's owner and admins can create invites.");
+      return;
+    }
+
+    // An invite can never hand out ownership: a room has exactly one owner, and
+    // transferring it is a deliberate act, not a side effect of sharing a link.
+    const role = (INVITABLE_ROLES as readonly string[]).includes(msg.role)
+      ? msg.role
+      : "editor";
+
+    const maxUses = Math.max(0, Math.min(1000, Math.round(Number(msg.maxUses) || 0)));
+    const hours = Math.max(0, Math.min(24 * 365, Math.round(Number(msg.expiresInHours) || 0)));
+    const expiresAt = hours === 0 ? 0 : Date.now() + hours * 3600_000;
+    const label = String(msg.label ?? "").trim().slice(0, 48);
+
+    const code = newInviteCode();
+    this.sql`INSERT INTO invites (code, role, max_uses, uses, expires_at, created_by, created_at, revoked_at, label)
+             VALUES (${code}, ${role}, ${maxUses}, 0, ${expiresAt}, ${uid}, ${Date.now()}, 0, ${label})`;
+
+    // The transcript records that an invite exists and who made it, but never
+    // the code itself — the transcript is visible to the whole room.
+    this.#system(
+      `${this.#memberName(uid) ?? "someone"} created an invite for a new ${role}` +
+        (label ? ` (${label})` : ""),
+    );
+    this.#sendInvites(connection);
+  }
+
+  async #onInviteRevoke(connection: Connection, rawCode: string) {
+    const uid = this.#uidOf(connection);
+    if (!uid || !this.#canInvite(this.#roleOf(connection))) {
+      this.#refuse(connection, "Only the room's owner and admins can revoke invites.");
+      return;
+    }
+    const code = String(rawCode ?? "");
+    // Revoking is idempotent: the first revocation time is the one that counts.
+    this.sql`UPDATE invites SET revoked_at = ${Date.now()}
+             WHERE code = ${code} AND revoked_at = 0`;
+    this.#system(`${this.#memberName(uid) ?? "someone"} revoked an invite`);
+    this.#sendInvites(connection);
   }
 
   async #onSay(connection: Connection, rawText: string) {

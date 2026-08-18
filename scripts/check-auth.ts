@@ -189,6 +189,27 @@ async function main() {
     check("two empty strings are true", constantTimeEqual("", "") === true);
   }
 
+  console.log("\ninvite code shape");
+  {
+    const CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
+    const forbidden = new Set(["0", "1", "I", "O", "l", "o"]);
+
+    let allInAlphabet = true;
+    let allLength10 = true;
+    let noneForbidden = true;
+    for (let i = 0; i < 500; i++) {
+      const c = newInviteCode();
+      if (c.length !== 10) allLength10 = false;
+      for (const ch of c) {
+        if (!CODE_ALPHABET.includes(ch)) allInAlphabet = false;
+        if (forbidden.has(ch)) noneForbidden = false;
+      }
+    }
+    check("every character of 500 generated codes is in the 56-character alphabet", allInAlphabet);
+    check("every one of 500 generated codes is exactly 10 characters", allLength10);
+    check("none of 500 generated codes contain an ambiguous character", noneForbidden);
+  }
+
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

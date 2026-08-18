@@ -66,19 +66,22 @@ function clearToken(roomId: string) {
   localStorage.removeItem(tokenKey(roomId));
 }
 
+// A Record keyed by the full union, rather than a switch, so adding a new
+// JoinRefusal member is a compile error here instead of a silent fallthrough.
+const REFUSAL_MESSAGES: Record<JoinRefusal | "network", string> = {
+  not_found: "There's no room at that link. Check you copied all of it.",
+  invite_required: "This room is invite-only. Ask someone inside for an invite link.",
+  locked: "This room isn't accepting new members.",
+  bad_request: "That link doesn't look right.",
+  bad_code: "That invite code isn't valid. Check the link, or ask for a new one.",
+  code_expired: "That invite link has expired. Ask for a new one.",
+  code_used_up: "That invite link has already been used as many times as it allows.",
+  code_revoked: "That invite link was turned off. Ask for a new one.",
+  network: "Couldn't reach the server. Check your connection and try again.",
+};
+
 function refusalMessage(reason: JoinRefusal | "network"): string {
-  switch (reason) {
-    case "not_found":
-      return "There's no room at that link. Check you copied all of it.";
-    case "invite_required":
-      return "This room is invite-only. Ask someone inside for an invite link.";
-    case "locked":
-      return "This room isn't accepting new members.";
-    case "bad_request":
-      return "That link doesn't look right.";
-    case "network":
-      return "Couldn't reach the server. Check your connection and try again.";
-  }
+  return REFUSAL_MESSAGES[reason];
 }
 
 export function App() {
