@@ -101,7 +101,18 @@ npx wrangler secret put ANTHROPIC_API_KEY
 npm run deploy
 ```
 
-Durable Objects require a paid Workers plan.
+This runs on the **Workers Free** plan. Durable Objects are free-tier eligible
+as long as they use the SQLite storage backend, which is what
+`new_sqlite_classes` in `wrangler.jsonc` selects. Only the legacy key-value
+backend needs a paid plan, and this does not use it.
+
+Free limits are 100k requests/day, 13,000 GB-s of compute duration, 5M row reads,
+100k row writes, and 5 GB stored. Exceeding one makes further operations of that
+type fail with an error rather than billing you. Idle rooms hibernate and stop
+accruing duration, so the practical ceiling is active room-time, not uptime.
+
+Cloudflare is unlikely to be your main cost either way — Anthropic tokens are.
+The header gauge tracks those.
 
 ---
 
