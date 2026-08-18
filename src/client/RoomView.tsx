@@ -12,7 +12,8 @@ import {
   type Vote,
 } from "../shared/protocol";
 import type { RoomSettings } from "../shared/models";
-import { asRole, can, type Role } from "../shared/access";
+import { asRole, can, describePolicy, type Role } from "../shared/access";
+import type { AccessPolicy } from "../shared/access";
 import {
   ApprovalCard,
   Composer,
@@ -20,6 +21,7 @@ import {
   DocPanel,
   InvitePanel,
   MembersPanel,
+  PermissionsPanel,
   Presence,
   Transcript,
   WorkerStrip,
@@ -50,6 +52,7 @@ export function RoomView({
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPermissions, setShowPermissions] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [copied, setCopied] = useState(false);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
@@ -61,6 +64,7 @@ export function RoomView({
   // boundary, this is only so nobody clicks into a refusal.
   const maySpeak = can(myRole, "speak");
   const maySettings = can(myRole, "settings");
+  const mayPolicy = can(myRole, "policy");
   const mayInvite = can(myRole, "invite");
   const mayManage = can(myRole, "manage_members");
 
@@ -168,6 +172,7 @@ export function RoomView({
     (s: RoomSettings) => send({ t: "settings", settings: s }),
     [send],
   );
+  const applyPolicy = useCallback((p: AccessPolicy) => send({ t: "policy", policy: p }), [send]);
   const compactNow = useCallback(() => send({ t: "compact" }), [send]);
   const createInvite = useCallback(
     (role: string, maxUses: number, expiresInHours: number, label: string) =>
@@ -258,6 +263,18 @@ export function RoomView({
             cost={state.cost}
           />
           <span className={`status status-${state.status}`}>{statusLabel}</span>
+          <span
+            className={`policy-chip policy-${state.policy.mode}`}
+            title={describePolicy(state.policy)}
+          >
+            {state.policy.mode === "read_only"
+              ? "read-only"
+              : state.policy.mode === "auto"
+                ? "auto-accept"
+                : state.policy.mode === "custom"
+                  ? "custom"
+                  : "ask first"}
+          </span>
           <Presence users={state.users} me={me} />
           {mayManage && (
             <button
@@ -282,6 +299,16 @@ export function RoomView({
               aria-label="Invite people"
             >
               🔗
+            </button>
+          )}
+          {mayPolicy && (
+            <button
+              className="icon"
+              onClick={() => setShowPermissions(true)}
+              title="What the agent may do"
+              aria-label="What the agent may do"
+            >
+              🛡
             </button>
           )}
           {maySettings && (
@@ -311,6 +338,18 @@ export function RoomView({
           onApply={applySettings}
           onCompactNow={compactNow}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showPermissions && (
+        <PermissionsPanel
+          policy={state.policy}
+          busy={state.status !== "idle"}
+          onApply={(p) => {
+            applyPolicy(p);
+            setShowPermissions(false);
+          }}
+          onClose={() => setShowPermissions(false)}
         />
       )}
 
@@ -345,9 +384,16 @@ export function RoomView({
             <div className="approvals">
               <div className="approvals-head">
                 The agent needs the room's approval
+                {/*
+                  The server computes the threshold from eligible voters and the
+                  approval rule (e.g. owner_only needs one vote regardless of
+                  headcount); the client has no way to recompute that denominator,
+                  so it displays the pending item's own threshold rather than
+                  guessing one from users.length.
+                */}
                 <span className="hint">
-                  {state.pending[0]!.threshold} of {Math.max(1, state.users.length)} to
-                  decide
+                  {state.pending[0]!.threshold}{" "}
+                  {state.pending[0]!.threshold === 1 ? "approval" : "approvals"} needed
                 </span>
               </div>
               {state.pending.map((p) => (

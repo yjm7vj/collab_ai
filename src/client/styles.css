@@ -629,3 +629,47 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 
 /* Viewers are read-only — mark their chip subtly rather than shouting it. */
 .chip-viewer { opacity: 0.6; border-style: dashed; }
+
+/* ------------------------------------------------------------- permissions */
+
+/* Quiet by default (ask), calmer still when read-only, loud when the agent
+   can edit unattended — the room should notice auto-accept at a glance. */
+.policy-chip {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.policy-read_only { color: var(--ink-faint); border-style: dashed; }
+.policy-ask { color: var(--ink-dim); }
+.policy-auto { background: #3a1d18; border-color: var(--bad); color: #f0b9ac; font-weight: 700; }
+.policy-custom { border-color: var(--accent); color: var(--accent); }
+
+.policy-modes { display: grid; gap: 4px; }
+.policy-mode-opt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 4px;
+  border-radius: 8px;
+}
+.policy-mode-opt.on { background: #2a2115; }
+.policy-mode-opt input { margin-top: 3px; flex: none; }
+.policy-mode-name { display: block; font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+
+.policy-tools { display: grid; gap: 2px; }
+.policy-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+.policy-tool-row:last-child { border-bottom: none; }
+.policy-tool-options { display: flex; gap: 14px; font-size: 12px; color: var(--ink-dim); }
+.policy-tool-opt { display: flex; align-items: center; gap: 5px; }
+
+.policy-summary { font-style: italic; }
