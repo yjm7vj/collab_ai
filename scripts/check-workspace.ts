@@ -111,12 +111,26 @@ const denied = [
   ".aws/credentials",
   ".git/config",
   ".npmrc",
-  "node_modules/left-pad/index.js",
+  ".git/credentials",
+  ".git-credentials",
   "service-account-key.json",
 ];
 for (const p of denied) {
   check(`"${p}" is denied by DEFAULT_PATH_POLICY`, pathDecision(DEFAULT_PATH_POLICY, p, false) === "deny");
 }
+// Opened up deliberately: git history and dependency source are legitimately
+// useful to read. The credential-bearing files inside .git stay denied above,
+// which is the whole reason .git could be opened at all.
+for (const p of [
+  ".git/HEAD",
+  ".git/refs/heads/main",
+  ".git/logs/HEAD",
+  "node_modules/left-pad/index.js",
+  "node_modules/.bin/tsc",
+]) {
+  check(`"${p}" is readable`, pathDecision(DEFAULT_PATH_POLICY, p, false) === "allow", pathDecision(DEFAULT_PATH_POLICY, p, false));
+}
+
 check(
   '"src/index.ts" is not denied',
   pathDecision(DEFAULT_PATH_POLICY, "src/index.ts", false) !== "deny",
