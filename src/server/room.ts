@@ -443,6 +443,7 @@ export class Room extends Agent<Env, RoomState> {
         // Counted only after the member row lands, so a failed insert cannot
         // burn a use of a single-use invite.
         this.sql`UPDATE invites SET uses = uses + 1 WHERE code = ${code}`;
+        this.#system(`${name} joined as ${verdict.role}`);
         return json({ role: verdict.role });
       }
 
@@ -450,6 +451,7 @@ export class Room extends Agent<Env, RoomState> {
 
       this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
                VALUES (${uid}, ${name}, ${now}, ${now}, 'editor')`;
+      this.#system(`${name} joined`);
       return json({ role: "editor" });
     }
 
@@ -491,12 +493,14 @@ export class Room extends Agent<Env, RoomState> {
 
   override async onClose(connection: Connection) {
     this.#ready();
-    const uid = this.#uidOf(connection);
-    const name = uid ? this.#memberName(uid) : null;
     // Membership rows are deliberately not deleted — a member who closes a tab
-    // is still a member. Only announce a departure when their last socket goes.
-    const remaining = this.#presence(connection.id);
-    if (name && !remaining.some((u) => u.uid === uid)) this.#system(`${name} left`);
+    // is still a member.
+    //
+    // Departures are deliberately not written to the transcript. A reload is a
+    // disconnect followed by a reconnect, so announcing them filled permanent
+    // history with churn nobody asked about. Who is here right now is already
+    // live in the presence strip; the transcript records membership changes —
+    // joining, role changes, removal — which are the ones that persist.
     await this.#refreshPresence(connection.id);
   }
 
