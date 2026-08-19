@@ -19,6 +19,19 @@ import { NO_WORKSPACE, type FsRequest, type FsResponse, type WorkspaceInfo, type
 
 export type Vote = "approve" | "deny";
 
+/**
+ * How a room admits people.
+ *
+ * `invite` is the default and the safe one. `open` lets anyone holding the
+ * room link in as an editor, which is only sensible for a demo. `locked`
+ * admits nobody new while leaving existing members untouched.
+ */
+export type RoomVisibility = "open" | "invite" | "locked";
+
+export function asVisibility(v: unknown): RoomVisibility {
+  return v === "open" || v === "locked" ? v : "invite";
+}
+
 /** One person in the room. Keyed by durable id, not by socket. */
 export type Presence = {
   /** Durable per-person id. Stable across reconnects, reloads and tabs. */
@@ -62,6 +75,8 @@ export type RoomState = {
   settings: RoomSettings;
   /** What the agent may do unattended. Independent of what people may do. */
   policy: AccessPolicy;
+  /** How the room admits people. Everyone sees this; only the owner sets it. */
+  visibility: RoomVisibility;
   /** The room's connected workspace, if any. Everyone sees this. */
   workspace: WorkspaceInfo;
   /** Live worker activity, for the manager workflow. Empty when nothing is running. */
@@ -88,6 +103,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   pending: [],
   settings: DEFAULT_SETTINGS,
   policy: DEFAULT_POLICY,
+  visibility: "invite",
   workspace: NO_WORKSPACE,
   workers: [],
   context: { messages: 0, tokens: 0 },
@@ -197,6 +213,8 @@ export type ClientMsg =
   | { t: "workspace.attach"; kind: WorkspaceKind; label: string; repo?: string }
   /** Disconnect the room's workspace. Owners and admins only. */
   | { t: "workspace.detach" }
+  /** Change how the room admits people. Owner only; the server re-checks. */
+  | { t: "room.visibility"; visibility: RoomVisibility }
   /** Start connecting a GitHub repository. Owners and admins only. */
   | { t: "github.connect"; repo: string };
 

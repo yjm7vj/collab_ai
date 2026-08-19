@@ -20,6 +20,7 @@ import type {
 
 import {
   INITIAL_ROOM_STATE,
+  asVisibility,
   INVITABLE_ROLES,
   UID_RE,
   colorFor,
@@ -590,6 +591,14 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
+    // RoomState is rebuilt from initialState on a fresh instance, so the
+    // stored visibility has to be read back or the room would report itself
+    // as invite-only after every eviction regardless of what it is.
+    const stored = this.#room();
+    if (stored && this.state.visibility !== stored.visibility) {
+      this.setState({ ...this.state, visibility: asVisibility(stored.visibility) });
+    }
+
     connection.setState({ uid, role });
     connection.send(JSON.stringify({ t: "you", uid, role } satisfies ServerMsg));
     const allowed = canSeeFileContents(asRole(role));
@@ -682,6 +691,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onMemberRemove(connection, msg.uid);
       case "workspace.attach":
         return this.#onWorkspaceAttach(connection, msg.kind, msg.label);
+      case "room.visibility":
+        return this.#onVisibility(connection, msg.visibility);
       case "workspace.detach":
         return this.#onWorkspaceDetach(connection);
       case "github.connect":
@@ -971,6 +982,31 @@ export class Room extends Agent<Env, RoomState> {
       workspace: { kind, online: true, hostUid: uid, label },
     });
     this.#system(`${name ?? "someone"} connected a workspace${label ? ` (${label})` : ""}`);
+  }
+
+  /**
+   * Change how the room admits people.
+   *
+   * Owner only, and deliberately not delegated to admins: opening a room up
+   * is the one setting that undoes the point of a private room, and it should
+   * take the person who owns it.
+   */
+  async #onVisibility(connection: Connection, incoming: unknown) {
+    if (!this.#allow(connection, "admin_room", "Only the room's owner can change who may join.")) return;
+    const room = this.#room();
+    if (!room) return;
+    const visibility = asVisibility(incoming);
+    if (visibility === room.visibility) return;
+
+    this.#kvSet("room", { ...room, visibility });
+    this.setState({ ...this.state, visibility });
+    const how =
+      visibility === "open"
+        ? "anyone with the link can join as an editor"
+        : visibility === "locked"
+          ? "nobody new can join"
+          : "an invite link is required to join";
+    this.#system(`${this.#nameOf(connection) ?? "someone"} changed who may join — ${how}`);
   }
 
   async #onWorkspaceDetach(connection: Connection) {
