@@ -9,6 +9,7 @@
  */
 
 import { resolveTools, type AccessPolicy, type ToolName } from "../shared/access";
+import { serverToolsFor } from "../shared/models";
 
 export type ToolCtx = {
   getDoc(): string;
@@ -73,8 +74,12 @@ const DELEGATE_DEF = {
 };
 
 /**
- * Anthropic tool definitions. Custom tools first, then server-side tools.
- * Order is stable so the prompt prefix stays cacheable.
+ * Anthropic custom tool definitions.
+ *
+ * Server-side tools (web_search, web_fetch) are NOT included here — which
+ * variant is valid depends on the model (see `serverToolsFor` in
+ * shared/models.ts), so they are appended per-model by the functions below
+ * rather than baked into this fixed list.
  */
 export const TOOL_DEFS = [
   {
@@ -246,8 +251,6 @@ export const TOOL_DEFS = [
       required: ["path"],
     },
   },
-  { type: "web_search_20260209", name: "web_search" },
-  { type: "web_fetch_20260209", name: "web_fetch" },
 ];
 
 /** Solo workflow: the full set, no delegation. */
@@ -288,12 +291,22 @@ function toolName(def: unknown): string {
  *
  * A denied tool is removed from the list rather than gated: the agent should
  * not spend a turn proposing something the room has already refused. Order is
- * preserved so the cached prompt prefix stays stable for a given policy.
+ * preserved (custom tools first, then the model's server tools last) so the
+ * cached prompt prefix stays stable for a given model + policy.
+ *
+ * The policy filter runs AFTER the server tools are appended, so a denial of
+ * `web_search` (say) drops it regardless of which variant `serverToolsFor`
+ * picked for this model.
  */
-export function toolsFor(policy: AccessPolicy, workflow: "solo" | "manager"): unknown[] {
+export function toolsFor(
+  policy: AccessPolicy,
+  workflow: "solo" | "manager",
+  modelId: string,
+): unknown[] {
   const decisions = resolveTools(policy);
   const base = workflow === "manager" ? MANAGER_TOOLS : AGENT_TOOLS;
-  return base.filter((def) => {
+  const withServerTools = [...base, ...serverToolsFor(modelId)];
+  return withServerTools.filter((def) => {
     const name = toolName(def);
     const decision = decisions[name as ToolName];
     return decision === undefined ? true : decision !== "deny";
@@ -318,16 +331,23 @@ export function toolsForRoom(
   policy: AccessPolicy,
   workflow: "solo" | "manager",
   workspaceOnline: boolean,
+  modelId: string,
 ): unknown[] {
-  const base = toolsFor(policy, workflow);
+  const base = toolsFor(policy, workflow, modelId);
   if (workspaceOnline) return base;
   return base.filter((def) => !WORKSPACE_TOOL_NAMES.has(toolName(def)));
 }
 
-/** Worker tools under this policy. Workers can never write, gated or not. */
-export function workerToolsFor(policy: AccessPolicy): unknown[] {
+/**
+ * Worker tools under this policy, for the given worker model. Workers can
+ * never write, gated or not. Server tools are appended last (same ordering
+ * intent as `toolsFor`) and the policy filter runs after that append, so a
+ * denial reaches them whichever variant `serverToolsFor` picked.
+ */
+export function workerToolsFor(policy: AccessPolicy, modelId: string): unknown[] {
   const decisions = resolveTools(policy);
-  return WORKER_TOOLS.filter((def) => {
+  const withServerTools = [...WORKER_TOOLS, ...serverToolsFor(modelId)];
+  return withServerTools.filter((def) => {
     const name = toolName(def);
     const decision = decisions[name as ToolName];
     return decision === undefined ? true : decision !== "deny";

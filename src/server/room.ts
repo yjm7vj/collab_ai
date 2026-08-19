@@ -1492,7 +1492,13 @@ export class Room extends Agent<Env, RoomState> {
       accepted.map(async (task, i) => {
         const id = statuses[i]!.id;
         try {
-          const r = await runWorker(this.#config(), settings, task, ctx, workerToolsFor(this.#policy()));
+          const r = await runWorker(
+            this.#config(),
+            settings,
+            task,
+            ctx,
+            workerToolsFor(this.#policy(), this.#settings().workerModel),
+          );
           r.usage.forEach((u) => this.#recordUsage(u));
           settle(id, "done");
           return `## ${task.title}\n\n${r.text}`;
@@ -1571,6 +1577,7 @@ export class Room extends Agent<Env, RoomState> {
             this.#policy(),
             this.#settings().workflow,
             this.state.workspace.kind !== "none" && this.state.workspace.online,
+            this.#settings().agentModel,
           ),
           {
             onBlockStart: (index, type) => {

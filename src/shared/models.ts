@@ -25,6 +25,13 @@ export type ModelInfo = {
   efforts: Effort[];
   /** Adaptive thinking. Models without it get no `thinking` parameter at all. */
   adaptiveThinking: boolean;
+  /**
+   * Whether this model accepts the dynamic-filtering server tools
+   * (`web_search_20260209` / `web_fetch_20260209`). Those run code execution
+   * under the hood, so a model without programmatic tool calling rejects them
+   * with a 400 and must be given the basic variants instead.
+   */
+  dynamicServerTools: boolean;
   /** Suitable as a delegating manager (needs strong planning + tool use). */
   canManage: boolean;
   /** Suitable as a cheap worker doing reading-heavy subtasks. */
@@ -45,6 +52,7 @@ export const MODELS: ModelInfo[] = [
     temperature: false,
     efforts: ALL_EFFORTS,
     adaptiveThinking: true,
+    dynamicServerTools: true,
     canManage: true,
     canWork: false,
     contextWindow: 1000000,
@@ -57,6 +65,7 @@ export const MODELS: ModelInfo[] = [
     temperature: false,
     efforts: ALL_EFFORTS,
     adaptiveThinking: true,
+    dynamicServerTools: true,
     canManage: true,
     canWork: false,
     contextWindow: 1000000,
@@ -70,6 +79,7 @@ export const MODELS: ModelInfo[] = [
     temperature: false,
     efforts: ALL_EFFORTS,
     adaptiveThinking: true,
+    dynamicServerTools: true,
     canManage: true,
     canWork: true,
     contextWindow: 1000000,
@@ -82,6 +92,7 @@ export const MODELS: ModelInfo[] = [
     temperature: true,
     efforts: ["low", "medium", "high", "max"],
     adaptiveThinking: true,
+    dynamicServerTools: true,
     canManage: true,
     canWork: true,
     contextWindow: 1000000,
@@ -95,15 +106,34 @@ export const MODELS: ModelInfo[] = [
     temperature: true,
     efforts: [],
     adaptiveThinking: false,
+    dynamicServerTools: false,
     canManage: false,
     canWork: true,
     contextWindow: 200000,
-    note: "Does not accept the effort parameter, and has no adaptive thinking.",
+    note:
+      "Does not accept the effort parameter, and has no adaptive thinking. " +
+      "Also needs the basic web_search/web_fetch tool variants — it does not " +
+      "support the dynamic-filtering ones.",
   },
 ];
 
 export function modelInfo(id: string): ModelInfo {
   return MODELS.find((m) => m.id === id) ?? MODELS[0]!;
+}
+
+/** The server-side tool definitions a given model will actually accept. */
+export function serverToolsFor(modelId: string): unknown[] {
+  const info = modelInfo(modelId);
+  return info.dynamicServerTools
+    ? [
+        { type: "web_search_20260209", name: "web_search" },
+        { type: "web_fetch_20260209", name: "web_fetch" },
+      ]
+    : [
+        // Older models reject the dynamic-filtering variants outright.
+        { type: "web_search_20250305", name: "web_search" },
+        { type: "web_fetch_20250910", name: "web_fetch" },
+      ];
 }
 
 /* -------------------------------------------------------------- workflows */

@@ -970,6 +970,7 @@ export function WorkspacePanel({
   canWrite,
   onAttach,
   onDetach,
+  onConnectGithub,
   onClose,
 }: {
   workspace: WorkspaceInfo;
@@ -978,10 +979,12 @@ export function WorkspacePanel({
   canWrite: boolean;
   onAttach: (allowWrites: boolean) => void;
   onDetach: () => void;
+  onConnectGithub: (repo: string) => void;
   onClose: () => void;
 }) {
   const attached = workspace.kind !== "none";
   const [allowWrites, setAllowWrites] = useState(false);
+  const [repo, setRepo] = useState("");
 
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -999,17 +1002,11 @@ export function WorkspacePanel({
         </header>
 
         <div className="modal-body">
-          {!supported ? (
-            // A button that can't work is worse than an honest message — no
-            // disabled picker here, just the reason and a way out.
-            <p className="field-note">
-              Your browser can't share a local folder. Chrome or Edge can — or
-              connect a GitHub repository instead, which works everywhere.
-            </p>
-          ) : (
-            <>
-              {!attached ? (
-                <section>
+          {!attached ? (
+            <div className="ws-options">
+              {supported ? (
+                <section className="ws-option">
+                  <h3 className="ws-option-heading">A folder on your computer</h3>
                   <p className="field-note">
                     Connect a real folder from this device. The agent can read
                     files from it and search within it.
@@ -1032,38 +1029,78 @@ export function WorkspacePanel({
                   <button className="primary" onClick={() => onAttach(allowWrites)}>
                     Choose a folder…
                   </button>
+                  <p className="field-warn ws-warning">
+                    Everyone in this room can ask the agent to read files from the
+                    folder you pick, and what it reads appears in the transcript.
+                    Pick a project folder, never your home directory.
+                  </p>
                 </section>
               ) : (
-                <section>
-                  <p className="field-note">
-                    Connected: <strong>{workspace.label}</strong> ·{" "}
-                    {workspace.online ? "online" : "offline"}
-                  </p>
-                  <p className="field-note">
-                    {canWrite ? "The agent can propose changes" : "Read-only"}
-                  </p>
-                  {!canWrite && (
-                    <p className="field-warn">
-                      Shared read-only. Disconnect and reconnect with edits
-                      allowed to change that.
-                    </p>
-                  )}
-                  <button onClick={onDetach}>Disconnect</button>
-                  {!hosting && (
-                    <p className="field-warn">
-                      This tab isn't serving files. The member who connected
-                      the folder has to have it open.
-                    </p>
-                  )}
-                </section>
+                // A button that can't work is worse than an honest message — no
+                // disabled picker here, just the reason and a way out.
+                <p className="field-note">
+                  Your browser can't share a local folder. Chrome or Edge can — or
+                  connect a GitHub repository instead, which works everywhere.
+                </p>
               )}
 
-              <p className="field-warn ws-warning">
-                Everyone in this room can ask the agent to read files from the
-                folder you pick, and what it reads appears in the transcript.
-                Pick a project folder, never your home directory.
+              <section className="ws-option">
+                <h3 className="ws-option-heading">A GitHub repository</h3>
+                <p className="field-note">
+                  Connect a repository instead of a folder. Works in any
+                  browser, and the agent's changes arrive as a pull request
+                  rather than edits on someone's machine.
+                </p>
+                <label className="field">
+                  <span className="field-label">Repository</span>
+                  <input
+                    type="text"
+                    placeholder="owner/repo"
+                    maxLength={140}
+                    value={repo}
+                    onChange={(e) => setRepo(e.target.value)}
+                  />
+                </label>
+                <p className="field-note">
+                  Add a branch with owner/repo@branch. Defaults to the
+                  repository's default branch.
+                </p>
+                <button
+                  className="primary"
+                  disabled={repo.trim().length === 0}
+                  onClick={() => onConnectGithub(repo.trim())}
+                >
+                  Connect repository
+                </button>
+                <p className="field-note">
+                  GitHub will ask you to choose which repositories to
+                  install on. Nothing else in the room can see them.
+                </p>
+              </section>
+            </div>
+          ) : (
+            <section>
+              <p className="field-note">
+                Connected: <strong>{workspace.label}</strong> ·{" "}
+                {workspace.online ? "online" : "offline"}
               </p>
-            </>
+              <p className="field-note">
+                {canWrite ? "The agent can propose changes" : "Read-only"}
+              </p>
+              {!canWrite && (
+                <p className="field-warn">
+                  Shared read-only. Disconnect and reconnect with edits
+                  allowed to change that.
+                </p>
+              )}
+              <button onClick={onDetach}>Disconnect</button>
+              {workspace.kind === "local" && !hosting && (
+                <p className="field-warn">
+                  This tab isn't serving files. The member who connected
+                  the folder has to have it open.
+                </p>
+              )}
+            </section>
           )}
         </div>
       </div>
