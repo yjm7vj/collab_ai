@@ -950,6 +950,7 @@ export function WorkspacePanel({
   workspace,
   supported,
   hosting,
+  canWrite,
   onAttach,
   onDetach,
   onClose,
@@ -957,11 +958,13 @@ export function WorkspacePanel({
   workspace: WorkspaceInfo;
   supported: boolean;
   hosting: boolean;
-  onAttach: () => void;
+  canWrite: boolean;
+  onAttach: (allowWrites: boolean) => void;
   onDetach: () => void;
   onClose: () => void;
 }) {
   const attached = workspace.kind !== "none";
+  const [allowWrites, setAllowWrites] = useState(false);
 
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -992,10 +995,24 @@ export function WorkspacePanel({
                 <section>
                   <p className="field-note">
                     Connect a real folder from this device. The agent can read
-                    files from it and search within it; it can't write, edit
-                    or remove anything yet.
+                    files from it and search within it.
                   </p>
-                  <button className="primary" onClick={onAttach}>
+                  <label className="ws-write-toggle">
+                    <input
+                      type="checkbox"
+                      checked={allowWrites}
+                      onChange={(e) => setAllowWrites(e.target.checked)}
+                    />
+                    Let the agent change files (every change still goes to a vote)
+                  </label>
+                  {allowWrites && (
+                    <p className="field-warn">
+                      Your browser will ask for permission to edit the
+                      folder. The agent can then modify real files on your
+                      machine — approved by the room, but on your disk.
+                    </p>
+                  )}
+                  <button className="primary" onClick={() => onAttach(allowWrites)}>
                     Choose a folder…
                   </button>
                 </section>
@@ -1005,6 +1022,15 @@ export function WorkspacePanel({
                     Connected: <strong>{workspace.label}</strong> ·{" "}
                     {workspace.online ? "online" : "offline"}
                   </p>
+                  <p className="field-note">
+                    {canWrite ? "The agent can propose changes" : "Read-only"}
+                  </p>
+                  {!canWrite && (
+                    <p className="field-warn">
+                      Shared read-only. Disconnect and reconnect with edits
+                      allowed to change that.
+                    </p>
+                  )}
                   <button onClick={onDetach}>Disconnect</button>
                   {!hosting && (
                     <p className="field-warn">

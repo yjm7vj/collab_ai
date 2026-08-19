@@ -192,6 +192,60 @@ export const TOOL_DEFS = [
       required: ["pattern"],
     },
   },
+  {
+    name: "write_file",
+    description:
+      "Replace the entire contents of a file in the connected workspace, " +
+      "creating it if it does not exist. Destructive — it discards whatever " +
+      "is there. Prefer edit_file for targeted changes. The room votes before " +
+      "this takes effect. Requires a connected workspace that allows writes.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "File to write, relative to the workspace root." },
+        content: { type: "string", description: "The complete new contents of the file." },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "edit_file",
+    description:
+      "Replace one exact span of text in a file in the connected workspace. " +
+      "old_text must appear exactly once — if it appears zero times or more " +
+      "than once the edit is rejected and nothing changes. The room votes " +
+      "before this takes effect. Requires a connected workspace that allows writes.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "File to edit, relative to the workspace root." },
+        old_text: {
+          type: "string",
+          description:
+            "Exact text to replace, including whitespace. Include enough " +
+            "surrounding context to make it unique.",
+        },
+        new_text: {
+          type: "string",
+          description: "Text to put in its place. Empty string deletes the span.",
+        },
+      },
+      required: ["path", "old_text", "new_text"],
+    },
+  },
+  {
+    name: "delete_file",
+    description:
+      "Delete a file from the connected workspace. Irreversible. The room " +
+      "votes before this takes effect. Requires a connected workspace that allows writes.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "File to delete, relative to the workspace root." },
+      },
+      required: ["path"],
+    },
+  },
   { type: "web_search_20260209", name: "web_search" },
   { type: "web_fetch_20260209", name: "web_fetch" },
 ];
@@ -209,7 +263,17 @@ export const MANAGER_TOOLS = [...TOOL_DEFS, DELEGATE_DEF];
  */
 // Not derived from a policy: workers are read-only unconditionally, by
 // construction, regardless of what the room's agent permission policy allows.
-const WORKER_EXCLUDED = new Set(["write_doc", "edit_doc"]);
+// Workers are read-only by construction, which is why their output never needs
+// the room's approval. Every tool that changes something is withheld — the
+// workspace writes as much as the document ones, since a worker offered a tool
+// it cannot use will spend a turn discovering that.
+const WORKER_EXCLUDED = new Set([
+  "write_doc",
+  "edit_doc",
+  "write_file",
+  "edit_file",
+  "delete_file",
+]);
 export const WORKER_TOOLS = TOOL_DEFS.filter(
   (t) => !("name" in t) || !WORKER_EXCLUDED.has(t.name as string),
 );
@@ -236,8 +300,11 @@ export function toolsFor(policy: AccessPolicy, workflow: "solo" | "manager"): un
   });
 }
 
-/** The three tools that require a live round trip to a connected workspace. */
-const WORKSPACE_TOOL_NAMES = new Set(["list_files", "read_file", "search_files"]);
+/** The tools that require a live round trip to a connected workspace. */
+const WORKSPACE_TOOL_NAMES = new Set([
+  "list_files", "read_file", "search_files",
+  "write_file", "edit_file", "delete_file",
+]);
 
 /**
  * Tool definitions for a room, given its policy AND whether a workspace is
@@ -292,6 +359,19 @@ export function summarize(name: string, input: any): string {
       const glob = String(input?.glob ?? "");
       return glob ? `Search for "${pattern}" in ${glob}` : `Search for "${pattern}"`;
     }
+    case "write_file": {
+      const path = String(input?.path ?? "");
+      const len = String(input?.content ?? "").length;
+      return `Replace ${path} (${len.toLocaleString()} characters)`;
+    }
+    case "edit_file": {
+      const path = String(input?.path ?? "");
+      const from = preview(input?.old_text);
+      const to = preview(input?.new_text);
+      return `Edit ${path}: replace ${from} with ${to}`;
+    }
+    case "delete_file":
+      return `Delete ${String(input?.path ?? "")}`;
     default:
       return `Run ${name}`;
   }

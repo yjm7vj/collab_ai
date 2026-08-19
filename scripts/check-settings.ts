@@ -17,6 +17,8 @@ import {
   approvalThreshold,
   asRole,
   can,
+  canSeeFileContents,
+  isFileContentTool,
   isVoter,
   outranks,
   resolveTools,
@@ -200,18 +202,31 @@ check("ask marks edit_doc as ask", askDecisions.edit_doc === "ask", askDecisions
 
 const autoDecisions = resolveTools({ ...basePolicy, mode: "auto" });
 check(
-  "auto allows everything",
-  Object.values(autoDecisions).every((d) => d === "allow"),
+  // delete_file is the deliberate exception: deleting someone's file is not
+  // symmetric with editing it, so auto-accept does not extend to it.
+  "auto allows everything except delete_file",
+  Object.entries(autoDecisions).every(([name, d]) => (name === "delete_file" ? d === "ask" : d === "allow")),
   autoDecisions,
 );
 
 const gatedAuto = gatedFor({ ...basePolicy, mode: "auto" });
-check("gatedFor is empty under auto", gatedAuto.size === 0, [...gatedAuto]);
+check(
+  "gatedFor under auto is exactly delete_file",
+  gatedAuto.size === 1 && gatedAuto.has("delete_file"),
+  [...gatedAuto],
+);
+check("gatedFor under auto does not include write_file", !gatedAuto.has("write_file"), [...gatedAuto]);
+check("gatedFor under auto does not include edit_file", !gatedAuto.has("edit_file"), [...gatedAuto]);
 
 const gatedAsk = gatedFor({ ...basePolicy, mode: "ask" });
 check(
-  "gatedFor under ask is exactly write_doc and edit_doc",
-  gatedAsk.size === 2 && gatedAsk.has("write_doc") && gatedAsk.has("edit_doc"),
+  "gatedFor under ask is exactly write_doc, edit_doc, write_file, edit_file, delete_file",
+  gatedAsk.size === 5 &&
+    gatedAsk.has("write_doc") &&
+    gatedAsk.has("edit_doc") &&
+    gatedAsk.has("write_file") &&
+    gatedAsk.has("edit_file") &&
+    gatedAsk.has("delete_file"),
   [...gatedAsk],
 );
 
@@ -346,6 +361,96 @@ check(
   FILE_TOOLS.every((n) => composedNames.includes(n)),
   composedNames,
 );
+
+console.log("\nworkspace write tools");
+
+const WRITE_TOOLS = ["write_file", "edit_file", "delete_file"] as const;
+
+check(
+  "TOOL_NAMES contains the three write tools",
+  WRITE_TOOLS.every((n) => (TOOL_NAMES as readonly string[]).includes(n)),
+  TOOL_NAMES,
+);
+
+const readOnlyWriteDecisions = resolveTools({ ...basePolicy, mode: "read_only" });
+check(
+  "read_only denies all three write tools",
+  WRITE_TOOLS.every((n) => readOnlyWriteDecisions[n] === "deny"),
+  WRITE_TOOLS.map((n) => [n, readOnlyWriteDecisions[n]]),
+);
+
+const askWriteDecisions = resolveTools({ ...basePolicy, mode: "ask" });
+check(
+  "ask marks all three write tools as ask",
+  WRITE_TOOLS.every((n) => askWriteDecisions[n] === "ask"),
+  WRITE_TOOLS.map((n) => [n, askWriteDecisions[n]]),
+);
+
+const autoWriteDecisions = resolveTools({ ...basePolicy, mode: "auto" });
+check(
+  "auto allows write_file and edit_file",
+  autoWriteDecisions.write_file === "allow" && autoWriteDecisions.edit_file === "allow",
+  [autoWriteDecisions.write_file, autoWriteDecisions.edit_file],
+);
+// Deliberate asymmetry: editing is reversible with another edit, deleting is
+// not, so delete_file keeps requiring a vote even under auto-accept.
+check(
+  "auto still asks before delete_file",
+  autoWriteDecisions.delete_file === "ask",
+  autoWriteDecisions.delete_file,
+);
+
+const gatedForAsk = gatedFor({ ...basePolicy, mode: "ask" });
+check(
+  "gatedFor under ask includes all three write tools",
+  WRITE_TOOLS.every((n) => gatedForAsk.has(n)),
+  [...gatedForAsk],
+);
+
+const gatedForAuto = gatedFor({ ...basePolicy, mode: "auto" });
+check("gatedFor under auto includes delete_file", gatedForAuto.has("delete_file"), [...gatedForAuto]);
+check("gatedFor under auto does not include write_file", !gatedForAuto.has("write_file"), [...gatedForAuto]);
+
+const offlineWriteTools = toolsForRoom({ ...basePolicy, mode: "ask" }, "solo", false) as { name?: string }[];
+const offlineWriteNames = offlineWriteTools.map((t) => t.name);
+check(
+  "toolsForRoom(policy, 'solo', false) contains none of the write tools",
+  WRITE_TOOLS.every((n) => !offlineWriteNames.includes(n)),
+  offlineWriteNames,
+);
+
+const onlineAskWriteTools = toolsForRoom({ ...basePolicy, mode: "ask" }, "solo", true) as { name?: string }[];
+const onlineAskWriteNames = onlineAskWriteTools.map((t) => t.name);
+check(
+  "toolsForRoom(policy, 'solo', true) under ask contains all three write tools",
+  WRITE_TOOLS.every((n) => onlineAskWriteNames.includes(n)),
+  onlineAskWriteNames,
+);
+
+const readOnlyWriteTools = toolsForRoom({ ...basePolicy, mode: "read_only" }, "solo", true) as { name?: string }[];
+const readOnlyWriteNames = readOnlyWriteTools.map((t) => t.name);
+check(
+  // Denied tools are removed from the list, not gated behind a vote — so
+  // read_only withholds them even though a workspace is connected.
+  "toolsForRoom under read_only contains none of the write tools",
+  WRITE_TOOLS.every((n) => !readOnlyWriteNames.includes(n)),
+  readOnlyWriteNames,
+);
+
+console.log("\nfile content visibility");
+
+check("canSeeFileContents(owner) is true", canSeeFileContents("owner") === true);
+check("canSeeFileContents(admin) is true", canSeeFileContents("admin") === true);
+check("canSeeFileContents(editor) is false", canSeeFileContents("editor") === false);
+check("canSeeFileContents(viewer) is false", canSeeFileContents("viewer") === false);
+
+check("isFileContentTool(read_file) is true", isFileContentTool("read_file") === true);
+check("isFileContentTool(search_files) is true", isFileContentTool("search_files") === true);
+check("isFileContentTool(write_file) is true", isFileContentTool("write_file") === true);
+check("isFileContentTool(edit_file) is true", isFileContentTool("edit_file") === true);
+check("isFileContentTool(list_files) is false", isFileContentTool("list_files") === false);
+check("isFileContentTool(delete_file) is false", isFileContentTool("delete_file") === false);
+check("isFileContentTool(read_doc) is false", isFileContentTool("read_doc") === false);
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);
