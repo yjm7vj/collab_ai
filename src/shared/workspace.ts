@@ -262,9 +262,13 @@ export type FsRequest =
    * a secret instead of reading the file holding it.
    */
   | { op: "search"; pattern: string; glob: string; max: number; deny: string[] }
-  | { op: "write"; path: string; content: string }
-  | { op: "edit"; path: string; oldText: string; newText: string }
-  | { op: "remove"; path: string };
+  // Writes carry the deny list too. The server refuses a denied write before
+  // dispatch, but the provider re-checks: it runs on someone else's machine
+  // against their real files, and "the server already checked" is exactly the
+  // assumption that turns one server bug into an overwritten private key.
+  | { op: "write"; path: string; content: string; deny: string[] }
+  | { op: "edit"; path: string; oldText: string; newText: string; deny: string[] }
+  | { op: "remove"; path: string; deny: string[] };
 
 export type FsResponse = { ok: true; data: string } | { ok: false; error: string };
 
@@ -325,6 +329,15 @@ export function clampRequest(req: FsRequest): FsRequest {
         max: clampInt(req.max, 1, FS_LIMITS.searchMatches, FS_LIMITS.searchMatches),
         // Never let a malformed frame empty this — an absent deny list would
         // mean a search that reads everything.
+        deny: Array.isArray(req.deny) ? req.deny.filter((g) => typeof g === "string") : [...DEFAULT_DENY],
+      };
+    case "write":
+    case "edit":
+    case "remove":
+      // Same fallback rule as search and list: absent means the full default
+      // list, never an empty one.
+      return {
+        ...req,
         deny: Array.isArray(req.deny) ? req.deny.filter((g) => typeof g === "string") : [...DEFAULT_DENY],
       };
     default:

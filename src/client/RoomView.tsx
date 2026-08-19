@@ -30,7 +30,9 @@ import {
 import { SettingsPanel } from "./Settings";
 import {
   ensureReadPermission,
+  ensureWritePermission,
   forgetHandle,
+  hasWritePermission,
   isFileAccessSupported,
   loadHandle,
   performFsRequest,
@@ -76,6 +78,10 @@ export function RoomView({
   // Whether this tab can currently answer fs.req itself, i.e. whether rootRef
   // is populated and its permission is (still) granted.
   const [wsReady, setWsReady] = useState(false);
+  // Whether the attached folder currently holds read-write permission. Purely
+  // descriptive — the server, not this flag, decides whether a write is ever
+  // attempted; it only shapes what the workspace panel tells the user.
+  const [canWrite, setCanWrite] = useState(false);
 
   // These hide controls the server would refuse anyway; the server is the
   // boundary, this is only so nobody clicks into a refusal.
@@ -248,22 +254,33 @@ export function RoomView({
       if (!granted || cancelled) return;
       rootRef.current = handle;
       setWsReady(true);
+      // Queried, never requested: restoring a session must never itself
+      // trigger a permission prompt, so this only reads whatever write
+      // permission already happens to be granted.
+      const writable = await hasWritePermission(handle);
+      if (!cancelled) setCanWrite(writable);
     })();
     return () => {
       cancelled = true;
     };
   }, [roomId]);
 
-  const attachWorkspace = useCallback(async () => {
-    const handle = await pickDirectory();
-    if (!handle) return;
-    const granted = await ensureReadPermission(handle);
-    if (!granted) return;
-    await saveHandle(roomId, handle);
-    rootRef.current = handle;
-    setWsReady(true);
-    send({ t: "workspace.attach", kind: "local", label: handle.name });
-  }, [roomId, send]);
+  const attachWorkspace = useCallback(
+    async (allowWrites: boolean) => {
+      const handle = await pickDirectory(allowWrites ? "readwrite" : "read");
+      if (!handle) return;
+      const granted = allowWrites
+        ? await ensureWritePermission(handle)
+        : await ensureReadPermission(handle);
+      if (!granted) return;
+      await saveHandle(roomId, handle);
+      rootRef.current = handle;
+      setWsReady(true);
+      setCanWrite(allowWrites);
+      send({ t: "workspace.attach", kind: "local", label: handle.name });
+    },
+    [roomId, send],
+  );
 
   const detachWorkspace = useCallback(async () => {
     await forgetHandle(roomId);
@@ -454,6 +471,7 @@ export function RoomView({
           workspace={state.workspace}
           supported={isFileAccessSupported()}
           hosting={wsReady}
+          canWrite={canWrite}
           onAttach={attachWorkspace}
           onDetach={detachWorkspace}
           onClose={() => setShowWorkspace(false)}

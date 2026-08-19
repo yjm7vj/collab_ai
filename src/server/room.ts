@@ -1044,8 +1044,7 @@ export class Room extends Agent<Env, RoomState> {
     // filename is itself worth protecting. Injected here rather than taken from
     // the model, which must not get a say in what it may not see.
     const denyGlobs = [...this.#policy().paths.deny];
-    const withDeny: FsRequest =
-      req.op === "search" || req.op === "list" ? { ...req, deny: denyGlobs } : req;
+    const withDeny: FsRequest = { ...req, deny: denyGlobs } as FsRequest;
     const clamped = clampRequest(withDeny);
 
     // "search" has no single path to check — the glob is applied on the host
@@ -1061,12 +1060,11 @@ export class Room extends Agent<Env, RoomState> {
         return { ok: false, error: "The room's rules don't allow access to that path." };
       }
       // "ask" on a read is treated as allowed — reads are governed by deny,
-      // not by votes, so a per-file vote would be unusable. A future phase
-      // makes "ask" on a write mean a vote instead of an outright refusal;
-      // for now writes of any decision besides "deny" are simply not enabled.
-      if (write) {
-        return { ok: false, error: "Writing to the workspace isn't enabled yet." };
-      }
+      // not by votes, so a per-file vote would be unusable. Writes are
+      // different: a write reaching this point has already been approved by
+      // the room, because gating happens before execution — in `#advance`
+      // and `#settleIfDecided` — not here. By the time a write's path clears
+      // the "deny" check above, `#fs` just performs it.
     }
 
     // A GitHub workspace has no host socket — it's served straight from the
@@ -1133,7 +1131,10 @@ export class Room extends Agent<Env, RoomState> {
    * fields again to `FS_LIMITS`, so this only needs to supply sane defaults
    * for what the model omitted.
    */
-  #fsRequestFor(name: "list_files" | "read_file" | "search_files", input: unknown): FsRequest {
+  #fsRequestFor(
+    name: "list_files" | "read_file" | "search_files" | "write_file" | "edit_file" | "delete_file",
+    input: unknown,
+  ): FsRequest {
     const i = (input ?? {}) as Record<string, unknown>;
     const str = (v: unknown, fallback: string) => (typeof v === "string" ? v : fallback);
     const num = (v: unknown, fallback: number) =>
@@ -1160,6 +1161,18 @@ export class Room extends Agent<Env, RoomState> {
           // globs, so nothing the model puts here can survive.
           deny: [],
         };
+      case "write_file":
+        return { op: "write", path: str(i.path, ""), content: str(i.content, ""), deny: [] };
+      case "edit_file":
+        return {
+          op: "edit",
+          path: str(i.path, ""),
+          oldText: str(i.old_text, ""),
+          newText: str(i.new_text, ""),
+          deny: [],
+        };
+      case "delete_file":
+        return { op: "remove", path: str(i.path, ""), deny: [] };
     }
   }
 
@@ -1574,7 +1587,16 @@ export class Room extends Agent<Env, RoomState> {
             } else if (
               call.name === "list_files" ||
               call.name === "read_file" ||
-              call.name === "search_files"
+              call.name === "search_files" ||
+              // Writes reach here only when the policy did NOT gate them — the
+              // gated branch above catches those and parks them on a vote. In
+              // auto-accept mode a write is ungated and must execute here; if
+              // this listed only the read tools it would fall through to
+              // execute(), which knows nothing about workspaces, and every
+              // auto-mode write would come back as "Unknown tool".
+              call.name === "write_file" ||
+              call.name === "edit_file" ||
+              call.name === "delete_file"
             ) {
               const res = await this.#fs(this.#fsRequestFor(call.name, call.input));
               outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
@@ -1654,14 +1676,23 @@ export class Room extends Agent<Env, RoomState> {
     const results: ToolResultBlockParam[] = [...turn.carried];
     const docs = this.#docBuffer();
     for (const { p, approved } of verdicts) {
-      const outcome = approved
-        ? execute(p.name, p.input, docs)
-        : {
-            ok: false,
-            text:
-              "The room voted against this action, so it did not run. Do not " +
-              "retry the same call — ask the room what they would prefer.",
-          };
+      let outcome: ToolOutcome;
+      if (!approved) {
+        outcome = {
+          ok: false,
+          text:
+            "The room voted against this action, so it did not run. Do not " +
+            "retry the same call — ask the room what they would prefer.",
+        };
+      } else if (p.name === "write_file" || p.name === "edit_file" || p.name === "delete_file") {
+        // These are workspace tools, not document tools: they have no
+        // synchronous form, so approval resolves them with a round trip to
+        // #fs (and, through it, the workspace host) rather than execute().
+        const res = await this.#fs(this.#fsRequestFor(p.name, p.input));
+        outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
+      } else {
+        outcome = execute(p.name, p.input, docs);
+      }
 
       results.push({
         type: "tool_result",

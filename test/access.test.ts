@@ -183,11 +183,29 @@ describe("websocket token gate", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects a connection with a token whose final character was tampered with, 401", async () => {
+  /**
+   * Tampers with the MIDDLE of the signature, deliberately, not the end.
+   *
+   * An HMAC-SHA-256 signature is 32 bytes, which base64url-encodes to 43
+   * characters — and that final character carries only 2 significant bits.
+   * Three other characters decode to the identical 32 bytes, so altering the
+   * last character is a no-op about 5% of the time: the "tampered" token is
+   * byte-for-byte the original, verifies correctly, and the connection is
+   * accepted. That is exactly what this test is supposed to catch, so an
+   * earlier version of it failed intermittently while looking merely flaky.
+   *
+   * Every character away from the end carries all 6 bits, so changing one
+   * always changes the decoded bytes.
+   */
+  it("rejects a connection with a tampered signature, 401", async () => {
     const { roomId, token } = await newOwnedRoom();
-    const tamperedLastChar = token.at(-1) === "a" ? "b" : "a";
-    const tampered = token.slice(0, -1) + tamperedLastChar;
+    const dot = token.indexOf(".");
+    // Halfway into the signature segment: no padding bits, no ambiguity.
+    const target = dot + 1 + Math.floor((token.length - dot - 1) / 2);
+    const swapped = token[target] === "A" ? "B" : "A";
+    const tampered = token.slice(0, target) + swapped + token.slice(target + 1);
 
+    expect(tampered).not.toBe(token);
     const res = await connect(roomId, tampered);
     expect(res.status).toBe(401);
   });

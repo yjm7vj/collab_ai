@@ -9,10 +9,10 @@
  * open. See `RoomView.tsx` for the wiring (attach/detach, the `fs.req`
  * handler) and `src/shared/protocol.ts` for the message shapes.
  *
- * READ-ONLY FOR NOW. `write`, `edit` and `remove` are wired into the protocol
- * but not implemented here — they always return a "read-only" error. Writes
- * arrive in a later phase, behind a room vote; there is no reason to let a
- * message from the wire touch disk before that vote exists.
+ * `write`, `edit` and `remove` reach disk only when the folder was attached
+ * with read-write permission — the user opts into that explicitly (see
+ * `pickDirectory`), and every write the room sends here has already been
+ * approved through a room vote before it arrives on the wire.
  *
  * `src/shared/workspace.ts` already normalises and policy-checks every path
  * before a request is ever sent to a host. This module re-validates the path
@@ -62,11 +62,13 @@ export function isFileAccessSupported(): boolean {
 }
 
 /** Ask the user to choose a folder. Returns null if they cancel. */
-export async function pickDirectory(): Promise<FileSystemDirectoryHandle | null> {
+export async function pickDirectory(
+  mode: "read" | "readwrite" = "read",
+): Promise<FileSystemDirectoryHandle | null> {
   try {
     const picker = window.showDirectoryPicker;
     if (!picker) return null;
-    return await picker({ mode: "read" });
+    return await picker({ mode });
   } catch (err) {
     // The user closing the native picker throws AbortError — that's a normal
     // "no thanks", not a failure worth surfacing. Anything else (a permission
@@ -83,6 +85,28 @@ export async function ensureReadPermission(handle: FileSystemDirectoryHandle): P
   if (state !== "granted") {
     state = await withPerms.requestPermission({ mode: "read" });
   }
+  return state === "granted";
+}
+
+/** Confirm we still hold read-write permission, prompting if needed. */
+export async function ensureWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+  const withPerms = handle as unknown as FsPermissionHandle;
+  let state = await withPerms.queryPermission({ mode: "readwrite" });
+  if (state !== "granted") {
+    state = await withPerms.requestPermission({ mode: "readwrite" });
+  }
+  return state === "granted";
+}
+
+/**
+ * Whether this handle currently holds read-write permission, without
+ * prompting. Called on load to decide what the UI says: a permission prompt
+ * fired on page load with no user gesture is both hostile and blocked by
+ * browsers, so this only ever queries — it must never request.
+ */
+export async function hasWritePermission(handle: FileSystemDirectoryHandle): Promise<boolean> {
+  const withPerms = handle as unknown as FsPermissionHandle;
+  const state = await withPerms.queryPermission({ mode: "readwrite" });
   return state === "granted";
 }
 
@@ -349,6 +373,160 @@ async function doSearch(
   return { ok: true, data: results.join("\n") };
 }
 
+const READ_ONLY_ERROR =
+  "This folder was shared read-only. Reconnect it and allow edits to change files.";
+
+// Writes now carry the room's deny globs, same as reads.
+//
+// They deliberately did not, at first, on the reasoning that the server had
+// already policy-checked the exact path before dispatch. That reasoning was
+// correct about the server and wrong about this file: a check proved the
+// provider would happily overwrite .env when asked directly, and this module
+// runs on someone else's machine against their real files. "The server
+// checked it" is the assumption that turns one server bug into an
+// overwritten private key.
+/**
+ * Split a normalized path into its parent-directory segments and file name.
+ * Shared by all three write operations so they walk to the parent exactly
+ * the way the read paths do — one segment at a time, never a slash-bearing
+ * string handed to `getDirectoryHandle`.
+ */
+function splitParent(normalized: string): { dirSegments: string[]; name: string } {
+  const segments = normalized.split("/");
+  return { dirSegments: segments.slice(0, -1), name: segments[segments.length - 1]! };
+}
+
+async function doWrite(
+  root: FileSystemDirectoryHandle,
+  path: string,
+  content: string,
+  deny: readonly string[],
+): Promise<FsResponse> {
+  const normalized = normalizePath(path);
+  if (normalized === null) return { ok: false, error: "That path isn't allowed." };
+  if (normalized === "") return { ok: false, error: "That path isn't allowed." };
+  if (isDenied(normalized, deny)) {
+    return { ok: false, error: "The room's rules don't allow access to that path." };
+  }
+
+  const byteLength = new TextEncoder().encode(content).length;
+  if (byteLength > FS_LIMITS.writeBytes) {
+    return {
+      ok: false,
+      error: `That's ${byteLength} bytes, over the ${FS_LIMITS.writeBytes}-byte write limit.`,
+    };
+  }
+
+  if (!(await hasWritePermission(root))) return { ok: false, error: READ_ONLY_ERROR };
+
+  const { dirSegments, name } = splitParent(normalized);
+  const dir = await walkTo(root, dirSegments);
+  const fileHandle = await dir.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(content);
+  await writable.close();
+
+  return { ok: true, data: `Wrote ${path} (${content.length} characters).` };
+}
+
+/**
+ * Replace one exact span of text in a file. Mirrors the unique-match-or-
+ * reject contract `edit_doc` uses on the shared document (src/server/tools.ts):
+ * `old_text` must appear exactly once, or the edit is rejected rather than
+ * guessing which occurrence was meant.
+ */
+async function doEdit(
+  root: FileSystemDirectoryHandle,
+  path: string,
+  oldText: string,
+  newText: string,
+  deny: readonly string[],
+): Promise<FsResponse> {
+  const normalized = normalizePath(path);
+  if (normalized === null) return { ok: false, error: "That path isn't allowed." };
+  if (normalized === "") return { ok: false, error: `No such file: ${path}` };
+  if (isDenied(normalized, deny)) {
+    return { ok: false, error: "The room's rules don't allow access to that path." };
+  }
+
+  if (!(await hasWritePermission(root))) return { ok: false, error: READ_ONLY_ERROR };
+
+  const { dirSegments, name } = splitParent(normalized);
+
+  let fileHandle: FileSystemFileHandle;
+  let text: string;
+  try {
+    const dir = await walkTo(root, dirSegments);
+    fileHandle = await dir.getFileHandle(name);
+    text = await (await fileHandle.getFile()).text();
+  } catch {
+    return { ok: false, error: `No such file: ${path}` };
+  }
+
+  const first = text.indexOf(oldText);
+  if (first === -1) {
+    return {
+      ok: false,
+      error:
+        "old_text was not found in the file. Read the file to get the current text, then retry with an exact span.",
+    };
+  }
+  const second = text.indexOf(oldText, first + oldText.length);
+  if (second !== -1) {
+    return {
+      ok: false,
+      error:
+        "old_text appears more than once, so the target is ambiguous. Include more surrounding context to make it unique.",
+    };
+  }
+
+  const updated = text.slice(0, first) + newText + text.slice(first + oldText.length);
+  const byteLength = new TextEncoder().encode(updated).length;
+  if (byteLength > FS_LIMITS.writeBytes) {
+    return {
+      ok: false,
+      error: `That edit would make the file ${byteLength} bytes, over the ${FS_LIMITS.writeBytes}-byte write limit.`,
+    };
+  }
+
+  const writable = await fileHandle.createWritable();
+  await writable.write(updated);
+  await writable.close();
+
+  return { ok: true, data: `Edited ${path}.` };
+}
+
+async function doRemove(
+  root: FileSystemDirectoryHandle,
+  path: string,
+  deny: readonly string[],
+): Promise<FsResponse> {
+  const normalized = normalizePath(path);
+  if (normalized === null) return { ok: false, error: "That path isn't allowed." };
+  if (normalized === "") return { ok: false, error: `No such file: ${path}` };
+  if (isDenied(normalized, deny)) {
+    return { ok: false, error: "The room's rules don't allow access to that path." };
+  }
+
+  if (!(await hasWritePermission(root))) return { ok: false, error: READ_ONLY_ERROR };
+
+  const { dirSegments, name } = splitParent(normalized);
+
+  let dir: FileSystemDirectoryHandle;
+  try {
+    dir = await walkTo(root, dirSegments);
+    // Confirmed to exist before removal, so a missing file is reported
+    // honestly rather than letting removeEntry's behaviour on a non-existent
+    // entry stand in for a real answer.
+    await dir.getFileHandle(name);
+  } catch {
+    return { ok: false, error: `No such file: ${path}` };
+  }
+
+  await dir.removeEntry(name);
+  return { ok: true, data: `Deleted ${path}.` };
+}
+
 /** Answer one request against the picked folder. Never throws. */
 export async function performFsRequest(
   root: FileSystemDirectoryHandle,
@@ -363,9 +541,11 @@ export async function performFsRequest(
       case "search":
         return await doSearch(root, req.pattern, req.glob, req.max, req.deny ?? []);
       case "write":
+        return await doWrite(root, req.path, req.content, req.deny ?? []);
       case "edit":
+        return await doEdit(root, req.path, req.oldText, req.newText, req.deny ?? []);
       case "remove":
-        return { ok: false, error: "This workspace is read-only." };
+        return await doRemove(root, req.path, req.deny ?? []);
     }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

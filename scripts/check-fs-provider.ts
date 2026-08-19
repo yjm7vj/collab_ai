@@ -11,7 +11,7 @@
  *
  * Run: npm run check:fs
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { performFsRequest } from "../src/client/workspace";
@@ -35,24 +35,49 @@ function makeFixture(): string {
 const CANARY = "CANARY-MUST-NOT-APPEAR";
 const ROOT = makeFixture();
 
-function mockDir(abs: string): any {
+/**
+ * `writable` controls what queryPermission reports.
+ *
+ * This matters more than it looks. An earlier version of this mock had no
+ * permission methods at all, so the provider's `hasWritePermission` call threw
+ * a TypeError, the outer catch turned it into a generic failure, and the
+ * "write refused" assertion passed — while testing nothing but the mock's own
+ * incompleteness. A read-only workspace and a broken handle must not be
+ * indistinguishable to this suite.
+ */
+function mockDir(abs: string, writable: boolean): any {
   return {
     kind: "directory",
+    async queryPermission(d?: { mode?: string }) {
+      if (d?.mode === "readwrite") return writable ? "granted" : "denied";
+      return "granted";
+    },
+    async requestPermission(d?: { mode?: string }) {
+      if (d?.mode === "readwrite") return writable ? "granted" : "denied";
+      return "granted";
+    },
     async *entries() {
       for (const name of readdirSync(abs)) {
         const p = join(abs, name);
-        yield [name, statSync(p).isDirectory() ? mockDir(p) : mockFile(p)] as const;
+        yield [
+          name,
+          statSync(p).isDirectory() ? mockDir(p, writable) : mockFile(p),
+        ] as const;
       }
     },
     async getDirectoryHandle(name: string) {
       const p = join(abs, name);
       if (!statSync(p).isDirectory()) throw new Error("not a directory");
-      return mockDir(p);
+      return mockDir(p, writable);
     },
-    async getFileHandle(name: string) {
+    async getFileHandle(name: string, opts?: { create?: boolean }) {
       const p = join(abs, name);
+      if (opts?.create && !existsSync(p)) writeFileSync(p, "");
       if (!statSync(p).isFile()) throw new Error("not a file");
       return mockFile(p);
+    },
+    async removeEntry(name: string) {
+      rmSync(join(abs, name), { force: true });
     },
   };
 }
@@ -69,10 +94,18 @@ function mockFile(abs: string): any {
       });
       return mk(buf);
     },
+    async createWritable() {
+      let acc = "";
+      return {
+        async write(chunk: unknown) { acc += String(chunk); },
+        async close() { writeFileSync(abs, acc); },
+      };
+    },
   };
 }
 
-const root = mockDir(ROOT);
+const root = mockDir(ROOT, false);
+const writableRoot = mockDir(ROOT, true);
 const DENY = [...DEFAULT_PATH_POLICY.deny];
 const SECRETS = [CANARY];
 
@@ -127,9 +160,59 @@ async function main() {
     must(`read "${p}" refused`, r.ok === false, r);
   }
 
-  console.log("\nwrites are not enabled in this phase");
-  const w = await performFsRequest(root, { op: "write", path: "src/index.ts", content: "x" });
-  must("write refused", w.ok === false, w);
+  console.log("\nwrites on a read-only workspace");
+  const ro = await performFsRequest(root, { op: "write", path: "src/index.ts", content: "x", deny: DENY });
+  must("refused", ro.ok === false, ro);
+  // The exact message matters: it distinguishes "you shared this read-only"
+  // from any other failure, which is the whole point of the earlier fix.
+  must(
+    "refused for the right reason, not a broken handle",
+    ro.ok === false && ro.error.includes("read-only"),
+    ro,
+  );
+  must(
+    "and the file on disk is untouched",
+    readFileSync(join(ROOT, "src/index.ts"), "utf8").includes("greet"),
+  );
+
+  console.log("\nwrites on a writable workspace");
+  const okw = await performFsRequest(writableRoot, {
+    op: "write", path: "src/new.ts", content: "export const added = 1;\n",
+  });
+  must("write succeeds", okw.ok === true, okw);
+  must(
+    "and the bytes actually reached disk",
+    existsSync(join(ROOT, "src/new.ts")) &&
+      readFileSync(join(ROOT, "src/new.ts"), "utf8").includes("added"),
+  );
+
+  const ed = await performFsRequest(writableRoot, {
+    op: "edit", path: "src/new.ts", oldText: "added = 1", newText: "added = 2", deny: DENY,
+  });
+  must("edit applies a unique span", ed.ok === true, ed);
+  must(
+    "edit changed the file",
+    readFileSync(join(ROOT, "src/new.ts"), "utf8").includes("added = 2"),
+  );
+
+  const missing = await performFsRequest(writableRoot, {
+    op: "edit", path: "src/new.ts", oldText: "not-present-anywhere", newText: "x", deny: DENY,
+  });
+  must("edit refuses a span that is not there", missing.ok === false, missing);
+
+  const rm = await performFsRequest(writableRoot, { op: "remove", path: "src/new.ts", deny: DENY });
+  must("remove succeeds", rm.ok === true, rm);
+  must("and the file is gone", !existsSync(join(ROOT, "src/new.ts")));
+
+  console.log("\nwrites cannot reach a denied path even when writable");
+  const denied = await performFsRequest(writableRoot, {
+    op: "write", path: ".env", content: "OWNED=1", deny: DENY,
+  });
+  must("write to .env refused", denied.ok === false, denied);
+  must(
+    "and .env still holds its original contents",
+    readFileSync(join(ROOT, ".env"), "utf8").includes(CANARY),
+  );
 
   rmSync(ROOT, { recursive: true, force: true });
   console.log(bad === 0 ? "\nno leaks found\n" : `\n${bad} LEAK(S)\n`);

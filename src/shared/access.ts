@@ -83,11 +83,13 @@ export type ToolDecision = "allow" | "ask" | "deny";
 
 export type ToolName =
   | "read_doc" | "write_doc" | "edit_doc" | "delegate" | "web_search" | "web_fetch"
-  | "list_files" | "read_file" | "search_files";
+  | "list_files" | "read_file" | "search_files"
+  | "write_file" | "edit_file" | "delete_file";
 
 export const TOOL_NAMES: readonly ToolName[] = [
   "read_doc", "write_doc", "edit_doc", "delegate", "web_search", "web_fetch",
   "list_files", "read_file", "search_files",
+  "write_file", "edit_file", "delete_file",
 ] as const;
 
 /**
@@ -116,6 +118,7 @@ const ALL_ALLOW: Record<ToolName, ToolDecision> = {
   read_doc: "allow", write_doc: "allow", edit_doc: "allow",
   delegate: "allow", web_search: "allow", web_fetch: "allow",
   list_files: "allow", read_file: "allow", search_files: "allow",
+  write_file: "allow", edit_file: "allow", delete_file: "allow",
 };
 
 export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<ToolName, ToolDecision>> = {
@@ -123,11 +126,26 @@ export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<Tool
   // withheld entirely, so the agent proposes in prose instead of burning turns
   // on calls it will never be allowed to make. The file tools are reads, and
   // reading is exactly what read-only mode is for, so all three stay "allow".
-  read_only: { ...ALL_ALLOW, write_doc: "deny", edit_doc: "deny" },
+  // The workspace write tools are withheld the same way — read-only means
+  // those tools are not offered at all, which is the entire point of the mode.
+  read_only: {
+    ...ALL_ALLOW,
+    write_doc: "deny", edit_doc: "deny",
+    write_file: "deny", edit_file: "deny", delete_file: "deny",
+  },
   // A vote per file read would be unusable — the path policy is the real
   // control for reads, not the vote — so the file tools stay "allow" here too.
-  ask: { ...ALL_ALLOW, write_doc: "ask", edit_doc: "ask" },
-  auto: { ...ALL_ALLOW },
+  ask: {
+    ...ALL_ALLOW,
+    write_doc: "ask", edit_doc: "ask",
+    write_file: "ask", edit_file: "ask", delete_file: "ask",
+  },
+  // Auto-accept skips the vote for routine writes so the agent doesn't stall
+  // out the flow, but deleting someone's file is not symmetric with editing
+  // it: an edit can be undone by another edit, a delete cannot. So delete_file
+  // stays "ask" even in auto — auto-accept is about not interrupting a flow,
+  // not about removing the last check on an irreversible action.
+  auto: { ...ALL_ALLOW, delete_file: "ask" },
 };
 
 export const DEFAULT_POLICY: AccessPolicy = {
@@ -204,4 +222,24 @@ export function describePolicy(policy: AccessPolicy): string {
   if (gated.length) parts.push(`votes on ${gated.join(", ")}`);
   if (denied.length) parts.push(`no ${denied.join(", ")}`);
   return parts.join(" · ");
+}
+
+/**
+ * Whether a role may see file contents pulled from a workspace.
+ *
+ * A room's transcript is shared, but a workspace is one person's disk or one
+ * team's repository. Owners and admins see what the agent read; editors and
+ * viewers see that a file was read, and its path, but not what was in it.
+ */
+export function canSeeFileContents(role: Role): boolean {
+  return role === "owner" || role === "admin";
+}
+
+/** Tools whose results contain workspace file contents. */
+export const FILE_CONTENT_TOOLS: readonly ToolName[] = [
+  "read_file", "search_files", "write_file", "edit_file",
+] as const;
+
+export function isFileContentTool(name: string): boolean {
+  return (FILE_CONTENT_TOOLS as readonly string[]).includes(name);
 }

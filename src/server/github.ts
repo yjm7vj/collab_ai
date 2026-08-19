@@ -63,6 +63,28 @@ function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+/** Encode raw bytes as standard (non-url-safe) base64, the form the contents API wants. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
+}
+
+/**
+ * UTF-8 encode text before base64-encoding it.
+ *
+ * `btoa` walks a string one UTF-16 code unit at a time and assumes every
+ * code unit fits in a byte — anything outside Latin-1 (an emoji, an
+ * accented letter) either throws or comes out silently mangled. Routing the
+ * text through `TextEncoder` first guarantees the bytes handed to `btoa`
+ * are always in range, so committed file content round-trips exactly.
+ */
+function utf8ToBase64(text: string): string {
+  return bytesToBase64(new TextEncoder().encode(text));
+}
+
 /**
  * Convert a PEM private key to the raw PKCS#8 bytes WebCrypto needs.
  *
@@ -213,6 +235,277 @@ export function parseRepoRef(input: unknown): RepoRef | null {
   return { owner, repo, ref };
 }
 
+function ghHeaders(token: string): HeadersInit {
+  return {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${token}`,
+    // GitHub rejects requests sent with no User-Agent header.
+    "User-Agent": "collab-ai-github-provider",
+  };
+}
+
+/** Extract GitHub's `message` field from an error response body, if present. */
+async function ghErrorMessage(res: Response): Promise<string> {
+  let message = `GitHub returned ${res.status}`;
+  try {
+    const body = (await res.json()) as { message?: string };
+    if (body && typeof body.message === "string") {
+      message = `GitHub returned ${res.status}: ${body.message}`;
+    }
+  } catch {
+    // Non-JSON error body; the status-only message stands.
+  }
+  return message;
+}
+
+/** A branch name in a URL *path* keeps its slashes as segments (unlike a query value). */
+function encodeBranchPathSegments(branch: string): string {
+  return branch.split("/").map(encodeURIComponent).join("/");
+}
+
+function encodeContentsPath(path: string): string {
+  return path
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map(encodeURIComponent)
+    .join("/");
+}
+
+function repoUrl(ref: RepoRef, suffix: string): string {
+  return `https://api.github.com/repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repo)}${suffix}`;
+}
+
+/**
+ * Resolve "HEAD" to the repository's actual default branch name.
+ *
+ * A repo's default branch is not always `main` — plenty of older
+ * repositories still use `master`, or something else entirely — so assuming
+ * it is would silently target the wrong branch. When the ref is already a
+ * concrete branch name this is a no-op with no network call.
+ */
+async function resolveBranchName(
+  token: string,
+  ref: RepoRef,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; branch: string } | { ok: false; error: string }> {
+  if (ref.ref !== "HEAD") return { ok: true, branch: ref.ref };
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const res = await doFetch(repoUrl(ref, ""), { headers: ghHeaders(token) });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+    const body = (await res.json()) as { default_branch?: string };
+    if (typeof body.default_branch !== "string") {
+      return { ok: false, error: "GitHub did not return a default branch for this repository." };
+    }
+    return { ok: true, branch: body.default_branch };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to resolve the repository's default branch.",
+    };
+  }
+}
+
+/** The commit a ref currently points at, and (implicitly) the tree it carries. */
+export async function refHead(
+  token: string,
+  ref: RepoRef,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const branchRes = await resolveBranchName(token, ref, fetchImpl);
+    if (!branchRes.ok) return branchRes;
+
+    const res = await doFetch(repoUrl(ref, `/git/ref/heads/${encodeBranchPathSegments(branchRes.branch)}`), {
+      headers: ghHeaders(token),
+    });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const body = (await res.json()) as { object?: { sha?: string } };
+    if (typeof body.object?.sha !== "string") {
+      return { ok: false, error: "GitHub did not return a commit sha for that ref." };
+    }
+    return { ok: true, sha: body.object.sha };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to resolve the ref." };
+  }
+}
+
+/** Create a branch at `fromSha`, or report that it already exists. */
+export async function ensureBranch(
+  token: string,
+  ref: RepoRef,
+  branch: string,
+  fromSha: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; created: boolean } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const res = await doFetch(repoUrl(ref, "/git/refs"), {
+      method: "POST",
+      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: fromSha }),
+    });
+    if (res.ok) return { ok: true, created: true };
+
+    if (res.status === 422) {
+      const message = await ghErrorMessage(res);
+      // GitHub reports a ref collision as a 422 with a message mentioning
+      // this — that is success (the branch this call wanted already exists),
+      // not a failure.
+      if (message.toLowerCase().includes("already exists")) {
+        return { ok: true, created: false };
+      }
+      return { ok: false, error: message };
+    }
+    return { ok: false, error: await ghErrorMessage(res) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to create the branch." };
+  }
+}
+
+/** Current blob sha for a path on a branch, or null when the file is new. */
+export async function fileSha(
+  token: string,
+  ref: RepoRef,
+  path: string,
+  branch: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; sha: string | null } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const url = repoUrl(ref, `/contents/${encodeContentsPath(path)}?ref=${encodeURIComponent(branch)}`);
+    const res = await doFetch(url, { headers: ghHeaders(token) });
+
+    // Distinguishing "missing" from "failed" matters here: creating a file
+    // and updating one are the same PUT endpoint, and the only thing that
+    // tells them apart is whether a `sha` is sent. A 404 is not an error
+    // this caller needs to handle — it is the answer "this write will
+    // create a new file."
+    if (res.status === 404) return { ok: true, sha: null };
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const body = (await res.json()) as { sha?: string };
+    if (typeof body.sha !== "string") {
+      return { ok: false, error: `GitHub did not return a sha for ${path}.` };
+    }
+    return { ok: true, sha: body.sha };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : `Failed to look up ${path}.` };
+  }
+}
+
+/** Create or update one file on a branch. */
+export async function commitFile(
+  token: string,
+  ref: RepoRef,
+  branch: string,
+  path: string,
+  content: string,
+  message: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; commitSha: string } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const shaRes = await fileSha(token, ref, path, branch, fetchImpl);
+    if (!shaRes.ok) return shaRes;
+
+    const body: { message: string; branch: string; content: string; sha?: string } = {
+      message,
+      branch,
+      content: utf8ToBase64(content),
+    };
+    if (shaRes.sha !== null) body.sha = shaRes.sha;
+
+    const res = await doFetch(repoUrl(ref, `/contents/${encodeContentsPath(path)}`), {
+      method: "PUT",
+      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const resBody = (await res.json()) as { commit?: { sha?: string } };
+    if (typeof resBody.commit?.sha !== "string") {
+      return { ok: false, error: "GitHub did not return a commit sha." };
+    }
+    return { ok: true, commitSha: resBody.commit.sha };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : `Failed to commit ${path}.` };
+  }
+}
+
+/** Delete one file from a branch. */
+export async function deleteFile(
+  token: string,
+  ref: RepoRef,
+  branch: string,
+  path: string,
+  message: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const shaRes = await fileSha(token, ref, path, branch, fetchImpl);
+    if (!shaRes.ok) return shaRes;
+    if (shaRes.sha === null) {
+      return { ok: false, error: `${path} does not exist on ${branch}.` };
+    }
+
+    const res = await doFetch(repoUrl(ref, `/contents/${encodeContentsPath(path)}`), {
+      method: "DELETE",
+      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ message, branch, sha: shaRes.sha }),
+    });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : `Failed to delete ${path}.` };
+  }
+}
+
+/** Open a pull request. */
+export async function openPullRequest(
+  token: string,
+  ref: RepoRef,
+  head: string,
+  base: string,
+  title: string,
+  body: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; url: string; number: number } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const res = await doFetch(repoUrl(ref, "/pulls"), {
+      method: "POST",
+      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body, head, base }),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as { html_url?: string; number?: number };
+      if (typeof data.html_url !== "string" || typeof data.number !== "number") {
+        return { ok: false, error: "GitHub did not return a pull request URL and number." };
+      }
+      return { ok: true, url: data.html_url, number: data.number };
+    }
+
+    if (res.status === 422) {
+      const message = await ghErrorMessage(res);
+      if (message.toLowerCase().includes("a pull request already exists")) {
+        // A real failure, but a clear one: name the branch so whoever reads
+        // this knows which pull request to go look at instead of opening
+        // a new one.
+        return { ok: false, error: `${message} (head branch: ${head})` };
+      }
+      return { ok: false, error: message };
+    }
+    return { ok: false, error: await ghErrorMessage(res) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to open the pull request." };
+  }
+}
+
 /** Whether any of the room's deny globs covers this path. Mirrors the local provider. */
 function isDenied(path: string, deny: readonly string[]): boolean {
   for (const pattern of deny) {
@@ -228,7 +521,12 @@ type FetchResult =
   | { ok: true; status: number; body: unknown }
   | { ok: false; status: number; error: string };
 
-/** A read-only provider over the GitHub contents API. */
+/**
+ * A provider over the GitHub contents API. Reads go straight against
+ * `#ref`; writes never touch it — they land on a working branch (see
+ * `#branch` below) so nothing this provider does can change the default
+ * branch without a human reviewing a pull request first.
+ */
 export class GithubProvider implements WorkspaceProvider {
   readonly kind = "github" as const;
   readonly label: string;
@@ -236,12 +534,24 @@ export class GithubProvider implements WorkspaceProvider {
   #token: string;
   #ref: RepoRef;
   #deny: readonly string[];
+  #branch: string;
   #fetchImpl: typeof fetch;
 
-  constructor(token: string, ref: RepoRef, deny: readonly string[], fetchImpl?: typeof fetch) {
+  constructor(
+    token: string,
+    ref: RepoRef,
+    deny: readonly string[],
+    branch?: string,
+    fetchImpl?: typeof fetch,
+  ) {
     this.#token = token;
     this.#ref = ref;
     this.#deny = deny;
+    // A fixed branch name, rather than one derived fresh per write, means
+    // every change the room approves accumulates onto the same branch and
+    // therefore the same pull request, instead of each edit opening its
+    // own — which is what a human reviewer actually wants to look at.
+    this.#branch = branch && branch.length > 0 ? branch : "collab-ai";
     this.#fetchImpl = fetchImpl ?? fetch;
     this.label = `${ref.owner}/${ref.repo}`;
   }
@@ -396,6 +706,135 @@ export class GithubProvider implements WorkspaceProvider {
     return { ok: true, data: results.join("\n") };
   }
 
+  /** Read one file's text off a specific branch — unlike `#read`, not tied to `#ref.ref`. */
+  async #readOnBranch(path: string, branch: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+    const url = `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/contents/${encodeContentsPath(path)}?ref=${encodeURIComponent(branch)}`;
+    const res = await this.#fetchJson(url);
+    if (!res.ok) return { ok: false, error: res.error };
+
+    const body = res.body;
+    if (Array.isArray(body)) {
+      return { ok: false, error: `${path} is a directory, not a file.` };
+    }
+    const file = body as { content?: unknown };
+    if (typeof file.content !== "string") {
+      return { ok: false, error: `GitHub did not return file content for ${path}.` };
+    }
+
+    try {
+      const bytes = base64ToBytes(file.content.replace(/\s+/g, ""));
+      return { ok: true, text: new TextDecoder().decode(bytes) };
+    } catch {
+      return { ok: false, error: `GitHub returned content that could not be decoded for ${path}.` };
+    }
+  }
+
+  /**
+   * Make sure the working branch exists, branched off the current head of
+   * `#ref`. Every write op does this first: nothing is ever committed
+   * straight to the default branch, only to `#branch`, which later becomes
+   * a pull request a human reviews.
+   */
+  async #ensureWorkingBranch(): Promise<{ ok: true } | { ok: false; error: string }> {
+    const head = await refHead(this.#token, this.#ref, this.#fetchImpl);
+    if (!head.ok) return head;
+    const branch = await ensureBranch(this.#token, this.#ref, this.#branch, head.sha, this.#fetchImpl);
+    if (!branch.ok) return branch;
+    return { ok: true };
+  }
+
+  async #write(path: string, content: string): Promise<FsResponse> {
+    // Same discipline as the read path: the deny list is checked before any
+    // network call, not after.
+    if (isDenied(path, this.#deny)) {
+      return { ok: false, error: "The room's rules don't allow access to that path." };
+    }
+
+    const branch = await this.#ensureWorkingBranch();
+    if (!branch.ok) return branch;
+
+    const res = await commitFile(
+      this.#token,
+      this.#ref,
+      this.#branch,
+      path,
+      content,
+      `Update ${path} via collab_ai`,
+      this.#fetchImpl,
+    );
+    if (!res.ok) return res;
+    return { ok: true, data: `Wrote ${path} on branch ${this.#branch} (commit ${res.commitSha}).` };
+  }
+
+  async #edit(path: string, oldText: string, newText: string): Promise<FsResponse> {
+    if (isDenied(path, this.#deny)) {
+      return { ok: false, error: "The room's rules don't allow access to that path." };
+    }
+
+    const branch = await this.#ensureWorkingBranch();
+    if (!branch.ok) return branch;
+
+    // Read from the working branch, not from `#ref` — if an earlier
+    // approved edit already landed on `#branch`, this edit must see that
+    // version, not the default branch's stale one.
+    const current = await this.#readOnBranch(path, this.#branch);
+    if (!current.ok) return current;
+
+    // Same unique-match-or-reject contract as the local provider (and
+    // edit_doc in src/server/tools.ts): the span must appear exactly once,
+    // or nothing changes.
+    const first = current.text.indexOf(oldText);
+    if (first === -1) {
+      return {
+        ok: false,
+        error:
+          "old_text was not found in the file. Read it again to get the current " +
+          "text, then retry with an exact span from it.",
+      };
+    }
+    if (current.text.indexOf(oldText, first + 1) !== -1) {
+      return {
+        ok: false,
+        error:
+          "old_text appears more than once, so the target is ambiguous. Include " +
+          "more surrounding context to make it unique.",
+      };
+    }
+    const updated = current.text.slice(0, first) + newText + current.text.slice(first + oldText.length);
+
+    const res = await commitFile(
+      this.#token,
+      this.#ref,
+      this.#branch,
+      path,
+      updated,
+      `Update ${path} via collab_ai`,
+      this.#fetchImpl,
+    );
+    if (!res.ok) return res;
+    return { ok: true, data: `Edited ${path} on branch ${this.#branch} (commit ${res.commitSha}).` };
+  }
+
+  async #remove(path: string): Promise<FsResponse> {
+    if (isDenied(path, this.#deny)) {
+      return { ok: false, error: "The room's rules don't allow access to that path." };
+    }
+
+    const branch = await this.#ensureWorkingBranch();
+    if (!branch.ok) return branch;
+
+    const res = await deleteFile(
+      this.#token,
+      this.#ref,
+      this.#branch,
+      path,
+      `Remove ${path} via collab_ai`,
+      this.#fetchImpl,
+    );
+    if (!res.ok) return res;
+    return { ok: true, data: `Removed ${path} on branch ${this.#branch}.` };
+  }
+
   async perform(req: FsRequest): Promise<FsResponse> {
     try {
       switch (req.op) {
@@ -406,14 +845,34 @@ export class GithubProvider implements WorkspaceProvider {
         case "search":
           return await this.#search(req.pattern, req.glob, req.max, req.deny ?? []);
         case "write":
+          return await this.#write(req.path, req.content);
         case "edit":
+          return await this.#edit(req.path, req.oldText, req.newText);
         case "remove":
-          return { ok: false, error: "This workspace is read-only." };
+          return await this.#remove(req.path);
         default:
           return { ok: false, error: "Unsupported operation." };
       }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : "GitHub request failed unexpectedly." };
     }
+  }
+
+  /**
+   * Open a pull request from the working branch into `#ref`'s branch.
+   *
+   * Not part of `WorkspaceProvider` — nothing in the normal read/write flow
+   * calls this. A room calls it directly once it wants to ship what has
+   * accumulated on the working branch: the room's vote is the approval, and
+   * this is what turns that approval into something a human reviews on
+   * GitHub.
+   */
+  async openPr(title: string, body: string): Promise<FsResponse> {
+    const base = await resolveBranchName(this.#token, this.#ref, this.#fetchImpl);
+    if (!base.ok) return base;
+
+    const pr = await openPullRequest(this.#token, this.#ref, this.#branch, base.branch, title, body, this.#fetchImpl);
+    if (!pr.ok) return pr;
+    return { ok: true, data: `Opened pull request #${pr.number}: ${pr.url}` };
   }
 }
