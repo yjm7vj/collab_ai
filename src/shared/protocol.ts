@@ -139,7 +139,9 @@ export type ServerMsg =
   /** Sent only to the connection that asked. */
   | { t: "members"; members: MemberSummary[] }
   /** Sent only to the workspace host's socket. Never broadcast. */
-  | { t: "fs.req"; id: string; req: FsRequest };
+  | { t: "fs.req"; id: string; req: FsRequest }
+  /** Sent only to the connection that asked. Carries no secret. */
+  | { t: "github.install"; url: string };
 
 export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */
@@ -165,9 +167,11 @@ export type ClientMsg =
   /** A provider's reply to an earlier "fs.req". Only the host's answer counts. */
   | { t: "fs.res"; id: string; res: FsResponse }
   /** Connect a workspace to this room. Owners and admins only. */
-  | { t: "workspace.attach"; kind: WorkspaceKind; label: string }
+  | { t: "workspace.attach"; kind: WorkspaceKind; label: string; repo?: string }
   /** Disconnect the room's workspace. Owners and admins only. */
-  | { t: "workspace.detach" };
+  | { t: "workspace.detach" }
+  /** Start connecting a GitHub repository. Owners and admins only. */
+  | { t: "github.connect"; repo: string };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

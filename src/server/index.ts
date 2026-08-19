@@ -35,6 +35,15 @@ async function roomStub(env: Env, roomId: string) {
   return await getAgentByName(env.Room, roomId);
 }
 
+/**
+ * Whether this Worker has both GitHub App secrets configured. GitHub
+ * workspaces are an optional feature: absent these, everything else in the
+ * app still works, so callers use this to degrade cleanly rather than error.
+ */
+function githubConfigured(env: Env): boolean {
+  return Boolean(env.GITHUB_APP_ID) && Boolean(env.GITHUB_APP_PRIVATE_KEY);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (!env.ANTHROPIC_API_KEY) {
@@ -142,6 +151,47 @@ export default {
       });
 
       return json({ token, role } satisfies JoinRoomResponse);
+    }
+
+    if (url.pathname === "/api/github/callback") {
+      if (!githubConfigured(env)) return json({ error: "not_found" }, 404);
+
+      const state = url.searchParams.get("state") ?? "";
+      const claims = await verifyToken(env.ROOM_SECRET, state);
+      if (!claims) {
+        return new Response(
+          "That installation link is invalid or has expired. Start again from the room.",
+          { status: 400 },
+        );
+      }
+
+      const installationId = url.searchParams.get("installation_id") ?? "";
+      if (!/^[0-9]+$/.test(installationId)) {
+        return new Response("GitHub didn't return an installation id.", { status: 400 });
+      }
+
+      const stub = await roomStub(env, claims.rid);
+      const installedRes = await stub.fetch("https://room/github-installed", {
+        method: "POST",
+        body: JSON.stringify({ installationId, uid: claims.uid }),
+        headers: {
+          "content-type": "application/json",
+          "x-internal-auth": env.ROOM_SECRET,
+        },
+      });
+
+      if (!installedRes.ok) {
+        return new Response(installedRes.body, {
+          status: installedRes.status,
+          headers: installedRes.headers,
+        });
+      }
+
+      return new Response(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Repository connected</title></head>" +
+          "<body><p>The repository is connected. You can close this tab.</p></body></html>",
+        { status: 200, headers: { "content-type": "text/html" } },
+      );
     }
 
     /**
