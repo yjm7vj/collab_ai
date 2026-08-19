@@ -73,7 +73,8 @@ import {
   type ToolCtx,
   type ToolOutcome,
 } from "./tools";
-import { constantTimeEqual, newInviteCode } from "./auth";
+import { constantTimeEqual, mintToken, newInviteCode } from "./auth";
+import { GithubProvider, installationToken, parseRepoRef, pemToPkcs8 } from "./github";
 import { PendingRequests } from "./workspace";
 import {
   FS_LIMITS,
@@ -143,6 +144,18 @@ export class Room extends Agent<Env, RoomState> {
       created_at INTEGER NOT NULL,
       revoked_at INTEGER NOT NULL DEFAULT 0,
       label TEXT NOT NULL DEFAULT ''
+    )`;
+    // Only the installation id and repo are stored here. Installation tokens
+    // are short-lived (about an hour) and are minted fresh per request, never
+    // persisted — a stored token is a stored credential with an hour to be
+    // stolen in, and RoomState syncs to every connected client, so anything
+    // secret placed there or here is handed to every member of the room.
+    this.sql`CREATE TABLE IF NOT EXISTS github (
+      k TEXT PRIMARY KEY,
+      installation_id TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      connected_by TEXT NOT NULL,
+      connected_at INTEGER NOT NULL
     )`;
     this.#schemaReady = true;
   }
@@ -431,7 +444,7 @@ export class Room extends Agent<Env, RoomState> {
       return json({ error: "not_found" }, 404);
     }
 
-    let body: { uid?: string; name?: string; title?: string; code?: string };
+    let body: { uid?: string; name?: string; title?: string; code?: string; installationId?: string };
     try {
       body = (await request.json()) as typeof body;
     } catch {
@@ -494,6 +507,31 @@ export class Room extends Agent<Env, RoomState> {
                VALUES (${uid}, ${name}, ${now}, ${now}, 'editor')`;
       this.#system(`${name} joined`);
       return json({ role: "editor" });
+    }
+
+    if (url.pathname === "/github-installed") {
+      const pending = this.#kvGet<{ repo: string; uid: string } | null>("github:pending", null);
+      if (!pending) return json({ error: "bad_request" }, 409);
+
+      const installationId = String(body.installationId ?? "");
+
+      this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at)
+               VALUES ('current', ${installationId}, ${pending.repo}, ${uid}, ${now})
+               ON CONFLICT(k) DO UPDATE SET
+                 installation_id = excluded.installation_id,
+                 repo = excluded.repo,
+                 connected_by = excluded.connected_by,
+                 connected_at = excluded.connected_at`;
+      this.#kvDel("github:pending");
+
+      this.setState({
+        ...this.state,
+        workspace: { kind: "github", online: true, hostUid: uid, label: pending.repo },
+      });
+      const connectedName = this.#memberName(uid) ?? "someone";
+      this.#system(`${connectedName} connected ${pending.repo}`);
+
+      return json({ ok: true });
     }
 
     return json({ error: "not_found" }, 404);
@@ -614,6 +652,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onWorkspaceAttach(connection, msg.kind, msg.label);
       case "workspace.detach":
         return this.#onWorkspaceDetach(connection);
+      case "github.connect":
+        return this.#onGithubConnect(connection, msg.repo);
       case "fs.res":
         return this.#onFsRes(connection, msg.id, msg.res);
     }
@@ -907,7 +947,62 @@ export class Room extends Agent<Env, RoomState> {
     const name = this.#nameOf(connection);
     this.#pending.failAll("The workspace was disconnected.");
     this.setState({ ...this.state, workspace: NO_WORKSPACE });
+    // A GitHub workspace stores its installation id and repo in the `github`
+    // table, not just in state — clear both, or a later re-attach could see
+    // stale rows.
+    this.sql`DELETE FROM github WHERE k = 'current'`;
     this.#system(`${name ?? "someone"} disconnected the workspace`);
+  }
+
+  /**
+   * Start connecting a GitHub repository. This only mints a state token and
+   * hands back the URL to GitHub's install page — the room is the only party
+   * that knows who is asking and whether they may, so the install-initiation
+   * route lives here rather than on the Worker. `/github-installed` (see
+   * onRequest) finishes the job once GitHub redirects back.
+   */
+  async #onGithubConnect(connection: Connection, repo: string) {
+    if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
+
+    if (!this.env.GITHUB_APP_ID || !this.env.GITHUB_APP_PRIVATE_KEY) {
+      this.#refuse(
+        connection,
+        "GitHub isn't set up on this server. Ask whoever deployed it to add the GitHub App credentials.",
+      );
+      return;
+    }
+
+    if (parseRepoRef(repo) === null) {
+      this.#refuse(
+        connection,
+        "That doesn't look like a repository. Use owner/repo, optionally owner/repo@branch.",
+      );
+      return;
+    }
+
+    const uid = this.#uidOf(connection);
+    if (!uid) return;
+    const role = this.#roleOf(connection);
+
+    // Ten minutes is plenty for an install round trip and keeps the replay
+    // window on this state token small.
+    const token = await mintToken(this.env.ROOM_SECRET, {
+      rid: this.name,
+      uid,
+      role,
+      exp: Math.floor(Date.now() / 1000) + 600,
+    });
+
+    this.#kvSet("github:pending", { repo, uid });
+
+    // The app slug is public — it appears in the app's own URL — and is only
+    // needed to send the user straight to the install page instead of a
+    // generic settings page they'd have to search from.
+    const url = this.env.GITHUB_APP_SLUG
+      ? `https://github.com/apps/${this.env.GITHUB_APP_SLUG}/installations/new?state=${token}`
+      : `https://github.com/settings/installations`;
+
+    connection.send(JSON.stringify({ t: "github.install", url } satisfies ServerMsg));
   }
 
   /**
@@ -972,6 +1067,43 @@ export class Room extends Agent<Env, RoomState> {
       if (write) {
         return { ok: false, error: "Writing to the workspace isn't enabled yet." };
       }
+    }
+
+    // A GitHub workspace has no host socket — it's served straight from the
+    // GitHub API using a token minted fresh for this one request, then
+    // discarded. Never stored: see the comment on the `github` table.
+    if (this.state.workspace.kind === "github") {
+      const row = this.sql<{
+        installation_id: string;
+        repo: string;
+      }>`SELECT installation_id, repo FROM github WHERE k = 'current'`[0];
+      if (!row) {
+        return { ok: false, error: "The repository connection is missing. Reconnect it." };
+      }
+
+      const ref = parseRepoRef(row.repo);
+      if (!ref) {
+        return { ok: false, error: "The repository connection is missing. Reconnect it." };
+      }
+
+      const pkcs8 = pemToPkcs8(this.env.GITHUB_APP_PRIVATE_KEY);
+      if (!pkcs8.ok) {
+        return { ok: false, error: pkcs8.error };
+      }
+
+      // Minted fresh for this one request and held only in this local
+      // variable — never written to state or storage. See the comment on the
+      // `github` table for why.
+      const tokenRes = await installationToken(
+        { appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY },
+        row.installation_id,
+      );
+      if (!tokenRes.ok) {
+        return { ok: false, error: tokenRes.error };
+      }
+
+      const provider = new GithubProvider(tokenRes.token, ref, denyGlobs);
+      return provider.perform(clamped);
     }
 
     const hostUid = this.state.workspace.hostUid;
