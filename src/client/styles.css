@@ -726,4 +726,61 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   color: var(--ink-faint);
 }
 .ws-option .field { margin-bottom: 10px; }
+
+/* ---------------------------------------------------- collapsed tool rows */
+
+/* The summary row is the quiet, single-line face of a tool block: smaller
+   than body text, muted, and clearly subordinate to the agent's prose. It
+   toggles the block open on click, so it reads (and behaves) like a control
+   rather than like transcript content. */
+.tool-head {
+  cursor: pointer;
+  border-radius: 6px;
+  margin: -2px -4px;
+  padding: 2px 4px;
+}
+.tool-head:hover { background: var(--panel-2); }
+.tool-disclosure {
+  color: var(--ink-faint);
+  font-size: 11px;
+  width: 10px;
+  flex: none;
+}
+.tool-summary {
+  color: var(--ink-faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.tool-hint {
+  color: var(--ink-faint);
+  font-size: 11px;
+  flex: none;
+}
+
+/* A small round dot carrying the same status colours as the border accent
+   on .tool-ok / .tool-error / .tool-denied / .tool-running, so the collapsed
+   row still reads status at a glance without repeating the border. */
+.tool-pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink-faint);
+}
+.tool-pip-ok { background: var(--ok); }
+.tool-pip-error { background: var(--bad); }
+.tool-pip-denied { background: var(--bad); opacity: 0.75; }
+.tool-pip-running { background: var(--accent); }
+
+/* The quietest thing in the transcript — a whole run of hidden steps should
+   draw less attention than a single collapsed row does. */
+.steps-hidden {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.8;
+}
 .ws-option .field-note + .field-note { margin-top: 8px; }
