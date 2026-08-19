@@ -11,6 +11,7 @@ import {
   type Vote,
   type WorkerStatus,
 } from "../shared/protocol";
+import type { WorkspaceInfo } from "../shared/workspace";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { ROLES, outranks, type Role } from "../shared/access";
 import {
@@ -932,6 +933,96 @@ export function PermissionsPanel({
             Apply
           </button>
         </footer>
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- workspace */
+
+/**
+ * Connect or disconnect this browser as the room's file server, and see the
+ * room's current workspace status. Read-only for now: this panel never
+ * offers write, edit or remove, because `performFsRequest` doesn't implement
+ * them yet.
+ */
+export function WorkspacePanel({
+  workspace,
+  supported,
+  hosting,
+  onAttach,
+  onDetach,
+  onClose,
+}: {
+  workspace: WorkspaceInfo;
+  supported: boolean;
+  hosting: boolean;
+  onAttach: () => void;
+  onDetach: () => void;
+  onClose: () => void;
+}) {
+  const attached = workspace.kind !== "none";
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-label="Workspace"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <h2>Workspace</h2>
+          <button className="icon" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </header>
+
+        <div className="modal-body">
+          {!supported ? (
+            // A button that can't work is worse than an honest message — no
+            // disabled picker here, just the reason and a way out.
+            <p className="field-note">
+              Your browser can't share a local folder. Chrome or Edge can — or
+              connect a GitHub repository instead, which works everywhere.
+            </p>
+          ) : (
+            <>
+              {!attached ? (
+                <section>
+                  <p className="field-note">
+                    Connect a real folder from this device. The agent can read
+                    files from it and search within it; it can't write, edit
+                    or remove anything yet.
+                  </p>
+                  <button className="primary" onClick={onAttach}>
+                    Choose a folder…
+                  </button>
+                </section>
+              ) : (
+                <section>
+                  <p className="field-note">
+                    Connected: <strong>{workspace.label}</strong> ·{" "}
+                    {workspace.online ? "online" : "offline"}
+                  </p>
+                  <button onClick={onDetach}>Disconnect</button>
+                  {!hosting && (
+                    <p className="field-warn">
+                      This tab isn't serving files. The member who connected
+                      the folder has to have it open.
+                    </p>
+                  )}
+                </section>
+              )}
+
+              <p className="field-warn ws-warning">
+                Everyone in this room can ask the agent to read files from the
+                folder you pick, and what it reads appears in the transcript.
+                Pick a project folder, never your home directory.
+              </p>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
