@@ -1,6 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   INVITABLE_ROLES,
+  REDACTED,
   tally,
   type AgentBlock,
   type Entry,
@@ -314,7 +315,14 @@ function BlockView({ block }: { block: AgentBlock }) {
                 : "done"}
         </span>
       </div>
-      {block.result && <div className="tool-result">{truncate(block.result, 400)}</div>}
+      {block.result &&
+        (block.result === REDACTED ? (
+          <div className="tool-result hint redacted" style={{ fontStyle: "italic" }}>
+            {block.result}
+          </div>
+        ) : (
+          <div className="tool-result">{truncate(block.result, 400)}</div>
+        ))}
     </div>
   );
 }
@@ -329,10 +337,12 @@ export function ApprovalCard({
   pending,
   me,
   onVote,
+  canDecide,
 }: {
   pending: PendingTool;
   me: string | null;
   onVote: (toolUseId: string, vote: Vote) => void;
+  canDecide: boolean;
 }) {
   const counts = tally(pending);
   const mine = me ? pending.votes[me] : undefined;
@@ -365,6 +375,7 @@ export function ApprovalCard({
         <button
           className={`vote approve ${mine === "approve" ? "cast" : ""}`}
           onClick={() => onVote(pending.toolUseId, "approve")}
+          disabled={!canDecide}
         >
           Approve
           <span className="count">
@@ -374,6 +385,7 @@ export function ApprovalCard({
         <button
           className={`vote deny ${mine === "deny" ? "cast" : ""}`}
           onClick={() => onVote(pending.toolUseId, "deny")}
+          disabled={!canDecide}
         >
           Deny
           <span className="count">
@@ -382,6 +394,11 @@ export function ApprovalCard({
         </button>
         {mine && <span className="voted">you voted to {mine}</span>}
       </div>
+      {!canDecide && (
+        <div className="hint redacted" style={{ fontStyle: "italic" }}>
+          You can't see this file's contents, so an owner or admin has to decide this one.
+        </div>
+      )}
     </div>
   );
 }

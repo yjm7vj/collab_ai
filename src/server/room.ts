@@ -34,13 +34,16 @@ import {
   type RoomState,
   type ServerMsg,
   type WorkerStatus,
+  redactEntry,
 } from "../shared/protocol";
 import {
   DEFAULT_POLICY,
   approvalThreshold,
   asRole,
   can,
+  canSeeFileContents,
   describePolicy,
+  isFileContentTool,
   isVoter,
   outranks,
   sanitizeAccessPolicy,
@@ -222,12 +225,12 @@ export class Room extends Agent<Env, RoomState> {
 
   #append(entry: Entry) {
     this.#putEntry(entry);
-    this.#send({ t: "entry", entry });
+    this.#sendEntry("entry", entry);
   }
 
   #patch(entry: Entry) {
     this.#putEntry(entry);
-    this.#send({ t: "patch", entry });
+    this.#sendEntry("patch", entry);
   }
 
   #system(text: string) {
@@ -236,6 +239,20 @@ export class Room extends Agent<Env, RoomState> {
 
   #send(msg: ServerMsg) {
     this.broadcast(JSON.stringify(msg));
+  }
+
+  /**
+   * Send an entry to each connection at the visibility its role allows.
+   *
+   * This cannot use `broadcast`, because different members are entitled to
+   * different versions of the same entry. The stored copy is always the full
+   * one; only what leaves the server is trimmed.
+   */
+  #sendEntry(t: "entry" | "patch", entry: Entry) {
+    for (const conn of this.getConnections()) {
+      const allowed = canSeeFileContents(this.#roleOf(conn));
+      conn.send(JSON.stringify({ t, entry: redactEntry(entry, allowed) } satisfies ServerMsg));
+    }
   }
 
   /** The member this socket joined as, or null if it hasn't joined yet. */
@@ -399,23 +416,34 @@ export class Room extends Agent<Env, RoomState> {
    */
   async #refreshPresence(exclude?: string) {
     const users = this.#presence(exclude);
-    // Viewers are present but cannot vote, so they must not raise the bar.
-    const threshold = approvalThreshold(
-      this.#policy().approval,
-      users.filter((u) => isVoter(u.role)).length,
-    );
     const present = new Set(users.map((u) => u.uid));
 
+    // Each pending call gets its own threshold: a sensitive one (file
+    // contents) is decided only by those who can see them, so it must not
+    // share a threshold with an ordinary call decided by all voters. Compute
+    // eligibility against the freshly-read `users` above, not the stale
+    // this.state.users a no-argument call would otherwise see.
     const pending = this.state.pending.map((p) => {
       // Drop votes from people who have left, so tallies match the new threshold.
       const votes = Object.fromEntries(
         Object.entries(p.votes).filter(([uid]) => present.has(uid)),
+      );
+      const threshold = approvalThreshold(
+        this.#policy().approval,
+        this.#eligible(p.sensitive === true, users),
       );
       return { ...p, votes, threshold };
     });
 
     this.setState({ ...this.state, users, pending });
     if (pending.length > 0) await this.#settleIfDecided();
+  }
+
+  /** How many people present are eligible to decide this proposal. */
+  #eligible(sensitive: boolean, users: Presence[] = this.state.users): number {
+    return users.filter(
+      (u) => isVoter(u.role) && (!sensitive || canSeeFileContents(u.role)),
+    ).length;
   }
 
   /**
@@ -564,8 +592,12 @@ export class Room extends Agent<Env, RoomState> {
 
     connection.setState({ uid, role });
     connection.send(JSON.stringify({ t: "you", uid, role } satisfies ServerMsg));
+    const allowed = canSeeFileContents(asRole(role));
     connection.send(
-      JSON.stringify({ t: "history", entries: this.#entries() } satisfies ServerMsg),
+      JSON.stringify({
+        t: "history",
+        entries: this.#entries().map((e) => redactEntry(e, allowed)),
+      } satisfies ServerMsg),
     );
 
     // The workspace stays configured while its host is offline — see onClose —
@@ -1204,6 +1236,12 @@ export class Room extends Agent<Env, RoomState> {
   async #onVote(connection: Connection, toolUseId: string, vote: "approve" | "deny") {
     if (!this.#allow(connection, "vote", "You're a viewer in this room, so you can't vote.")) return;
 
+    const target = this.state.pending.find((p) => p.toolUseId === toolUseId);
+    if (target?.sensitive && !canSeeFileContents(this.#roleOf(connection))) {
+      this.#refuse(connection, "You can't see this file's contents, so you can't vote on it. An owner or admin has to decide.");
+      return;
+    }
+
     // Not a threshold but a restriction on who may vote at all.
     if (this.#policy().approval === "owner_only" && this.#roleOf(connection) !== "owner") {
       this.#refuse(connection, "Only the room's owner can approve actions here.");
@@ -1552,10 +1590,6 @@ export class Room extends Agent<Env, RoomState> {
         const results: ToolResultBlockParam[] = [...turn.carried];
         const gated: PendingTool[] = [];
         const gatedNames = gatedFor(this.#policy());
-        const threshold = approvalThreshold(
-          this.#policy().approval,
-          this.state.users.filter((u) => isVoter(u.role)).length,
-        );
         const docs = this.#docBuffer();
 
         for (const call of calls) {
@@ -1568,13 +1602,15 @@ export class Room extends Agent<Env, RoomState> {
           });
 
           if (gatedNames.has(call.name)) {
+            const sensitive = isFileContentTool(call.name);
             gated.push({
               toolUseId: call.id,
               name: call.name,
               input: call.input,
               summary: summarizeCall(call.name, call.input),
               votes: {},
-              threshold,
+              threshold: approvalThreshold(this.#policy().approval, this.#eligible(sensitive)),
+              sensitive,
             });
           } else {
             // `delegate` is one async tool — it fans out to worker models. The
@@ -1614,6 +1650,7 @@ export class Room extends Agent<Env, RoomState> {
             if (block.type === "tool") {
               block.status = outcome.ok ? "ok" : "error";
               block.result = outcome.text;
+              block.sensitive = isFileContentTool(call.name);
             }
           }
         }
@@ -1707,6 +1744,7 @@ export class Room extends Agent<Env, RoomState> {
       if (block && block.type === "tool") {
         block.status = approved ? (outcome.ok ? "ok" : "error") : "denied";
         block.result = outcome.text;
+        block.sensitive = isFileContentTool(p.name);
       }
     }
     docs.flush();

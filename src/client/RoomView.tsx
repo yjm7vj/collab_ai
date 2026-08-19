@@ -12,7 +12,7 @@ import {
   type Vote,
 } from "../shared/protocol";
 import type { RoomSettings } from "../shared/models";
-import { asRole, can, describePolicy, type Role } from "../shared/access";
+import { asRole, can, canSeeFileContents, describePolicy, type Role } from "../shared/access";
 import type { AccessPolicy } from "../shared/access";
 import {
   ApprovalCard,
@@ -522,7 +522,13 @@ export function RoomView({
                 </span>
               </div>
               {state.pending.map((p) => (
-                <ApprovalCard key={p.toolUseId} pending={p} me={me} onVote={vote} />
+                <ApprovalCard
+                  key={p.toolUseId}
+                  pending={p}
+                  me={me}
+                  onVote={vote}
+                  canDecide={!p.sensitive || canSeeFileContents(myRole)}
+                />
               ))}
             </div>
           )}

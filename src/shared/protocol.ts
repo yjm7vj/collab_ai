@@ -45,6 +45,8 @@ export type PendingTool = {
   votes: Record<string, Vote>;
   /** Votes needed to decide, fixed when the request was raised. */
   threshold: number;
+  /** True when deciding this needs sight of file contents. */
+  sensitive?: boolean;
 };
 
 export type RoomStatus = "idle" | "thinking" | "awaiting_approval";
@@ -103,6 +105,8 @@ export type AgentBlock =
       input: unknown;
       status: "running" | "ok" | "error" | "denied";
       result?: string;
+      /** True when this block's result contains workspace file contents. */
+      sensitive?: boolean;
     };
 
 export type Entry =
@@ -117,6 +121,29 @@ export type Entry =
     }
   | { id: string; ts: number; kind: "agent"; blocks: AgentBlock[] }
   | { id: string; ts: number; kind: "system"; text: string };
+
+/** Shown in place of file contents to anyone not permitted to see them. */
+export const REDACTED = "(file contents hidden — ask an owner or admin)";
+
+/**
+ * A copy of `entry` safe to send to someone who may not see file contents.
+ *
+ * Redaction happens on the way out, never on the way in: the full entry is
+ * what gets stored, so an owner reconnecting still gets the real transcript.
+ * A redacted transcript written to disk would be unrecoverable.
+ */
+export function redactEntry(entry: Entry, allowed: boolean): Entry {
+  if (allowed || entry.kind !== "agent") return entry;
+  if (!entry.blocks.some((b) => b.type === "tool" && b.sensitive)) return entry;
+  return {
+    ...entry,
+    blocks: entry.blocks.map((b) =>
+      b.type === "tool" && b.sensitive && b.result !== undefined
+        ? { ...b, result: REDACTED }
+        : b,
+    ),
+  };
+}
 
 export type ServerMsg =
   /** Full transcript, sent once on connect. */

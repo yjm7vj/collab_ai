@@ -10,7 +10,7 @@ import {
   modelInfo,
   sanitizeSettings,
 } from "../src/shared/models";
-import { thresholdFor } from "../src/shared/protocol";
+import { REDACTED, redactEntry, thresholdFor } from "../src/shared/protocol";
 import {
   ROLE_CAPS,
   TOOL_NAMES,
@@ -451,6 +451,95 @@ check("isFileContentTool(edit_file) is true", isFileContentTool("edit_file") ===
 check("isFileContentTool(list_files) is false", isFileContentTool("list_files") === false);
 check("isFileContentTool(delete_file) is false", isFileContentTool("delete_file") === false);
 check("isFileContentTool(read_doc) is false", isFileContentTool("read_doc") === false);
+
+console.log("\nfile content redaction");
+
+const userEntry = {
+  id: "e1",
+  ts: 0,
+  kind: "user" as const,
+  authorUid: "u1",
+  authorName: "Ann",
+  color: "#fff",
+  text: "hello",
+};
+check(
+  "redactEntry on a non-agent entry returns it unchanged",
+  redactEntry(userEntry, false) === userEntry,
+);
+
+const agentEntry = {
+  id: "e2",
+  ts: 0,
+  kind: "agent" as const,
+  blocks: [
+    { type: "text" as const, text: "here is the file" },
+    {
+      type: "tool" as const,
+      toolUseId: "t1",
+      name: "read_file",
+      input: { path: "a.txt" },
+      status: "ok" as const,
+      result: "secret contents",
+      sensitive: true,
+    },
+    {
+      type: "tool" as const,
+      toolUseId: "t2",
+      name: "list_files",
+      input: {},
+      status: "ok" as const,
+      result: "a.txt\nb.txt",
+      sensitive: false,
+    },
+  ],
+};
+
+check(
+  "redactEntry(entry, true) returns the entry unchanged even with sensitive blocks",
+  redactEntry(agentEntry, true) === agentEntry,
+);
+
+const redacted = redactEntry(agentEntry, false);
+const redactedBlocks = redacted.kind === "agent" ? redacted.blocks : [];
+check(
+  "redactEntry(entry, false) replaces only sensitive block results, leaving the rest untouched",
+  redacted !== agentEntry &&
+    redactedBlocks[0]!.type === "text" &&
+    redactedBlocks[0]!.text === "here is the file" &&
+    redactedBlocks[1]!.type === "tool" &&
+    redactedBlocks[1]!.result === REDACTED &&
+    redactedBlocks[2]!.type === "tool" &&
+    redactedBlocks[2]!.result === "a.txt\nb.txt",
+  redacted,
+);
+
+check(
+  "redactEntry(entry, false) does not mutate the input — the stored copy stays whole",
+  agentEntry.blocks[1]!.result === "secret contents" && agentEntry.blocks[2]!.result === "a.txt\nb.txt",
+  agentEntry,
+);
+
+const noSensitiveEntry = {
+  id: "e3",
+  ts: 0,
+  kind: "agent" as const,
+  blocks: [
+    {
+      type: "tool" as const,
+      toolUseId: "t3",
+      name: "list_files",
+      input: {},
+      status: "ok" as const,
+      result: "a.txt",
+      sensitive: false,
+    },
+  ],
+};
+check(
+  "an entry with no sensitive blocks is returned by identity when not allowed — the common path allocates nothing",
+  redactEntry(noSensitiveEntry, false) === noSensitiveEntry,
+);
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);
