@@ -6,3 +6,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 # so treat it like a password. Changing it invalidates every existing session
 # — everyone currently connected gets kicked back to the join screen.
 ROOM_SECRET=change-me-to-a-long-random-string
+
+# Optional: enables GitHub repository workspaces through a GitHub App.
+# Leave these blank if you only want local-folder workspaces.
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY=
+GITHUB_APP_SLUG=
