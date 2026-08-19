@@ -72,6 +72,7 @@ export function RoomView({
   const [members, setMembers] = useState<MemberSummary[]>([]);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("compact");
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
   const rootRef = useRef<FileSystemDirectoryHandle | null>(null);
@@ -412,6 +413,35 @@ export function RoomView({
               🔗
             </button>
           )}
+          {/*
+            Visible to every role — a viewer reads the transcript too and
+            needs to be able to quiet it down just as much as anyone who can
+            actually act on the room.
+          */}
+          <button
+            className="icon"
+            onClick={() =>
+              setToolDisplay((d) =>
+                d === "compact" ? "full" : d === "full" ? "hidden" : "compact",
+              )
+            }
+            title={
+              toolDisplay === "compact"
+                ? "Tool activity: collapsed"
+                : toolDisplay === "full"
+                  ? "Tool activity: expanded"
+                  : "Tool activity: hidden"
+            }
+            aria-label={
+              toolDisplay === "compact"
+                ? "Tool activity: collapsed"
+                : toolDisplay === "full"
+                  ? "Tool activity: expanded"
+                  : "Tool activity: hidden"
+            }
+          >
+            {toolDisplay === "compact" ? "📋" : toolDisplay === "full" ? "📖" : "🙈"}
+          </button>
           {mayPolicy && (
             <button
               className="icon"
@@ -510,7 +540,7 @@ export function RoomView({
 
       <div className="columns">
         <section className="chat">
-          <Transcript entries={entries} me={me} />
+          <Transcript entries={entries} me={me} toolDisplay={toolDisplay} />
 
           {state.workers.length > 0 && <WorkerStrip workers={state.workers} />}
 

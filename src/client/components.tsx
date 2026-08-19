@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import {
   INVITABLE_ROLES,
   REDACTED,
@@ -213,7 +213,15 @@ export function Presence({ users, me }: { users: PresenceUser[]; me: string | nu
 
 /* ------------------------------------------------------------ transcript */
 
-export function Transcript({ entries, me }: { entries: Entry[]; me: string | null }) {
+export function Transcript({
+  entries,
+  me,
+  toolDisplay = "compact",
+}: {
+  entries: Entry[];
+  me: string | null;
+  toolDisplay?: "hidden" | "compact" | "full";
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -242,7 +250,7 @@ export function Transcript({ entries, me }: { entries: Entry[]; me: string | nul
         </div>
       )}
       {entries.map((entry) => (
-        <EntryView key={entry.id} entry={entry} me={me} />
+        <EntryView key={entry.id} entry={entry} me={me} toolDisplay={toolDisplay} />
       ))}
     </div>
   );
@@ -251,9 +259,11 @@ export function Transcript({ entries, me }: { entries: Entry[]; me: string | nul
 const EntryView = memo(function EntryView({
   entry,
   me,
+  toolDisplay,
 }: {
   entry: Entry;
   me: string | null;
+  toolDisplay: "hidden" | "compact" | "full";
 }) {
   if (entry.kind === "system") {
     return <div className="sys">{entry.text}</div>;
@@ -270,41 +280,155 @@ const EntryView = memo(function EntryView({
     );
   }
 
+  // In "hidden" mode, tool blocks aren't rendered individually — each run of
+  // consecutive omitted tool blocks collapses into a single muted counter, so
+  // three tool calls in a row read as one line rather than three.
+  const rendered: ReactElement[] = [];
+  let hiddenRun = 0;
+  const flushHiddenRun = (key: string) => {
+    if (hiddenRun > 0) {
+      rendered.push(
+        <div className="steps-hidden" key={key}>
+          {hiddenRun} {hiddenRun === 1 ? "step" : "steps"} hidden
+        </div>,
+      );
+      hiddenRun = 0;
+    }
+  };
+
+  if (toolDisplay === "hidden") {
+    entry.blocks.forEach((b, i) => {
+      if (b.type === "tool") {
+        hiddenRun++;
+        return;
+      }
+      flushHiddenRun(`hide-${i}`);
+      rendered.push(<BlockView key={i} block={b} toolDisplay={toolDisplay} />);
+    });
+    flushHiddenRun("hide-end");
+  } else {
+    entry.blocks.forEach((b, i) => {
+      rendered.push(<BlockView key={i} block={b} toolDisplay={toolDisplay} />);
+    });
+  }
+
   return (
     <div className="msg agent">
       <div className="who agent-who">agent</div>
       <div className="body">
         {entry.blocks.length === 0 && <span className="dots" aria-label="working" />}
-        {entry.blocks.map((b, i) => (
-          <BlockView key={i} block={b} />
-        ))}
+        {rendered}
       </div>
     </div>
   );
 });
 
-function BlockView({ block }: { block: AgentBlock }) {
-  const [open, setOpen] = useState(false);
+/** One-line description of a tool call, for the collapsed row. */
+function describeCall(name: string, input: unknown): string {
+  const rec = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
 
+  switch (name) {
+    case "read_file":
+    case "write_file":
+    case "edit_file":
+    case "delete_file":
+      return str(rec.path);
+    case "list_files": {
+      const path = str(rec.path) || "workspace root";
+      const depth = rec.depth;
+      return typeof depth === "number" ? `${path} · depth ${depth}` : path;
+    }
+    case "search_files": {
+      const pattern = str(rec.pattern);
+      const glob = str(rec.glob);
+      const base = pattern ? `"${pattern}"` : "";
+      return glob ? `${base} · in ${glob}` : base;
+    }
+    case "read_doc":
+    case "write_doc":
+    case "edit_doc":
+      return "";
+    case "delegate": {
+      const tasks = Array.isArray(rec.tasks) ? rec.tasks.length : 0;
+      return `${tasks} tasks`;
+    }
+    case "web_search": {
+      const query = str(rec.query);
+      return query ? `"${query}"` : "";
+    }
+    default:
+      return "";
+  }
+}
+
+/** Human-readable byte size, matching the `18 lines` / `340 B` hint format. */
+function sizeHint(result: string): string {
+  if (result.includes("\n")) {
+    return `${result.split("\n").length} lines`;
+  }
+  const bytes = result.length;
+  if (bytes < 1000) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function BlockView({
+  block,
+  toolDisplay,
+}: {
+  block: AgentBlock;
+  toolDisplay: "hidden" | "compact" | "full";
+}) {
   if (block.type === "thinking") {
-    return (
-      <div className="thinking">
-        <button className="thinking-toggle" onClick={() => setOpen((v) => !v)}>
-          {open ? "▾" : "▸"} reasoning
-        </button>
-        {open && <div className="thinking-body">{block.text}</div>}
-      </div>
-    );
+    return <ThinkingBlock block={block} />;
   }
 
   if (block.type === "text") {
     return <div className="text">{block.text}</div>;
   }
 
+  return <ToolBlock block={block} toolDisplay={toolDisplay} />;
+}
+
+function ThinkingBlock({ block }: { block: Extract<AgentBlock, { type: "thinking" }> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="thinking">
+      <button className="thinking-toggle" onClick={() => setOpen((v) => !v)}>
+        {open ? "▾" : "▸"} reasoning
+      </button>
+      {open && <div className="thinking-body">{block.text}</div>}
+    </div>
+  );
+}
+
+function ToolBlock({
+  block,
+  toolDisplay,
+}: {
+  block: Extract<AgentBlock, { type: "tool" }>;
+  toolDisplay: "hidden" | "compact" | "full";
+}) {
+  // Errors and denials start expanded — the one result the user must not
+  // have to hunt for. Every other block starts per the room's toolDisplay
+  // mode (or collapsed, when no mode is given).
+  const startsOpen =
+    block.status === "error" || block.status === "denied" || toolDisplay === "full";
+  const [open, setOpen] = useState(startsOpen);
+
+  const summary = describeCall(block.name, block.input);
+  const isRedacted = block.result === REDACTED;
+  // The size of a withheld file is itself a small leak — how much someone
+  // wrote, roughly what shape it is — so a redacted result shows no hint.
+  const hint = !open && block.result && !isRedacted ? sizeHint(block.result) : null;
+
   return (
     <div className={`tool tool-${block.status}`}>
-      <div className="tool-head">
+      <div className="tool-head" onClick={() => setOpen((v) => !v)} role="button">
+        <span className="tool-disclosure">{open ? "▾" : "▸"}</span>
         <code>{block.name}</code>
+        {summary && <span className="tool-summary">{summary}</span>}
+        <span className={`tool-pip tool-pip-${block.status}`} aria-hidden="true" />
         <span className="tool-status">
           {block.status === "running"
             ? "running"
@@ -314,9 +438,11 @@ function BlockView({ block }: { block: AgentBlock }) {
                 ? "failed"
                 : "done"}
         </span>
+        {hint && <span className="tool-hint">{hint}</span>}
       </div>
-      {block.result &&
-        (block.result === REDACTED ? (
+      {open &&
+        block.result &&
+        (isRedacted ? (
           <div className="tool-result hint redacted" style={{ fontStyle: "italic" }}>
             {block.result}
           </div>
