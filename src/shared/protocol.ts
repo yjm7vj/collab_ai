@@ -276,10 +276,22 @@ export function tally(p: PendingTool): { approve: number; deny: number } {
  * token without being admitted to the room — so admission is decided here, over
  * plain HTTP, and the socket is authenticated from its first byte.
  */
-export type CreateRoomRequest = { uid: string; name: string; title?: string };
+/** Providers a deployment has configured. Empty means sign-in is off. */
+export type AuthConfigResponse = { providers: ("github" | "google")[] };
+
+/**
+ * A signed identity, minted after sign-in and held by the browser.
+ *
+ * The payload is readable (it is signed, not encrypted) so the client can show
+ * who it is without another round trip. It is not a room credential: it proves
+ * who you are, and `/api/join` still decides which rooms that gets you into.
+ */
+export const IDENTITY_MARKER = "identity";
+
+export type CreateRoomRequest = { uid: string; name: string; title?: string; identity?: string };
 export type CreateRoomResponse = { roomId: string; token: string; role: string };
 
-export type JoinRoomRequest = { roomId: string; uid: string; name: string; code?: string };
+export type JoinRoomRequest = { roomId: string; uid: string; name: string; code?: string; identity?: string };
 export type JoinRoomResponse = { token: string; role: string };
 
 /** Why admission was refused. Shown to the person trying to get in. */
@@ -291,7 +303,8 @@ export type JoinRefusal =
   | "bad_code"
   | "code_expired"
   | "code_used_up"
-  | "code_revoked";
+  | "code_revoked"
+  | "sign_in_required";
 
 export type JoinErrorResponse = { error: JoinRefusal };
 

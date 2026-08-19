@@ -100,11 +100,15 @@ export function Landing({
   busy,
   problem,
   onCreate,
+  identityName,
+  onSignOut,
 }: {
   initialName: string;
   busy: boolean;
   problem: string | null;
   onCreate: (name: string) => void;
+  identityName?: string;
+  onSignOut?: () => void;
 }) {
   const [value, setValue] = useState(initialName);
   return (
@@ -113,22 +117,33 @@ export function Landing({
         className="gate-card"
         onSubmit={(e) => {
           e.preventDefault();
-          onCreate(value);
+          onCreate(identityName ?? value);
         }}
       >
         <h1>collab_ai</h1>
         <p className="gate-sub">
           One agent, many people. Make a room and share the link.
         </p>
-        <input
-          autoFocus
-          value={value}
-          maxLength={32}
-          placeholder="Your name"
-          onChange={(e) => setValue(e.target.value)}
-          aria-label="Your name"
-        />
-        <button type="submit" disabled={!value.trim() || busy}>
+        {identityName ? (
+          <p className="gate-signed-in">
+            Signed in as {identityName}
+            {onSignOut && (
+              <button type="button" className="linkbtn" onClick={onSignOut}>
+                Sign out
+              </button>
+            )}
+          </p>
+        ) : (
+          <input
+            autoFocus
+            value={value}
+            maxLength={32}
+            placeholder="Your name"
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="Your name"
+          />
+        )}
+        <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
           {busy ? "creating…" : "Create a room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
@@ -148,12 +163,16 @@ export function JoinGate({
   busy,
   problem,
   onJoin,
+  identityName,
+  onSignOut,
 }: {
   roomId: string;
   initialName: string;
   busy: boolean;
   problem: string | null;
   onJoin: (name: string) => void;
+  identityName?: string;
+  onSignOut?: () => void;
 }) {
   const [value, setValue] = useState(initialName);
   return (
@@ -162,7 +181,7 @@ export function JoinGate({
         className="gate-card"
         onSubmit={(e) => {
           e.preventDefault();
-          onJoin(value);
+          onJoin(identityName ?? value);
         }}
       >
         <h1>collab_ai</h1>
@@ -171,15 +190,26 @@ export function JoinGate({
           <br />
           room {roomId.slice(0, 6)}…
         </p>
-        <input
-          autoFocus
-          value={value}
-          maxLength={32}
-          placeholder="Your name"
-          onChange={(e) => setValue(e.target.value)}
-          aria-label="Your name"
-        />
-        <button type="submit" disabled={!value.trim() || busy}>
+        {identityName ? (
+          <p className="gate-signed-in">
+            Signed in as {identityName}
+            {onSignOut && (
+              <button type="button" className="linkbtn" onClick={onSignOut}>
+                Sign out
+              </button>
+            )}
+          </p>
+        ) : (
+          <input
+            autoFocus
+            value={value}
+            maxLength={32}
+            placeholder="Your name"
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="Your name"
+          />
+        )}
+        <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
           {busy ? "joining…" : "Join room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
@@ -187,6 +217,47 @@ export function JoinGate({
           Your name is how the room and the agent will refer to you.
         </p>
       </form>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- sign-in */
+
+const PROVIDER_LABELS: Record<string, string> = {
+  github: "Continue with GitHub",
+  google: "Continue with Google",
+};
+
+export function SignInGate({
+  providers,
+  onSignIn,
+  problem,
+}: {
+  providers: string[];
+  onSignIn: (p: string) => void;
+  problem: string | null;
+}) {
+  return (
+    <div className="gate">
+      <div className="gate-card">
+        <h1>collab_ai</h1>
+        <p className="gate-sub">
+          One agent, many people. Sign in to create or join a room.
+        </p>
+        <div className="signin-providers">
+          {providers
+            .filter((p) => p in PROVIDER_LABELS)
+            .map((p) => (
+              <button key={p} type="button" onClick={() => onSignIn(p)}>
+                {PROVIDER_LABELS[p]}
+              </button>
+            ))}
+        </div>
+        {problem && <p className="gate-error">{problem}</p>}
+        <p className="gate-foot">
+          We only read your name and avatar. Nothing is posted on your behalf.
+        </p>
+      </div>
     </div>
   );
 }
