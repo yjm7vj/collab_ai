@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 
 import {
@@ -25,8 +25,18 @@ import {
   Presence,
   Transcript,
   WorkerStrip,
+  WorkspacePanel,
 } from "./components";
 import { SettingsPanel } from "./Settings";
+import {
+  ensureReadPermission,
+  forgetHandle,
+  isFileAccessSupported,
+  loadHandle,
+  performFsRequest,
+  pickDirectory,
+  saveHandle,
+} from "./workspace";
 
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
@@ -59,6 +69,13 @@ export function RoomView({
   const [showInvites, setShowInvites] = useState(false);
   const [members, setMembers] = useState<MemberSummary[]>([]);
   const [showMembers, setShowMembers] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
+  // The picked directory handle isn't rendered, so it lives in a ref rather
+  // than state — putting it in state would just cause re-renders nothing reads.
+  const rootRef = useRef<FileSystemDirectoryHandle | null>(null);
+  // Whether this tab can currently answer fs.req itself, i.e. whether rootRef
+  // is populated and its permission is (still) granted.
+  const [wsReady, setWsReady] = useState(false);
 
   // These hide controls the server would refuse anyway; the server is the
   // boundary, this is only so nobody clicks into a refusal.
@@ -116,6 +133,25 @@ export function RoomView({
         break;
       case "error":
         setError(msg.message);
+        break;
+      case "fs.req":
+        // applyServerMessage is synchronous but answering a filesystem
+        // request is not, so the work happens in a fire-and-forget async
+        // closure. The reply carries the same id the room sent, which is
+        // how the room matches it back up — nothing here depends on this
+        // resolving before the next message is handled.
+        void (async () => {
+          if (!rootRef.current) {
+            send({
+              t: "fs.res",
+              id: msg.id,
+              res: { ok: false, error: "This member isn't hosting a workspace." },
+            });
+            return;
+          }
+          const res = await performFsRequest(rootRef.current, msg.req);
+          send({ t: "fs.res", id: msg.id, res });
+        })();
         break;
     }
   }, []);
@@ -199,6 +235,43 @@ export function RoomView({
   );
   const removeMember = useCallback((uid: string) => send({ t: "member.remove", uid }), [send]);
 
+  // A stored handle can outlive its permission grant — browsers drop File
+  // System Access permissions on things like a profile restart or enough time
+  // away, so a handle recovered from IndexedDB is only trusted once its
+  // permission is re-confirmed, never assumed from the fact that it was saved.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const handle = await loadHandle(roomId);
+      if (!handle || cancelled) return;
+      const granted = await ensureReadPermission(handle);
+      if (!granted || cancelled) return;
+      rootRef.current = handle;
+      setWsReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId]);
+
+  const attachWorkspace = useCallback(async () => {
+    const handle = await pickDirectory();
+    if (!handle) return;
+    const granted = await ensureReadPermission(handle);
+    if (!granted) return;
+    await saveHandle(roomId, handle);
+    rootRef.current = handle;
+    setWsReady(true);
+    send({ t: "workspace.attach", kind: "local", label: handle.name });
+  }, [roomId, send]);
+
+  const detachWorkspace = useCallback(async () => {
+    await forgetHandle(roomId);
+    rootRef.current = null;
+    setWsReady(false);
+    send({ t: "workspace.detach" });
+  }, [roomId, send]);
+
   const copyLink = useCallback(() => {
     void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`).then(() => {
       setCopied(true);
@@ -275,6 +348,19 @@ export function RoomView({
                   ? "custom"
                   : "ask first"}
           </span>
+          {state.workspace.kind !== "none" && (
+            <span
+              className={`ws-chip ${state.workspace.online ? "ws-online" : "ws-offline"}`}
+              title={
+                state.workspace.online
+                  ? `Workspace: ${state.workspace.label}`
+                  : "The workspace host is offline"
+              }
+            >
+              📁 {state.workspace.label}
+              {state.workspace.online ? "" : " (offline)"}
+            </span>
+          )}
           <Presence users={state.users} me={me} />
           {mayManage && (
             <button
@@ -299,6 +385,16 @@ export function RoomView({
               aria-label="Invite people"
             >
               🔗
+            </button>
+          )}
+          {mayPolicy && (
+            <button
+              className="icon"
+              onClick={() => setShowWorkspace(true)}
+              title="Workspace"
+              aria-label="Workspace"
+            >
+              📁
             </button>
           )}
           {mayPolicy && (
@@ -350,6 +446,17 @@ export function RoomView({
             setShowPermissions(false);
           }}
           onClose={() => setShowPermissions(false)}
+        />
+      )}
+
+      {showWorkspace && (
+        <WorkspacePanel
+          workspace={state.workspace}
+          supported={isFileAccessSupported()}
+          hosting={wsReady}
+          onAttach={attachWorkspace}
+          onDetach={detachWorkspace}
+          onClose={() => setShowWorkspace(false)}
         />
       )}
 

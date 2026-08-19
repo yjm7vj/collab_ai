@@ -13,6 +13,7 @@ import {
 import { thresholdFor } from "../src/shared/protocol";
 import {
   ROLE_CAPS,
+  TOOL_NAMES,
   approvalThreshold,
   asRole,
   can,
@@ -23,7 +24,8 @@ import {
   type Capability,
   type Role,
 } from "../src/shared/access";
-import { gatedFor, toolsFor } from "../src/server/tools";
+import { DEFAULT_DENY, DEFAULT_PATH_POLICY } from "../src/shared/workspace";
+import { gatedFor, toolsFor, toolsForRoom } from "../src/server/tools";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail?: unknown) {
@@ -180,7 +182,12 @@ check("asRole(42) is viewer", asRole(42) === "viewer", asRole(42));
 
 console.log("\nagent permission policy");
 
-const basePolicy = { mode: "ask" as const, tools: {} as never, approval: "majority" as const };
+const basePolicy = {
+  mode: "ask" as const,
+  tools: {} as never,
+  approval: "majority" as const,
+  paths: DEFAULT_PATH_POLICY,
+};
 
 const readOnlyDecisions = resolveTools({ ...basePolicy, mode: "read_only" });
 check("read_only denies write_doc", readOnlyDecisions.write_doc === "deny", readOnlyDecisions.write_doc);
@@ -266,6 +273,78 @@ check(
   "sanitizeAccessPolicy({tools:{write_doc:'banana'}}) does not yield allow",
   p5.tools.write_doc !== "allow",
   p5.tools.write_doc,
+);
+
+console.log("\nworkspace file tools");
+
+const FILE_TOOLS = ["list_files", "read_file", "search_files"] as const;
+
+check(
+  "TOOL_NAMES contains the three file tools",
+  FILE_TOOLS.every((n) => (TOOL_NAMES as readonly string[]).includes(n)),
+  TOOL_NAMES,
+);
+
+for (const mode of ["read_only", "ask", "auto"] as const) {
+  const decisions = resolveTools({ ...basePolicy, mode });
+  check(
+    `${mode} allows all three file tools`,
+    FILE_TOOLS.every((n) => decisions[n] === "allow"),
+    FILE_TOOLS.map((n) => [n, decisions[n]]),
+  );
+}
+
+const p6 = sanitizeAccessPolicy({});
+check(
+  "sanitizeAccessPolicy({}) paths.deny contains the default deny entries",
+  DEFAULT_DENY.every((g) => p6.paths.deny.includes(g)),
+  p6.paths.deny,
+);
+
+// A client cannot shrink the path deny list by sending an empty array for it
+// — sanitizePathPolicy always unions the defaults back in, so the policy can
+// never be widened from the wire.
+const p7 = sanitizeAccessPolicy({ paths: { deny: [] } });
+check(
+  "sanitizeAccessPolicy({paths:{deny:[]}}) still contains every default deny entry",
+  DEFAULT_DENY.every((g) => p7.paths.deny.includes(g)),
+  p7.paths.deny,
+);
+
+const offlineTools = toolsForRoom({ ...basePolicy, mode: "auto" }, "solo", false) as { name?: string }[];
+const offlineNames = offlineTools.map((t) => t.name);
+check(
+  "toolsForRoom(policy, 'solo', false) contains none of the file tools",
+  FILE_TOOLS.every((n) => !offlineNames.includes(n)),
+  offlineNames,
+);
+
+const onlineTools = toolsForRoom({ ...basePolicy, mode: "auto" }, "solo", true) as { name?: string }[];
+const onlineNames = onlineTools.map((t) => t.name);
+check(
+  "toolsForRoom(policy, 'solo', true) contains all three file tools",
+  FILE_TOOLS.every((n) => onlineNames.includes(n)),
+  onlineNames,
+);
+
+// toolsForRoom composes with the existing per-tool filter: a denied doc tool
+// stays denied whether or not the workspace is online.
+const deniedDocPolicy = {
+  ...basePolicy,
+  mode: "custom" as const,
+  tools: { ...resolveTools({ ...basePolicy, mode: "auto" }), read_doc: "deny" as const },
+};
+const composedTools = toolsForRoom(deniedDocPolicy, "solo", true) as { name?: string }[];
+const composedNames = composedTools.map((t) => t.name);
+check(
+  "toolsForRoom(workspaceOnline: true) still excludes a denied doc tool",
+  !composedNames.includes("read_doc"),
+  composedNames,
+);
+check(
+  "toolsForRoom(workspaceOnline: true) still includes the file tools alongside the denial",
+  FILE_TOOLS.every((n) => composedNames.includes(n)),
+  composedNames,
 );
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);

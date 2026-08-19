@@ -68,13 +68,24 @@ import {
   execute,
   gatedFor,
   summarize as summarizeCall,
-  toolsFor,
+  toolsForRoom,
   workerToolsFor,
   type ToolCtx,
+  type ToolOutcome,
 } from "./tools";
 import { constantTimeEqual, newInviteCode } from "./auth";
 import { PendingRequests } from "./workspace";
-import { NO_WORKSPACE, type FsResponse, type WorkspaceKind } from "../shared/workspace";
+import {
+  FS_LIMITS,
+  NO_WORKSPACE,
+  clampRequest,
+  isWriteOp,
+  normalizePath,
+  pathDecision,
+  type FsRequest,
+  type FsResponse,
+  type WorkspaceKind,
+} from "../shared/workspace";
 
 /** In-flight turn bookkeeping. Persisted, because a turn can outlive this instance. */
 type Turn = {
@@ -914,6 +925,112 @@ export class Room extends Agent<Env, RoomState> {
     this.#pending.settle(id, res);
   }
 
+  /**
+   * Run one filesystem request against the connected workspace.
+   *
+   * Three things happen here in order, and the order matters: the path is
+   * normalised, then checked against the room's path policy, and only then sent
+   * to the host. A denied path never leaves the server, so a refusal cannot be
+   * turned into a request by anything the host's browser does.
+   */
+  async #fs(req: FsRequest): Promise<FsResponse> {
+    if (this.state.workspace.kind === "none") {
+      return { ok: false, error: "No workspace is connected to this room." };
+    }
+    if (!this.state.workspace.online) {
+      return { ok: false, error: "The workspace host is offline, so files can't be read right now." };
+    }
+
+    // Search and list both walk the tree themselves, so neither names a single
+    // path this server can police before the request leaves. Instead the room
+    // hands its deny globs to the provider, which does the walking and is the
+    // only place that can skip an entry before touching it. Search would
+    // otherwise return the contents of a denied file; list would name it, and a
+    // filename is itself worth protecting. Injected here rather than taken from
+    // the model, which must not get a say in what it may not see.
+    const denyGlobs = [...this.#policy().paths.deny];
+    const withDeny: FsRequest =
+      req.op === "search" || req.op === "list" ? { ...req, deny: denyGlobs } : req;
+    const clamped = clampRequest(withDeny);
+
+    // "search" has no single path to check — the glob is applied on the host
+    // instead — every other op names one path to police here.
+    if (clamped.op !== "search") {
+      const normalized = normalizePath(clamped.path);
+      if (normalized === null) {
+        return { ok: false, error: "That path isn't allowed." };
+      }
+      const write = isWriteOp(clamped.op);
+      const decision = pathDecision(this.#policy().paths, normalized, write);
+      if (decision === "deny") {
+        return { ok: false, error: "The room's rules don't allow access to that path." };
+      }
+      // "ask" on a read is treated as allowed — reads are governed by deny,
+      // not by votes, so a per-file vote would be unusable. A future phase
+      // makes "ask" on a write mean a vote instead of an outright refusal;
+      // for now writes of any decision besides "deny" are simply not enabled.
+      if (write) {
+        return { ok: false, error: "Writing to the workspace isn't enabled yet." };
+      }
+    }
+
+    const hostUid = this.state.workspace.hostUid;
+    let host: Connection | null = null;
+    for (const c of this.getConnections()) {
+      if (this.#uidOf(c) === hostUid) {
+        host = c;
+        break;
+      }
+    }
+    if (!host) {
+      return { ok: false, error: "The workspace host isn't connected." };
+    }
+
+    const { id, promise } = this.#pending.open(FS_LIMITS.timeoutMs);
+    // Sent to the host's connection only, never broadcast — handing a file
+    // request to the whole room would let any member answer it.
+    host.send(JSON.stringify({ t: "fs.req", id, req: clamped } satisfies ServerMsg));
+    return promise;
+  }
+
+  /**
+   * Build an `FsRequest` from one of the file tools' raw model input.
+   *
+   * The model can send anything — missing fields, wrong types — so every field
+   * is coerced defensively rather than trusted. `#fs` clamps the numeric
+   * fields again to `FS_LIMITS`, so this only needs to supply sane defaults
+   * for what the model omitted.
+   */
+  #fsRequestFor(name: "list_files" | "read_file" | "search_files", input: unknown): FsRequest {
+    const i = (input ?? {}) as Record<string, unknown>;
+    const str = (v: unknown, fallback: string) => (typeof v === "string" ? v : fallback);
+    const num = (v: unknown, fallback: number) =>
+      typeof v === "number" && Number.isFinite(v) ? v : fallback;
+
+    switch (name) {
+      case "list_files":
+        // `deny` is a placeholder; #fs overwrites it with the room's real globs.
+        return { op: "list", path: str(i.path, ""), depth: num(i.depth, 2), deny: [] };
+      case "read_file":
+        return {
+          op: "read",
+          path: str(i.path, ""),
+          offset: num(i.offset, 0),
+          limit: num(i.limit, FS_LIMITS.readBytes),
+        };
+      case "search_files":
+        return {
+          op: "search",
+          pattern: str(i.pattern, ""),
+          glob: str(i.glob, ""),
+          max: num(i.max, FS_LIMITS.searchMatches),
+          // Placeholder only. #fs overwrites this with the room's real deny
+          // globs, so nothing the model puts here can survive.
+          deny: [],
+        };
+    }
+  }
+
   async #onSay(connection: Connection, rawText: string) {
     if (!this.#allow(connection, "speak", "You're a viewer in this room, so you can't talk to the agent.")) return;
     const text = rawText.trim();
@@ -1227,23 +1344,33 @@ export class Room extends Agent<Env, RoomState> {
         // Map API content-block index -> index in the entry we render.
         const slots = new Map<number, number>();
 
-        const { message, usage } = await runModel(this.#config(), this.#settings(), this.#convo(), toolsFor(this.#policy(), this.#settings().workflow), {
-          onBlockStart: (index, type) => {
-            if (type !== "text" && type !== "thinking") return;
-            entry.blocks.push({ type, text: "" } as AgentBlock);
-            slots.set(index, entry.blocks.length - 1);
-            this.#patch(entry);
+        const { message, usage } = await runModel(
+          this.#config(),
+          this.#settings(),
+          this.#convo(),
+          toolsForRoom(
+            this.#policy(),
+            this.#settings().workflow,
+            this.state.workspace.kind !== "none" && this.state.workspace.online,
+          ),
+          {
+            onBlockStart: (index, type) => {
+              if (type !== "text" && type !== "thinking") return;
+              entry.blocks.push({ type, text: "" } as AgentBlock);
+              slots.set(index, entry.blocks.length - 1);
+              this.#patch(entry);
+            },
+            onDelta: (index, _kind, text) => {
+              const slot = slots.get(index);
+              if (slot === undefined) return;
+              const block = entry.blocks[slot]!;
+              if (block.type === "text" || block.type === "thinking") block.text += text;
+              // Stream the token; persist the accumulated entry once, below. A
+              // write per token would be a lot of storage traffic for no benefit.
+              this.#send({ t: "delta", entryId: entry.id, block: slot, text });
+            },
           },
-          onDelta: (index, _kind, text) => {
-            const slot = slots.get(index);
-            if (slot === undefined) return;
-            const block = entry.blocks[slot]!;
-            if (block.type === "text" || block.type === "thinking") block.text += text;
-            // Stream the token; persist the accumulated entry once, below. A
-            // write per token would be a lot of storage traffic for no benefit.
-            this.#send({ t: "delta", entryId: entry.id, block: slot, text });
-          },
-        });
+        );
 
         this.#setConvo([...this.#convo(), { role: "assistant", content: message.content }]);
         this.#recordUsage(usage);
@@ -1305,12 +1432,23 @@ export class Room extends Agent<Env, RoomState> {
               threshold,
             });
           } else {
-            // `delegate` is the one async tool — it fans out to worker models.
-            // Everything else resolves synchronously against the doc buffer.
-            const outcome =
-              call.name === "delegate"
-                ? await this.#delegate((call.input as { tasks?: unknown })?.tasks, docs)
-                : execute(call.name, call.input, docs);
+            // `delegate` is one async tool — it fans out to worker models. The
+            // file tools are also async, each a round trip to the workspace
+            // host's browser via #fs. Everything else resolves synchronously
+            // against the doc buffer.
+            let outcome: ToolOutcome;
+            if (call.name === "delegate") {
+              outcome = await this.#delegate((call.input as { tasks?: unknown })?.tasks, docs);
+            } else if (
+              call.name === "list_files" ||
+              call.name === "read_file" ||
+              call.name === "search_files"
+            ) {
+              const res = await this.#fs(this.#fsRequestFor(call.name, call.input));
+              outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
+            } else {
+              outcome = execute(call.name, call.input, docs);
+            }
 
             results.push({
               type: "tool_result",

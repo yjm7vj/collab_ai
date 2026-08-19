@@ -251,9 +251,17 @@ export function describePathPolicy(policy: PathPolicy): string {
 
 /** One filesystem operation the agent can ask a provider to perform. */
 export type FsRequest =
-  | { op: "list"; path: string; depth: number }
+  | { op: "list"; path: string; depth: number; deny: string[] }
   | { op: "read"; path: string; offset: number; limit: number }
-  | { op: "search"; pattern: string; glob: string; max: number }
+  /**
+   * `deny` carries the room's deny globs to the provider.
+   *
+   * Every other operation names one path the server can police before the
+   * request leaves. A search names none — it walks the tree itself — so
+   * without this the deny list would be trivially bypassed by searching for
+   * a secret instead of reading the file holding it.
+   */
+  | { op: "search"; pattern: string; glob: string; max: number; deny: string[] }
   | { op: "write"; path: string; content: string }
   | { op: "edit"; path: string; oldText: string; newText: string }
   | { op: "remove"; path: string };
@@ -298,7 +306,13 @@ function clampInt(value: unknown, min: number, max: number, whenInvalid: number)
 export function clampRequest(req: FsRequest): FsRequest {
   switch (req.op) {
     case "list":
-      return { ...req, depth: clampInt(req.depth, 0, FS_LIMITS.listDepth, FS_LIMITS.listDepth) };
+      return {
+        ...req,
+        depth: clampInt(req.depth, 0, FS_LIMITS.listDepth, FS_LIMITS.listDepth),
+        // A denied file should not even be visible by name. Same fallback
+        // reasoning as search: absent means default, never means none.
+        deny: Array.isArray(req.deny) ? req.deny.filter((g) => typeof g === "string") : [...DEFAULT_DENY],
+      };
     case "read":
       return {
         ...req,
@@ -306,7 +320,13 @@ export function clampRequest(req: FsRequest): FsRequest {
         limit: clampInt(req.limit, 1, FS_LIMITS.readBytes, FS_LIMITS.readBytes),
       };
     case "search":
-      return { ...req, max: clampInt(req.max, 1, FS_LIMITS.searchMatches, FS_LIMITS.searchMatches) };
+      return {
+        ...req,
+        max: clampInt(req.max, 1, FS_LIMITS.searchMatches, FS_LIMITS.searchMatches),
+        // Never let a malformed frame empty this — an absent deny list would
+        // mean a search that reads everything.
+        deny: Array.isArray(req.deny) ? req.deny.filter((g) => typeof g === "string") : [...DEFAULT_DENY],
+      };
     default:
       return req;
   }

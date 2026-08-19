@@ -7,6 +7,8 @@
  * acting.
  */
 
+import { DEFAULT_PATH_POLICY, sanitizePathPolicy, type PathPolicy } from "./workspace";
+
 export type Role = "owner" | "admin" | "editor" | "viewer";
 
 /** Every role, most powerful first. */
@@ -80,10 +82,12 @@ export function isVoter(role: Role): boolean {
 export type ToolDecision = "allow" | "ask" | "deny";
 
 export type ToolName =
-  | "read_doc" | "write_doc" | "edit_doc" | "delegate" | "web_search" | "web_fetch";
+  | "read_doc" | "write_doc" | "edit_doc" | "delegate" | "web_search" | "web_fetch"
+  | "list_files" | "read_file" | "search_files";
 
 export const TOOL_NAMES: readonly ToolName[] = [
   "read_doc", "write_doc", "edit_doc", "delegate", "web_search", "web_fetch",
+  "list_files", "read_file", "search_files",
 ] as const;
 
 /**
@@ -104,18 +108,24 @@ export type AccessPolicy = {
   mode: PermissionMode;
   tools: Record<ToolName, ToolDecision>;
   approval: ApprovalPolicy;
+  /** Which paths in the workspace the agent may touch. */
+  paths: PathPolicy;
 };
 
 const ALL_ALLOW: Record<ToolName, ToolDecision> = {
   read_doc: "allow", write_doc: "allow", edit_doc: "allow",
   delegate: "allow", web_search: "allow", web_fetch: "allow",
+  list_files: "allow", read_file: "allow", search_files: "allow",
 };
 
 export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<ToolName, ToolDecision>> = {
   // Claude Code's plan mode. The writing tools are not merely gated, they are
   // withheld entirely, so the agent proposes in prose instead of burning turns
-  // on calls it will never be allowed to make.
+  // on calls it will never be allowed to make. The file tools are reads, and
+  // reading is exactly what read-only mode is for, so all three stay "allow".
   read_only: { ...ALL_ALLOW, write_doc: "deny", edit_doc: "deny" },
+  // A vote per file read would be unusable — the path policy is the real
+  // control for reads, not the vote — so the file tools stay "allow" here too.
   ask: { ...ALL_ALLOW, write_doc: "ask", edit_doc: "ask" },
   auto: { ...ALL_ALLOW },
 };
@@ -124,6 +134,7 @@ export const DEFAULT_POLICY: AccessPolicy = {
   mode: "ask",
   tools: MODE_PRESETS.ask,
   approval: "majority",
+  paths: DEFAULT_PATH_POLICY,
 };
 
 /** The effective matrix: a preset when one is named, else the stored matrix. */
@@ -156,7 +167,11 @@ export function sanitizeAccessPolicy(input: unknown): AccessPolicy {
     const v = incoming[name];
     tools[name] = v === "allow" || v === "deny" ? v : v === "ask" ? "ask" : MODE_PRESETS.ask[name];
   }
-  return { mode, tools, approval };
+  // sanitizePathPolicy always unions the default deny list back into whatever
+  // arrives, so this can never be used to widen access beyond what the room
+  // already forbids — only to narrow it further or add ask rules.
+  const paths = sanitizePathPolicy(raw.paths);
+  return { mode, tools, approval, paths };
 }
 
 /**

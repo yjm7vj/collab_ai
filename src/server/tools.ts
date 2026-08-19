@@ -131,6 +131,67 @@ export const TOOL_DEFS = [
       required: ["old_text", "new_text"],
     },
   },
+  {
+    name: "list_files",
+    description:
+      "List files and directories in the room's connected workspace. Start " +
+      "here before reading — you cannot guess paths. Paths are relative to " +
+      "the workspace root; use \"\" for the root itself. Requires a " +
+      "connected workspace. Some paths are off-limits and will be refused.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        path: {
+          type: "string",
+          description: "Directory to list, relative to the workspace root. Empty string for the root.",
+        },
+        depth: {
+          type: "integer",
+          description: "How many levels to descend. Higher values return far more, and the result is capped.",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "read_file",
+    description:
+      "Read one file from the room's connected workspace. Large files are " +
+      "truncated, so use offset to page through one if you need the rest. " +
+      "Requires a connected workspace. Some paths are off-limits and will be refused.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        path: { type: "string", description: "File to read, relative to the workspace root." },
+        offset: {
+          type: "integer",
+          description: "Byte offset to start from. Use it to continue a truncated read.",
+        },
+        limit: { type: "integer", description: "Maximum bytes to return." },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "search_files",
+    description:
+      "Search the workspace for a literal substring, case-insensitively. " +
+      "Much cheaper than reading many files — use it to find where something " +
+      "lives, then read that file. Requires a connected workspace. Some " +
+      "paths are off-limits and will be refused.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        pattern: { type: "string", description: "Literal substring to search for." },
+        glob: {
+          type: "string",
+          description: "Restrict to matching paths, e.g. src/**/*.ts. Empty means everywhere.",
+        },
+        max: { type: "integer", description: "Maximum matches to return." },
+      },
+      required: ["pattern"],
+    },
+  },
   { type: "web_search_20260209", name: "web_search" },
   { type: "web_fetch_20260209", name: "web_fetch" },
 ];
@@ -175,6 +236,27 @@ export function toolsFor(policy: AccessPolicy, workflow: "solo" | "manager"): un
   });
 }
 
+/** The three tools that require a live round trip to a connected workspace. */
+const WORKSPACE_TOOL_NAMES = new Set(["list_files", "read_file", "search_files"]);
+
+/**
+ * Tool definitions for a room, given its policy AND whether a workspace is
+ * reachable.
+ *
+ * The file tools are withheld entirely when there is no workspace online. An
+ * agent handed a tool that always fails will keep trying it, so absence is
+ * better than a tool that only ever returns an error.
+ */
+export function toolsForRoom(
+  policy: AccessPolicy,
+  workflow: "solo" | "manager",
+  workspaceOnline: boolean,
+): unknown[] {
+  const base = toolsFor(policy, workflow);
+  if (workspaceOnline) return base;
+  return base.filter((def) => !WORKSPACE_TOOL_NAMES.has(toolName(def)));
+}
+
 /** Worker tools under this policy. Workers can never write, gated or not. */
 export function workerToolsFor(policy: AccessPolicy): unknown[] {
   const decisions = resolveTools(policy);
@@ -196,6 +278,19 @@ export function summarize(name: string, input: any): string {
       const from = preview(input?.old_text);
       const to = preview(input?.new_text);
       return to === '""' ? `Delete ${from}` : `Replace ${from} with ${to}`;
+    }
+    case "list_files": {
+      const path = String(input?.path ?? "");
+      const depth = input?.depth;
+      const where = path === "" ? "the workspace root" : path;
+      return depth === undefined ? `List ${where}` : `List ${where} (depth ${depth})`;
+    }
+    case "read_file":
+      return `Read ${String(input?.path ?? "")}`;
+    case "search_files": {
+      const pattern = String(input?.pattern ?? "");
+      const glob = String(input?.glob ?? "");
+      return glob ? `Search for "${pattern}" in ${glob}` : `Search for "${pattern}"`;
     }
     default:
       return `Run ${name}`;
@@ -259,6 +354,10 @@ export function execute(name: string, input: any, ctx: ToolCtx): ToolOutcome {
     }
 
     default:
+      // list_files, read_file and search_files are not handled here: they are
+      // async and go through the room's workspace provider rather than this
+      // synchronous doc-buffer path, so room.ts dispatches them directly —
+      // they require a round trip to the workspace host's browser.
       return { ok: false, text: `Unknown tool: ${name}` };
   }
 }

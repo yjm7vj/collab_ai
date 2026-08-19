@@ -491,3 +491,43 @@ async function main() {
 }
 
 main();
+
+/**
+ * A search names no single path, so it is the one operation the server cannot
+ * police before the request leaves. These checks guard the compensating
+ * control: the deny globs always travel with the request.
+ */
+console.log("\nsearch carries the deny list");
+{
+  const withDeny = clampRequest({
+    op: "search", pattern: "x", glob: "", max: 10, deny: ["**/.env"],
+  });
+  check(
+    "an explicit deny list survives clamping",
+    withDeny.op === "search" && withDeny.deny.includes("**/.env"),
+    withDeny,
+  );
+
+  // A frame that omits or corrupts `deny` must not produce a search that reads
+  // everything — it falls back to the full default list.
+  for (const bad of [undefined, null, "nope", 42, {}] as unknown[]) {
+    const r = clampRequest({
+      op: "search", pattern: "x", glob: "", max: 10, deny: bad as string[],
+    });
+    check(
+      `deny of ${JSON.stringify(bad)} falls back to the defaults`,
+      r.op === "search" && DEFAULT_DENY.every((d) => r.deny.includes(d)),
+      r.op === "search" ? r.deny.length : r,
+    );
+  }
+
+  const mixed = clampRequest({
+    op: "search", pattern: "x", glob: "", max: 10,
+    deny: ["**/.env", 7 as unknown as string, null as unknown as string],
+  });
+  check(
+    "non-string entries are dropped rather than poisoning the list",
+    mixed.op === "search" && mixed.deny.every((d) => typeof d === "string"),
+    mixed,
+  );
+}
