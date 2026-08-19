@@ -15,6 +15,7 @@ import {
   type RoomSettings,
 } from "./models";
 import { DEFAULT_POLICY, type AccessPolicy, type Role } from "./access";
+import { NO_WORKSPACE, type FsRequest, type FsResponse, type WorkspaceInfo, type WorkspaceKind } from "./workspace";
 
 export type Vote = "approve" | "deny";
 
@@ -59,6 +60,8 @@ export type RoomState = {
   settings: RoomSettings;
   /** What the agent may do unattended. Independent of what people may do. */
   policy: AccessPolicy;
+  /** The room's connected workspace, if any. Everyone sees this. */
+  workspace: WorkspaceInfo;
   /** Live worker activity, for the manager workflow. Empty when nothing is running. */
   workers: WorkerStatus[];
   /** Size of the conversation as last sent, for the context gauge. */
@@ -83,6 +86,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   pending: [],
   settings: DEFAULT_SETTINGS,
   policy: DEFAULT_POLICY,
+  workspace: NO_WORKSPACE,
   workers: [],
   context: { messages: 0, tokens: 0 },
   cost: EMPTY_LEDGER,
@@ -133,7 +137,9 @@ export type ServerMsg =
   /** Sent only to the connection that asked. Never broadcast. */
   | { t: "invites"; invites: InviteSummary[] }
   /** Sent only to the connection that asked. */
-  | { t: "members"; members: MemberSummary[] };
+  | { t: "members"; members: MemberSummary[] }
+  /** Sent only to the workspace host's socket. Never broadcast. */
+  | { t: "fs.req"; id: string; req: FsRequest };
 
 export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */
@@ -155,7 +161,13 @@ export type ClientMsg =
   /** Change someone's role. The server re-checks that the actor outranks them. */
   | { t: "member.role"; uid: string; role: Role }
   /** Remove someone from the room and close their sockets. */
-  | { t: "member.remove"; uid: string };
+  | { t: "member.remove"; uid: string }
+  /** A provider's reply to an earlier "fs.req". Only the host's answer counts. */
+  | { t: "fs.res"; id: string; res: FsResponse }
+  /** Connect a workspace to this room. Owners and admins only. */
+  | { t: "workspace.attach"; kind: WorkspaceKind; label: string }
+  /** Disconnect the room's workspace. Owners and admins only. */
+  | { t: "workspace.detach" };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

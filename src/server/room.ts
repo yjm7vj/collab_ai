@@ -73,6 +73,8 @@ import {
   type ToolCtx,
 } from "./tools";
 import { constantTimeEqual, newInviteCode } from "./auth";
+import { PendingRequests } from "./workspace";
+import { NO_WORKSPACE, type FsResponse, type WorkspaceKind } from "../shared/workspace";
 
 /** In-flight turn bookkeeping. Persisted, because a turn can outlive this instance. */
 type Turn = {
@@ -91,6 +93,13 @@ export class Room extends Agent<Env, RoomState> {
   initialState: RoomState = INITIAL_ROOM_STATE;
 
   #schemaReady = false;
+
+  /**
+   * Correlates outstanding filesystem requests sent to the workspace host's
+   * socket with their eventual "fs.res" reply. See src/server/workspace.ts for
+   * why this lives in memory rather than storage.
+   */
+  #pending = new PendingRequests();
 
   // ---------------------------------------------------------------- storage
 
@@ -509,6 +518,15 @@ export class Room extends Agent<Env, RoomState> {
     connection.send(
       JSON.stringify({ t: "history", entries: this.#entries() } satisfies ServerMsg),
     );
+
+    // The workspace stays configured while its host is offline — see onClose —
+    // so a reconnect from that same host is what brings it back, not a fresh
+    // "workspace.attach".
+    if (this.state.workspace.hostUid === uid && !this.state.workspace.online) {
+      this.setState({ ...this.state, workspace: { ...this.state.workspace, online: true } });
+      this.#system(`${this.#memberName(uid) ?? "someone"}'s workspace is back online`);
+    }
+
     await this.#refreshPresence();
   }
 
@@ -522,6 +540,26 @@ export class Room extends Agent<Env, RoomState> {
     // history with churn nobody asked about. Who is here right now is already
     // live in the presence strip; the transcript records membership changes —
     // joining, role changes, removal — which are the ones that persist.
+
+    // The workspace is still configured after this — hostUid and kind are left
+    // alone — it is just unreachable until that member reconnects, which is
+    // what onConnect watches for.
+    const hostUid = this.state.workspace.hostUid;
+    if (hostUid && this.#uidOf(connection) === hostUid && this.state.workspace.online) {
+      let stillConnected = false;
+      for (const c of this.getConnections()) {
+        if (c.id !== connection.id && this.#uidOf(c) === hostUid) {
+          stillConnected = true;
+          break;
+        }
+      }
+      if (!stillConnected) {
+        this.#pending.failAll("The workspace host went offline.");
+        this.setState({ ...this.state, workspace: { ...this.state.workspace, online: false } });
+        this.#system(`${this.#memberName(hostUid) ?? "someone"}'s workspace went offline`);
+      }
+    }
+
     await this.#refreshPresence(connection.id);
   }
 
@@ -561,6 +599,12 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onMemberRole(connection, msg.uid, msg.role);
       case "member.remove":
         return this.#onMemberRemove(connection, msg.uid);
+      case "workspace.attach":
+        return this.#onWorkspaceAttach(connection, msg.kind, msg.label);
+      case "workspace.detach":
+        return this.#onWorkspaceDetach(connection);
+      case "fs.res":
+        return this.#onFsRes(connection, msg.id, msg.res);
     }
   }
 
@@ -816,6 +860,58 @@ export class Room extends Agent<Env, RoomState> {
     this.#system(`${this.#memberName(actorUid) ?? "someone"} removed ${name ?? "someone"}`);
     await this.#refreshPresence();
     this.#sendMembers(connection);
+  }
+
+  /**
+   * Connect a workspace to the room.
+   *
+   * Attaching and detaching are gated on "policy" rather than a dedicated
+   * capability — deciding what the agent can reach is part of the same
+   * decision as deciding what it may do with it, and access.ts is not the
+   * place to grow a one-off capability for this phase.
+   */
+  async #onWorkspaceAttach(connection: Connection, kind: WorkspaceKind, rawLabel: string) {
+    if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a workspace.")) return;
+
+    if (kind !== "local") {
+      this.#refuse(connection, "That workspace type isn't supported yet.");
+      return;
+    }
+
+    const uid = this.#uidOf(connection);
+    if (!uid) return;
+    const name = this.#memberName(uid);
+    const label = String(rawLabel ?? "").trim().slice(0, 64);
+
+    this.setState({
+      ...this.state,
+      workspace: { kind, online: true, hostUid: uid, label },
+    });
+    this.#system(`${name ?? "someone"} connected a workspace${label ? ` (${label})` : ""}`);
+  }
+
+  async #onWorkspaceDetach(connection: Connection) {
+    if (!this.#allow(connection, "policy", "Only the room's owner and admins can disconnect a workspace.")) return;
+
+    const name = this.#nameOf(connection);
+    this.#pending.failAll("The workspace was disconnected.");
+    this.setState({ ...this.state, workspace: NO_WORKSPACE });
+    this.#system(`${name ?? "someone"} disconnected the workspace`);
+  }
+
+  /**
+   * A provider's reply to an earlier "fs.req".
+   *
+   * Deliberately ungated by #allow — any member's socket could in principle
+   * send this frame — but it is only ever honoured from the configured
+   * workspace host. Without this check, any member could forge file contents
+   * into an agent's turn simply by sending a well-timed "fs.res"; this is the
+   * security-relevant line in this handler.
+   */
+  async #onFsRes(connection: Connection, id: string, res: FsResponse) {
+    const uid = this.#uidOf(connection);
+    if (!uid || uid !== this.state.workspace.hostUid) return;
+    this.#pending.settle(id, res);
   }
 
   async #onSay(connection: Connection, rawText: string) {

@@ -246,3 +246,83 @@ export function describePathPolicy(policy: PathPolicy): string {
   parts.push(`fallback ${policy.fallback}`);
   return parts.join(" · ");
 }
+
+/* ------------------------------------------------------------ fs requests */
+
+/** One filesystem operation the agent can ask a provider to perform. */
+export type FsRequest =
+  | { op: "list"; path: string; depth: number }
+  | { op: "read"; path: string; offset: number; limit: number }
+  | { op: "search"; pattern: string; glob: string; max: number }
+  | { op: "write"; path: string; content: string }
+  | { op: "edit"; path: string; oldText: string; newText: string }
+  | { op: "remove"; path: string };
+
+export type FsResponse = { ok: true; data: string } | { ok: false; error: string };
+
+/** Whether an operation changes the workspace. Writes are policed harder. */
+export function isWriteOp(op: FsRequest["op"]): boolean {
+  return op === "write" || op === "edit" || op === "remove";
+}
+
+/**
+ * Hard limits, applied by the room rather than trusted to the caller.
+ *
+ * A repository is not a document. One unbounded listing of a project with a
+ * node_modules directory returns tens of thousands of entries and exhausts the
+ * model's context in a single tool call, so these are the real control — not a
+ * suggestion the agent is expected to respect.
+ */
+export const FS_LIMITS = {
+  /** Maximum directory entries returned by one list. */
+  listEntries: 400,
+  /** Maximum directory depth one list may descend. */
+  listDepth: 4,
+  /** Maximum bytes returned by one read. */
+  readBytes: 64_000,
+  /** Maximum matches returned by one search. */
+  searchMatches: 100,
+  /** Maximum bytes accepted for one write. */
+  writeBytes: 512_000,
+  /** How long the room waits for a provider before giving up, in ms. */
+  timeoutMs: 5_000,
+} as const;
+
+function clampInt(value: unknown, min: number, max: number, whenInvalid: number): number {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n)) return whenInvalid;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
+/** Clamp a request's numeric fields to FS_LIMITS. Never throws. */
+export function clampRequest(req: FsRequest): FsRequest {
+  switch (req.op) {
+    case "list":
+      return { ...req, depth: clampInt(req.depth, 0, FS_LIMITS.listDepth, FS_LIMITS.listDepth) };
+    case "read":
+      return {
+        ...req,
+        offset: clampInt(req.offset, 0, Number.MAX_SAFE_INTEGER, 0),
+        limit: clampInt(req.limit, 1, FS_LIMITS.readBytes, FS_LIMITS.readBytes),
+      };
+    case "search":
+      return { ...req, max: clampInt(req.max, 1, FS_LIMITS.searchMatches, FS_LIMITS.searchMatches) };
+    default:
+      return req;
+  }
+}
+
+/** What the room shows everyone about its workspace. */
+export type WorkspaceInfo = {
+  kind: WorkspaceKind;
+  /** Whether the provider can currently be reached. */
+  online: boolean;
+  /** The member hosting it, or null when there is no workspace. */
+  hostUid: string | null;
+  /** Human label — a folder name or owner/repo. Never a full path. */
+  label: string;
+};
+
+export const NO_WORKSPACE: WorkspaceInfo = {
+  kind: "none", online: false, hostUid: null, label: "",
+};
