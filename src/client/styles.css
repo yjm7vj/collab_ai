@@ -708,3 +708,22 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   cursor: pointer;
 }
 .ws-write-toggle input { margin-top: 3px; }
+
+/* Two workspace choices, read as alternatives rather than one long form:
+   each gets its own bordered group instead of the plain stacked sections
+   the rest of the modal uses. */
+.ws-options { display: grid; gap: 14px; }
+.ws-options > section.ws-option {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.ws-option-heading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+.ws-option .field { margin-bottom: 10px; }
+.ws-option .field-note + .field-note { margin-top: 8px; }

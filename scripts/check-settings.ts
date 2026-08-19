@@ -9,6 +9,7 @@ import {
   effectiveWorkerCap,
   modelInfo,
   sanitizeSettings,
+  serverToolsFor,
 } from "../src/shared/models";
 import { REDACTED, redactEntry, thresholdFor } from "../src/shared/protocol";
 import {
@@ -22,12 +23,14 @@ import {
   isVoter,
   outranks,
   resolveTools,
+  DEFAULT_POLICY,
+
   sanitizeAccessPolicy,
   type Capability,
   type Role,
 } from "../src/shared/access";
 import { DEFAULT_DENY, DEFAULT_PATH_POLICY } from "../src/shared/workspace";
-import { gatedFor, toolsFor, toolsForRoom } from "../src/server/tools";
+import { gatedFor, toolsFor, toolsForRoom, workerToolsFor } from "../src/server/tools";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail?: unknown) {
@@ -540,6 +543,80 @@ check(
   "an entry with no sensitive blocks is returned by identity when not allowed — the common path allocates nothing",
   redactEntry(noSensitiveEntry, false) === noSensitiveEntry,
 );
+
+/**
+ * Guards the fix for a bug that broke the DEFAULT preset in production.
+ *
+ * The manager/worker preset runs Haiku 4.5 workers, and every worker was
+ * handed the web_search_20260209 / web_fetch_20260209 tools. Those variants
+ * do dynamic filtering by running code execution under the hood, so a model
+ * without programmatic tool calling rejects them outright — every delegated
+ * task came back as a 400. The manager (Opus 5) accepts them, which is why
+ * this only ever surfaced during delegation.
+ */
+console.log("\nserver tool variants per model");
+{
+  const names = (defs: unknown[]) => JSON.stringify(defs);
+
+  const haiku = serverToolsFor("claude-haiku-4-5");
+  check(
+    "haiku 4.5 gets the basic web_search variant",
+    names(haiku).includes("web_search_20250305"),
+    haiku,
+  );
+  check(
+    "haiku 4.5 gets the basic web_fetch variant",
+    names(haiku).includes("web_fetch_20250910"),
+    haiku,
+  );
+  // The exact shape that returned a 400 from the live API.
+  check(
+    "haiku 4.5 never sees a dynamic-filtering variant",
+    !names(haiku).includes("20260209"),
+    haiku,
+  );
+
+  for (const id of ["claude-opus-5", "claude-sonnet-5", "claude-fable-5"]) {
+    check(
+      `${id} gets the dynamic-filtering variants`,
+      names(serverToolsFor(id)).includes("20260209"),
+      serverToolsFor(id),
+    );
+  }
+
+  check(
+    "an unknown model id still yields usable server tools",
+    serverToolsFor("not-a-real-model").length === 2,
+    serverToolsFor("not-a-real-model"),
+  );
+
+  // The worker path is the one that actually broke, so assert it directly
+  // rather than trusting that it composes serverToolsFor correctly.
+  const workerDefs = workerToolsFor(DEFAULT_POLICY, "claude-haiku-4-5");
+  check(
+    "worker tools for haiku contain no dynamic-filtering variant",
+    !JSON.stringify(workerDefs).includes("20260209"),
+    workerDefs,
+  );
+  check(
+    "worker tools for haiku still include web_search",
+    JSON.stringify(workerDefs).includes("web_search"),
+    workerDefs,
+  );
+
+  // Denying a tool must win whichever variant the model would have received.
+  const noSearch = sanitizeAccessPolicy({
+    mode: "custom",
+    tools: { ...DEFAULT_POLICY.tools, web_search: "deny" },
+  });
+  for (const id of ["claude-haiku-4-5", "claude-opus-5"]) {
+    check(
+      `a web_search denial removes it for ${id}`,
+      !JSON.stringify(workerToolsFor(noSearch, id)).includes("\"web_search\""),
+      workerToolsFor(noSearch, id),
+    );
+  }
+}
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);

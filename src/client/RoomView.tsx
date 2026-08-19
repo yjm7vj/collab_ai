@@ -159,6 +159,12 @@ export function RoomView({
           send({ t: "fs.res", id: msg.id, res });
         })();
         break;
+      case "github.install":
+        // Opened in a new tab rather than navigating away: the room is a live
+        // socket and a full navigation would drop it, losing the transcript
+        // scroll position and forcing a reconnect for everyone watching.
+        window.open(msg.url, "_blank", "noopener,noreferrer");
+        break;
     }
   }, []);
 
@@ -288,6 +294,8 @@ export function RoomView({
     setWsReady(false);
     send({ t: "workspace.detach" });
   }, [roomId, send]);
+
+  const connectGithub = useCallback((repo: string) => send({ t: "github.connect", repo }), [send]);
 
   const copyLink = useCallback(() => {
     void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`).then(() => {
@@ -474,6 +482,7 @@ export function RoomView({
           canWrite={canWrite}
           onAttach={attachWorkspace}
           onDetach={detachWorkspace}
+          onConnectGithub={connectGithub}
           onClose={() => setShowWorkspace(false)}
         />
       )}
