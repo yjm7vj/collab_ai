@@ -222,6 +222,12 @@ export default {
       return new Request(req, { headers });
     }
 
+    // An unrecognised /api/ path is a mistake, not a page. Without this it
+    // falls through to the asset server, which answers every unknown path with
+    // the single-page app — so a typo'd endpoint would return 200 and a body of
+    // HTML, and the caller would fail at .json() somewhere far from the cause.
+    if (url.pathname.startsWith("/api/")) return json({ error: "not_found" }, 404);
+
     // /agents/room/:name -> the Room Durable Object for that name.
     const routed = await routeAgentRequest(request, env, { onBeforeConnect });
     if (routed) return routed;
