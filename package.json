@@ -12,9 +12,10 @@
     "check": "esbuild scripts/check-settings.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check.mjs --log-level=warning && node node_modules/.cache/check.mjs",
     "check:auth": "esbuild scripts/check-auth.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-auth.mjs --log-level=warning && node node_modules/.cache/check-auth.mjs",
     "check:workspace": "esbuild scripts/check-workspace.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-workspace.mjs --log-level=warning && node node_modules/.cache/check-workspace.mjs",
-    "test": "npm run check && npm run check:auth && npm run check:workspace && npm run check:fs",
+    "test": "npm run check && npm run check:auth && npm run check:workspace && npm run check:fs && npm run check:github",
     "test:integration": "vitest run",
-    "check:fs": "esbuild scripts/check-fs-provider.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-fs.mjs --log-level=warning --external:node:fs --external:node:path --external:node:os && node node_modules/.cache/check-fs.mjs"
+    "check:fs": "esbuild scripts/check-fs-provider.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-fs.mjs --log-level=warning --external:node:fs --external:node:path --external:node:os && node node_modules/.cache/check-fs.mjs",
+    "check:github": "esbuild scripts/check-github.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-github.mjs --log-level=warning --external:node:fs --external:node:path --external:node:os && node node_modules/.cache/check-github.mjs"
   },
   "repository": {
     "type": "git",
