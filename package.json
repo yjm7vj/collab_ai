@@ -22,7 +22,13 @@
     "type": "git",
     "url": "git+https://github.com/yjm7vj/collab_ai.git"
   },
-  "keywords": [],
+  "keywords": [
+    "ai",
+    "collaboration",
+    "cloudflare-workers",
+    "durable-objects",
+    "react"
+  ],
   "author": "",
   "license": "ISC",
   "type": "module",

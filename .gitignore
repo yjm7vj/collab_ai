@@ -12,4 +12,5 @@ dist/
 # having to be regenerated first.
 
 .DS_Store
+.idea/
 *.log
