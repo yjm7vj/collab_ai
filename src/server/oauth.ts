@@ -99,6 +99,29 @@ export function authorizeUrl(provider: OAuthProvider, clientId: string, redirect
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
+/** The scope that lets the agent read and write a repository the person picks. */
+export const GITHUB_REPO_SCOPE = "repo";
+
+/**
+ * Where to send the browser to authorise repository access.
+ *
+ * Deliberately separate from `authorizeUrl` above: sign-in asks for
+ * `read:user` and nothing else, so merely signing in to this app never
+ * grants anyone access to a person's repositories. The broader `repo` scope
+ * is requested only at the moment somebody actually clicks "Connect GitHub"
+ * on a room, and (per the caller in index.ts) only when that person is a
+ * room owner or admin — never as a side effect of signing in.
+ */
+export function repoAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    state,
+    scope: GITHUB_REPO_SCOPE,
+  });
+  return `https://github.com/login/oauth/authorize?${params.toString()}`;
+}
+
 /** Pull a human-readable error out of a provider's token/error response body. */
 function extractError(body: Record<string, unknown> | null): string | null {
   if (!body) return null;
@@ -304,4 +327,27 @@ export async function verifyState(
   if (claims.role !== "github" && claims.role !== "google") return null;
   if (!isSafeReturnTo(claims.uid)) return null;
   return { provider: claims.role, returnTo: claims.uid };
+}
+
+/** Marks an OAuth state token as a repository connect for a specific room. */
+export const GITHUB_REPO_STATE_ROLE = "gh-repo";
+
+/**
+ * Whether a set of verified token claims is a repository-connect state
+ * rather than a room token or a sign-in state.
+ *
+ * The repository-connect round trip reuses the same mintToken/verifyToken
+ * claims shape as everything else here, but with a different meaning for
+ * each field: the room id being connected rides in `rid`, and the uid of
+ * the member who clicked "Connect GitHub" rides in `uid` (the Durable
+ * Object mints this token itself, via mintToken — there is no separate
+ * signing path in this file). `role` is set to GITHUB_REPO_STATE_ROLE so the
+ * callback can tell this apart from a genuine room token: a real room token
+ * always carries one of the actual room roles (owner/admin/editor/viewer) in
+ * `role`, and "gh-repo" is never one of them, so the two can never be
+ * confused for one another even though both are minted by the same HMAC
+ * machinery.
+ */
+export function isRepoConnectState(claims: { rid: string; uid: string; role: string }): boolean {
+  return claims.role === GITHUB_REPO_STATE_ROLE;
 }

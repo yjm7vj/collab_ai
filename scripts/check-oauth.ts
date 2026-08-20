@@ -13,7 +13,11 @@ import {
   deriveUid,
   exchangeCode,
   fetchProfile,
+  GITHUB_REPO_SCOPE,
+  GITHUB_REPO_STATE_ROLE,
   isConfigured,
+  isRepoConnectState,
+  repoAuthorizeUrl,
   signState,
   verifyState,
 } from "../src/server/oauth";
@@ -266,6 +270,71 @@ async function main() {
     check("isConfigured with clientId empty is false", isConfigured({ clientId: "", clientSecret: "secret" }) === false);
     check("isConfigured with clientSecret empty is false", isConfigured({ clientId: "id", clientSecret: "" }) === false);
     check("isConfigured with undefined config is false", isConfigured(undefined) === false);
+  }
+
+  console.log("\nrepository authorisation");
+  {
+    const url = new URL(repoAuthorizeUrl("client-123", "https://app.example/api/auth/github/callback", "state-abc"));
+    check(
+      "repoAuthorizeUrl points at GitHub's authorize endpoint",
+      `${url.origin}${url.pathname}` === "https://github.com/login/oauth/authorize",
+      url.href,
+    );
+    check("repoAuthorizeUrl carries the repo scope", url.searchParams.get("scope") === GITHUB_REPO_SCOPE, url.href);
+    check("repoAuthorizeUrl carries the client id", url.searchParams.get("client_id") === "client-123");
+    check("repoAuthorizeUrl carries the state", url.searchParams.get("state") === "state-abc");
+    check(
+      "repoAuthorizeUrl carries the redirect uri",
+      url.searchParams.get("redirect_uri") === "https://app.example/api/auth/github/callback",
+    );
+    check("repoAuthorizeUrl leaks no client secret", !url.href.includes("client_secret"), url.href);
+
+    // The whole reason the two builders are kept apart. If this ever fails,
+    // merely signing in would hand this app read and write access to every
+    // repository the person can reach, which is not what sign-in is for.
+    const signIn = new URL(authorizeUrl("github", "client-123", "https://app.example/cb", "s"));
+    check("sign-in never asks for the repo scope", signIn.searchParams.get("scope") === "read:user", signIn.href);
+  }
+
+  console.log("\nrepository-connect state is its own namespace");
+  {
+    const REPO_STATE_SECRET = "state-secret";
+    const ROOM = "a".repeat(22);
+
+    check(
+      "a repo-connect state is recognised",
+      isRepoConnectState({ rid: ROOM, uid: "member-1", role: GITHUB_REPO_STATE_ROLE }) === true,
+    );
+
+    // A room token is signed with the same key and carries a real room id in
+    // `rid`. If any room role were ever mistaken for repository-connect state,
+    // a member could replay their own room credential as the OAuth callback's
+    // state parameter and have a token filed against the room in their name.
+    for (const role of ["owner", "admin", "editor", "viewer"]) {
+      check(
+        `a room token with role ${role} is not repo-connect state`,
+        isRepoConnectState({ rid: ROOM, uid: "member-1", role }) === false,
+      );
+    }
+
+    for (const role of ["github", "google"]) {
+      check(
+        `sign-in state for ${role} is not repo-connect state`,
+        isRepoConnectState({ rid: "oauth", uid: "/", role }) === false,
+      );
+    }
+
+    // ...and the reverse direction: the sign-in verifier must refuse a
+    // repository-connect state outright, because its rid is a room id and
+    // never the oauth marker.
+    const repoState = await mintToken(REPO_STATE_SECRET, {
+      rid: "b".repeat(22),
+      uid: "member-1",
+      role: GITHUB_REPO_STATE_ROLE,
+      exp: 2000,
+    });
+    const asSignIn = await verifyState(REPO_STATE_SECRET, repoState, 1000);
+    check("a repo-connect state passed to verifyState returns null", asSignIn === null, asSignIn);
   }
 
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);

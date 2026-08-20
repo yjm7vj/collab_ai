@@ -16,6 +16,7 @@ import {
   GithubProvider,
   installationToken,
   openPullRequest,
+  listUserRepos,
   parseRepoRef,
   pemToPkcs8,
   refHead,
@@ -536,6 +537,86 @@ async function main() {
     }
     check("a throwing fetch on write does not propagate", !writeThrew);
     check("a throwing fetch on write yields ok:false", writeRes !== undefined && writeRes.ok === false, writeRes);
+  }
+
+  console.log("\nlisting a user's repositories");
+  {
+    const okStub = (body: unknown, status = 200) =>
+      (async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch;
+
+    const res = await listUserRepos("user-token", okStub([
+      { full_name: "ada/analytical-engine", private: false, default_branch: "main" },
+      { full_name: "ada/notes", private: true, default_branch: "trunk" },
+    ]));
+    check("listUserRepos maps a normal response", res.ok === true && res.repos.length === 2, res);
+    check(
+      "listUserRepos carries fullName, private and defaultBranch",
+      res.ok === true &&
+        res.repos[0]!.fullName === "ada/analytical-engine" &&
+        res.repos[0]!.private === false &&
+        res.repos[1]!.private === true &&
+        res.repos[1]!.defaultBranch === "trunk",
+      res,
+    );
+
+    // GitHub is a third party. A malformed or hostile-shaped response must
+    // produce a short list, never a crash and never entries with a missing
+    // name that the picker would render as an empty clickable row.
+    const messy = await listUserRepos("user-token", okStub([
+      null,
+      "not-an-object",
+      { private: true },
+      { full_name: "" },
+      { full_name: "ada/ok" },
+      42,
+    ]));
+    check(
+      "listUserRepos drops every malformed entry",
+      messy.ok === true && messy.repos.length === 1 && messy.repos[0]!.fullName === "ada/ok",
+      messy,
+    );
+    check(
+      "a repo with no default_branch gets an empty string, not undefined",
+      messy.ok === true && messy.repos[0]!.defaultBranch === "",
+      messy,
+    );
+
+    const notArray = await listUserRepos("user-token", okStub({ message: "nope" }));
+    check("a non-array body yields an empty list, not a throw", notArray.ok === true && notArray.repos.length === 0, notArray);
+
+    const failed = await listUserRepos("user-token", okStub({ message: "Bad credentials" }, 401));
+    check("a 401 yields ok:false", failed.ok === false, failed);
+
+    const throwing = (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    let threw = false;
+    let thrownRes: Awaited<ReturnType<typeof listUserRepos>> | undefined;
+    try {
+      thrownRes = await listUserRepos("user-token", throwing);
+    } catch {
+      threw = true;
+    }
+    check("a throwing fetch does not propagate out of listUserRepos", !threw);
+    check("a throwing fetch yields ok:false", thrownRes !== undefined && thrownRes.ok === false, thrownRes);
+
+    // The token is a live credential against someone's account. It belongs in
+    // the Authorization header and absolutely nowhere else — not in the query
+    // string, where it would land in logs and proxies.
+    let seenUrl = "";
+    let seenAuth = "";
+    const recording = (async (input: unknown, init?: RequestInit) => {
+      seenUrl = String(input);
+      seenAuth = String(new Headers(init?.headers).get("authorization") ?? "");
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    await listUserRepos("super-secret-token", recording);
+    check("the token never appears in the request URL", !seenUrl.includes("super-secret-token"), seenUrl);
+    check("the token is sent as a bearer credential", seenAuth.includes("super-secret-token"), seenAuth);
   }
 
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);

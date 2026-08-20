@@ -15,6 +15,7 @@ import {
   exchangeCode,
   fetchProfile,
   isConfigured,
+  isRepoConnectState,
   signState,
   verifyState,
   type OAuthProvider,
@@ -54,6 +55,16 @@ async function roomStub(env: Env, roomId: string) {
  */
 function githubConfigured(env: Env): boolean {
   return Boolean(env.GITHUB_APP_ID) && Boolean(env.GITHUB_APP_PRIVATE_KEY);
+}
+
+/**
+ * Whether repository access over plain OAuth is available. This reuses the
+ * sign-in OAuth App, so a deployment that has configured sign-in with GitHub
+ * gets repository connection for free — no GitHub App, no private key, no
+ * PKCS#8 conversion.
+ */
+function githubOAuthConfigured(env: Env): boolean {
+  return isConfigured(providerConfig(env, "github"));
 }
 
 /** Pull the client id/secret pair for an OAuth sign-in provider off env. */
@@ -278,6 +289,59 @@ export default {
         return new Response("That sign-in link is invalid or has expired. Start again.", { status: 400 });
       }
 
+      // The GitHub OAuth App permits exactly one registered callback URL, so
+      // repository connection cannot have a route of its own — it shares
+      // this same sign-in callback and is told apart from an ordinary
+      // sign-in purely by the signed state token (isRepoConnectState is the
+      // only thing that distinguishes them). The access token GitHub hands
+      // back is passed straight to the room's Durable Object over the
+      // internal channel below; it is never placed in a URL, a cookie, a
+      // log line, or room state.
+      if (provider === "github") {
+        const claims = await verifyToken(env.ROOM_SECRET, state);
+        if (claims && isRepoConnectState(claims)) {
+          if (!/^[A-Za-z0-9]{22}$/.test(claims.rid)) {
+            return new Response(
+              "That link is invalid or has expired. Start again from the room.",
+              { status: 400 },
+            );
+          }
+          if (!githubOAuthConfigured(env)) return json({ error: "not_found" }, 404);
+
+          const redirectUri = `${url.origin}/api/auth/github/callback`;
+          const exchanged = await exchangeCode(
+            "github",
+            cfg as { clientId: string; clientSecret: string },
+            code,
+            redirectUri,
+          );
+          if (!exchanged.ok) return new Response(exchanged.error, { status: 502 });
+
+          // A failure here is not fatal — the login is only a display label
+          // for the picker, not something the connection depends on.
+          const fetched = await fetchProfile("github", exchanged.accessToken);
+          const login = fetched.ok ? fetched.profile.name : "";
+
+          const stub = await roomStub(env, claims.rid);
+          const stored = await stub.fetch("https://room/github-oauth", {
+            method: "POST",
+            body: JSON.stringify({ uid: claims.uid, token: exchanged.accessToken, login }),
+            headers: {
+              "content-type": "application/json",
+              "x-internal-auth": env.ROOM_SECRET,
+            },
+          });
+          if (!stored.ok) {
+            return new Response(stored.body, { status: stored.status, headers: stored.headers });
+          }
+
+          return Response.redirect(`${url.origin}/?gh=connected#/r/${claims.rid}`, 302);
+        }
+        // Not a repository-connect state (or not a valid token at all) —
+        // fall through to the ordinary sign-in verification below, which
+        // rejects it on its own terms if it isn't valid sign-in state either.
+      }
+
       // This is what stops a forged callback: verifyState only accepts a
       // token this server minted via signState. It also rejects a room
       // token outright (a room token's rid is never the oauth-state marker),
@@ -378,6 +442,11 @@ export default {
       // Same reasoning as x-room-uid: `set` overwrites, so a forged role header
       // on the incoming request can't survive to reach the Durable Object.
       headers.set("x-room-role", claims.role);
+      // The Durable Object needs the deployment's own origin to build an
+      // OAuth redirect URI for repository connection. It must come from the
+      // server, like the other bound headers above — `headers.set`
+      // overwrites, so a client cannot forge it.
+      headers.set("x-room-origin", reqUrl.origin);
       return new Request(req, { headers });
     }
 

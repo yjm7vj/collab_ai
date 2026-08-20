@@ -64,6 +64,38 @@ export type PendingTool = {
 
 export type RoomStatus = "idle" | "thinking" | "awaiting_approval";
 
+/**
+ * What this deployment can do with GitHub, and how far this room has got.
+ *
+ * BOOLEANS AND A PUBLIC LOGIN ONLY. RoomState is synced to every connected
+ * client, so this type may never grow a token, a client secret, or anything
+ * else that is not already safe for every member of the room to read. The
+ * OAuth access token that backs `authorized` lives in the Durable Object's
+ * own storage and is never put on the wire — see the `github_oauth` table.
+ */
+export type GithubStatus = {
+  /** A GitHub OAuth App is configured, so "Connect GitHub" can work at all. */
+  oauth: boolean;
+  /** A GitHub App is configured, so the per-repo installation flow can work. */
+  app: boolean;
+  /** Someone here has authorised GitHub, so a repository can be picked. */
+  authorized: boolean;
+  /** The GitHub login that authorised, for display. Empty when nobody has. */
+  login: string;
+};
+
+export const NO_GITHUB: GithubStatus = {
+  oauth: false, app: false, authorized: false, login: "",
+};
+
+/** One repository the authorising member can reach. Never broadcast. */
+export type GithubRepo = {
+  /** owner/repo. */
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+};
+
 export type RoomState = {
   status: RoomStatus;
   users: Presence[];
@@ -79,6 +111,8 @@ export type RoomState = {
   visibility: RoomVisibility;
   /** The room's connected workspace, if any. Everyone sees this. */
   workspace: WorkspaceInfo;
+  /** What this deployment can do with GitHub, and how far this room has got. */
+  github: GithubStatus;
   /** Live worker activity, for the manager workflow. Empty when nothing is running. */
   workers: WorkerStatus[];
   /** Size of the conversation as last sent, for the context gauge. */
@@ -105,6 +139,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   policy: DEFAULT_POLICY,
   visibility: "invite",
   workspace: NO_WORKSPACE,
+  github: NO_GITHUB,
   workers: [],
   context: { messages: 0, tokens: 0 },
   cost: EMPTY_LEDGER,
@@ -183,8 +218,18 @@ export type ServerMsg =
   | { t: "members"; members: MemberSummary[] }
   /** Sent only to the workspace host's socket. Never broadcast. */
   | { t: "fs.req"; id: string; req: FsRequest }
-  /** Sent only to the connection that asked. Carries no secret. */
-  | { t: "github.install"; url: string };
+  /**
+   * Where to send the browser next for GitHub — the OAuth authorise page, or
+   * the GitHub App install page. Sent only to the connection that asked.
+   * Carries a signed, short-lived state parameter and no other secret.
+   */
+  | { t: "github.install"; url: string }
+  /**
+   * Repositories the authorising member can reach. Sent only to that member's
+   * connection: which repositories someone can see is their business, not the
+   * room's, so this is never broadcast.
+   */
+  | { t: "github.repos"; repos: GithubRepo[] };
 
 export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */
@@ -215,8 +260,17 @@ export type ClientMsg =
   | { t: "workspace.detach" }
   /** Change how the room admits people. Owner only; the server re-checks. */
   | { t: "room.visibility"; visibility: RoomVisibility }
-  /** Start connecting a GitHub repository. Owners and admins only. */
-  | { t: "github.connect"; repo: string };
+  /** Connect a GitHub repository by name. Owners and admins only. */
+  | { t: "github.connect"; repo: string }
+  /**
+   * Begin GitHub authorisation for repository access. Owners and admins only.
+   * Answered with "github.install" carrying the URL to send the browser to.
+   */
+  | { t: "github.auth" }
+  /** List the repositories the authorising member can reach. Answered with "github.repos". */
+  | { t: "github.repos" }
+  /** Forget this room's stored GitHub authorisation. Owners and admins only. */
+  | { t: "github.signout" };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

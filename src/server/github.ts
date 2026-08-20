@@ -876,3 +876,50 @@ export class GithubProvider implements WorkspaceProvider {
     return { ok: true, data: `Opened pull request #${pr.number}: ${pr.url}` };
   }
 }
+
+export type UserRepo = { fullName: string; private: boolean; defaultBranch: string };
+
+/**
+ * List repositories the OAuth-connecting person can see, to populate a
+ * picker on the client.
+ *
+ * This is used only to fill that one picker for the person who just
+ * authorised: the result is sent to that one person's socket and never
+ * broadcast to the rest of the room. The 100-result cap is deliberately not
+ * paginated — a picker with a search box over the 100 most recently updated
+ * repositories is enough for someone choosing which one to connect; nobody
+ * is scrolling through their entire account here.
+ */
+export async function listUserRepos(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? fetch;
+  try {
+    const res = await doFetch(
+      "https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member",
+      { headers: ghHeaders(token) },
+    );
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const body = await res.json();
+    const items = Array.isArray(body) ? body : [];
+
+    const repos: UserRepo[] = [];
+    for (const item of items) {
+      if (typeof item !== "object" || item === null) continue;
+      const entry = item as { full_name?: unknown; private?: unknown; default_branch?: unknown };
+      if (typeof entry.full_name !== "string" || entry.full_name.length === 0) continue;
+      repos.push({
+        fullName: entry.full_name,
+        private: entry.private === true,
+        defaultBranch: typeof entry.default_branch === "string" && entry.default_branch.length > 0
+          ? entry.default_branch
+          : "",
+      });
+    }
+    return { ok: true, repos };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to list repositories." };
+  }
+}
