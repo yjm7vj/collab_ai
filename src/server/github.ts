@@ -58,6 +58,35 @@ export type GithubConfig = {
  */
 const runtimeFetch: typeof fetch = (input, init) => fetch(input, init);
 
+/**
+ * Budget for a tree-walk search. Searching by fetching files costs one
+ * request per candidate file, so it has to be bounded or a large
+ * repository would spend an entire rate limit on one query. When the
+ * filters leave more candidates than this, the search refuses and asks
+ * for a narrower glob rather than silently searching an arbitrary subset
+ * — a partial answer that looks complete is worse than a clear refusal.
+ */
+const SEARCH_MAX_CANDIDATES = 120;
+/** Skip anything larger than this; source files are not this big. */
+const SEARCH_MAX_FILE_BYTES = 256_000;
+/** Total decoded bytes one search may scan. */
+const SEARCH_MAX_TOTAL_BYTES = 2_000_000;
+/** How many file fetches are in flight at once. */
+const SEARCH_CONCURRENCY = 6;
+
+/**
+ * Extensions never worth grepping: binary, or generated blobs that would
+ * blow the byte budget without ever containing a useful match.
+ */
+const SEARCH_SKIP_EXT = [
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp", ".tiff",
+  ".pdf", ".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
+  ".mp3", ".mp4", ".mov", ".avi", ".webm", ".wav", ".ogg",
+  ".woff", ".woff2", ".ttf", ".otf", ".eot",
+  ".so", ".dll", ".dylib", ".exe", ".bin", ".wasm",
+  ".pyc", ".class", ".jar", ".lock",
+];
+
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {
@@ -691,17 +720,27 @@ export class GithubProvider implements WorkspaceProvider {
   }
 
   async #search(pattern: string, glob: string, max: number, deny: readonly string[]): Promise<FsResponse> {
+    // GitHub's code search index only ever covers the default branch. A room
+    // that named an explicit branch (`#ref.ref` non-empty) would get results
+    // from the wrong code — confidently, with no indication anything was
+    // off — so skip the index entirely and walk the tree instead.
+    if (this.#ref.ref.length > 0) {
+      return this.#searchByTree(pattern, glob, max, deny);
+    }
+
     const q = `${pattern} repo:${this.#ref.owner}/${this.#ref.repo}`;
     const url = `https://api.github.com/search/code?q=${encodeURIComponent(q)}`;
     const res = await this.#fetchJson(url);
 
     if (!res.ok) {
-      if (res.status === 403) {
-        return {
-          ok: false,
-          error:
-            "GitHub rate-limited or refused this code search (403). Code search has strict rate limits — wait a bit and try a narrower query.",
-        };
+      // 403 is code search's strict 10-requests-per-minute limit (far
+      // tighter than the normal 5000/hour), or an unindexed repository
+      // (a fork, or one too new to have been indexed yet). 422 is a query
+      // the code-search index refuses to run at all. Both are exactly the
+      // cases the tree walk handles, and it isn't subject to that limit, so
+      // fall back to it instead of surfacing either as a dead end.
+      if (res.status === 403 || res.status === 422) {
+        return this.#searchByTree(pattern, glob, max, deny);
       }
       return { ok: false, error: res.error };
     }
@@ -721,6 +760,123 @@ export class GithubProvider implements WorkspaceProvider {
       if (results.length >= max) break;
     }
     return { ok: true, data: results.join("\n") };
+  }
+
+  /**
+   * Fallback search used when code search is unavailable: fetch the tree in
+   * one request, filter it down to candidate files, then fetch and grep
+   * each candidate directly. This costs one ordinary API request per
+   * candidate file rather than one search-index query, so it is bounded by
+   * the normal 5000/hour rate limit instead of code search's 10/minute —
+   * and, unlike the index, it can be pointed at any branch and covers
+   * repositories the index has not (or will not) crawl.
+   */
+  async #searchByTree(pattern: string, glob: string, max: number, deny: readonly string[]): Promise<FsResponse> {
+    const base = await resolveBranchName(this.#token, this.#ref, this.#fetchImpl);
+    if (!base.ok) return { ok: false, error: base.error };
+
+    const treeUrl = `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/git/trees/${encodeURIComponent(base.branch)}?recursive=1`;
+    const treeRes = await this.#fetchJson(treeUrl);
+    if (!treeRes.ok) return { ok: false, error: treeRes.error };
+
+    // Read the body defensively: an unexpected shape here becomes an empty
+    // tree, never a thrown TypeError.
+    const treeBody = treeRes.body as { tree?: unknown; truncated?: unknown };
+    const rawTree = Array.isArray(treeBody.tree) ? treeBody.tree : [];
+    const treeTruncated = treeBody.truncated === true;
+
+    type Candidate = { path: string; sha: string };
+    const candidates: Candidate[] = [];
+    for (const raw of rawTree) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const entry = raw as { path?: unknown; type?: unknown; sha?: unknown; size?: unknown };
+      if (entry.type !== "blob") continue;
+      if (typeof entry.path !== "string" || entry.path.length === 0) continue;
+      // SECURITY: apply the deny list before any content is fetched, the
+      // same as every other read path in this provider — a denied file
+      // must never even be requested, let alone grepped.
+      if (isDenied(entry.path, deny)) continue;
+      if (glob.length > 0 && !matchGlob(glob, entry.path)) continue;
+      const lowerPath = entry.path.toLowerCase();
+      if (SEARCH_SKIP_EXT.some((ext) => lowerPath.endsWith(ext))) continue;
+      if (typeof entry.size === "number" && entry.size > SEARCH_MAX_FILE_BYTES) continue;
+      if (typeof entry.sha !== "string" || entry.sha.length === 0) continue;
+      candidates.push({ path: entry.path, sha: entry.sha });
+    }
+
+    if (candidates.length > SEARCH_MAX_CANDIDATES) {
+      return {
+        ok: false,
+        error: `Too many files to search (${candidates.length}). Narrow it with a glob — for example "src/**/*.ts" — or search for something more specific.`,
+      };
+    }
+
+    if (candidates.length === 0) {
+      return { ok: true, data: "" };
+    }
+
+    const lowerPattern = pattern.toLowerCase();
+    const matches: string[] = [];
+    let totalBytes = 0;
+    let byteBudgetExhausted = false;
+
+    for (let i = 0; i < candidates.length && matches.length < max && !byteBudgetExhausted; i += SEARCH_CONCURRENCY) {
+      const batch = candidates.slice(i, i + SEARCH_CONCURRENCY);
+      const texts = await Promise.all(
+        batch.map(async (candidate): Promise<{ path: string; text: string; byteLength: number } | null> => {
+          const blobUrl = `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/git/blobs/${encodeURIComponent(candidate.sha)}`;
+          // A failing fetch for one file is not fatal to the whole search —
+          // skip it and carry on with the rest of the batch.
+          const blobRes = await this.#fetchJson(blobUrl);
+          if (!blobRes.ok) return null;
+
+          const blobBody = blobRes.body as { content?: unknown; encoding?: unknown };
+          if (blobBody.encoding !== "base64" || typeof blobBody.content !== "string") return null;
+
+          try {
+            // GitHub's blob API wraps its base64 with embedded newlines;
+            // strip all whitespace before decoding.
+            const bytes = base64ToBytes(blobBody.content.replace(/\s+/g, ""));
+            return { path: candidate.path, text: new TextDecoder().decode(bytes), byteLength: bytes.length };
+          } catch {
+            // A binary file that slipped past the extension filter — skip
+            // it rather than let a decode failure throw.
+            return null;
+          }
+        }),
+      );
+
+      for (const result of texts) {
+        if (!result) continue;
+        totalBytes += result.byteLength;
+
+        const lines = result.text.split("\n");
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+          if (matches.length >= max) break;
+          const line = lines[lineIndex]!;
+          // Literal substring match, deliberately not a regular expression:
+          // `pattern` comes from a model, and compiling model-supplied text
+          // as a regex is both a correctness surprise (accidental regex
+          // metacharacters) and a denial-of-service risk (catastrophic
+          // backtracking), for no benefit a plain literal search doesn't
+          // already give a room member.
+          if (line.toLowerCase().includes(lowerPattern)) {
+            matches.push(`${result.path}:${lineIndex + 1}: ${line.trim().slice(0, 200)}`);
+          }
+        }
+        if (matches.length >= max) break;
+      }
+
+      if (totalBytes > SEARCH_MAX_TOTAL_BYTES) {
+        byteBudgetExhausted = true;
+      }
+    }
+
+    const matchCapHit = matches.length >= max;
+    if (treeTruncated || byteBudgetExhausted || matchCapHit) {
+      matches.push("(results truncated — narrow the glob or the search term for more)");
+    }
+    return { ok: true, data: matches.join("\n") };
   }
 
   /** Read one file's text off a specific branch — unlike `#read`, not tied to `#ref.ref`. */

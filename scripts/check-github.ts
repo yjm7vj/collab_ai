@@ -681,6 +681,199 @@ async function main() {
     }
   }
 
+  console.log("\nsearch falls back to a tree walk");
+  {
+    // These drive the provider through its public `perform` API rather than
+    // any private method, so they keep testing the behaviour even if the
+    // internals are reshaped.
+    type Fixture = { path: string; text: string; size?: number };
+
+    /**
+     * A stand-in GitHub serving the endpoints a tree-walk search touches. It
+     * records every URL, so a test can assert what was NOT called — the only
+     * way to prove a file's contents were never fetched at all.
+     */
+    function treeStub(files: Fixture[], opts: { codeSearchStatus?: number; truncated?: boolean } = {}) {
+      const urls: string[] = [];
+      const fetchImpl = (async (input: unknown) => {
+        const url = String(input);
+        urls.push(url);
+        const jsonRes = (body: unknown, status = 200) =>
+          new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+        if (url.includes("/search/code")) {
+          const status = opts.codeSearchStatus ?? 403;
+          if (status !== 200) return jsonRes({ message: "rate limited" }, status);
+          return jsonRes({ items: files.map((f) => ({ path: f.path })) });
+        }
+        if (url.includes("/git/trees/")) {
+          return jsonRes({
+            truncated: opts.truncated ?? false,
+            tree: files.map((f) => ({
+              path: f.path,
+              type: "blob",
+              sha: `sha-${f.path}`,
+              size: f.size ?? f.text.length,
+            })),
+          });
+        }
+        if (url.includes("/git/blobs/")) {
+          const sha = decodeURIComponent(url.split("/git/blobs/")[1] ?? "");
+          const file = files.find((f) => `sha-${f.path}` === sha);
+          if (!file) return jsonRes({ message: "Not Found" }, 404);
+          return jsonRes({ content: btoa(file.text), encoding: "base64" });
+        }
+        // The repository itself, for resolveBranchName.
+        return jsonRes({ default_branch: "main" });
+      }) as unknown as typeof fetch;
+      return { urls, fetchImpl };
+    }
+
+    const searchRef = { owner: "ada", repo: "engine", ref: "" };
+    const files: Fixture[] = [
+      { path: "src/index.ts", text: "const answer = 42;\nexport const NEEDLE = 1;" },
+      { path: "src/other.ts", text: "nothing here" },
+      { path: "README.md", text: "a NEEDLE in the readme" },
+    ];
+
+    {
+      const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("a 403 from code search does not surface as an error", res.ok === true, res);
+      check(
+        "the tree walk finds matches the code search could not return",
+        res.ok === true && res.data.includes("src/index.ts:2") && res.data.includes("README.md:1"),
+        res,
+      );
+      check("the fallback fetched the git tree", urls.some((u) => u.includes("/git/trees/")), urls.length);
+    }
+
+    {
+      // GitHub's code search index only covers the default branch, so on an
+      // explicit branch it would confidently answer from the wrong code.
+      const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 200 });
+      const provider = new GithubProvider("t", { ...searchRef, ref: "feature-x" }, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("an explicit branch never calls the code-search endpoint", !urls.some((u) => u.includes("/search/code")), urls);
+      check("an explicit branch still returns matches", res.ok === true && res.data.includes("NEEDLE"), res);
+    }
+
+    {
+      // THE SECURITY CHECK. The deny list is what keeps .env and private keys
+      // out of a room, and a search walks the tree itself rather than naming
+      // one path the server can police — so if the walk ignored deny, every
+      // secret in the repository would be one search away.
+      const secrets: Fixture[] = [
+        { path: ".env", text: "DB_PASSWORD=NEEDLE-secret" },
+        { path: "deploy/id_rsa", text: "NEEDLE private key" },
+        { path: "src/app.ts", text: "const NEEDLE = true;" },
+      ];
+      const deny = [".env", ".env.*", "id_rsa*", "**/id_rsa*"];
+      const { urls, fetchImpl } = treeStub(secrets, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny });
+
+      check("a denied file never appears in search results", res.ok === true && !res.data.includes(".env"), res);
+      check("a denied key file never appears in search results", res.ok === true && !res.data.includes("id_rsa"), res);
+      check("the undenied file still matches", res.ok === true && res.data.includes("src/app.ts"), res);
+      // Stronger than checking the output: a denied file must never be
+      // FETCHED, so its contents never enter the Worker's memory at all.
+      check(
+        "a denied file's contents are never even requested",
+        !urls.some((u) => u.includes("sha-.env") || u.includes("id_rsa")),
+        urls.filter((u) => u.includes("/git/blobs/")),
+      );
+      // Control: prove the fixture would have revealed the secret without deny.
+      const open = treeStub(secrets, { codeSearchStatus: 403 });
+      const openProvider = new GithubProvider("t", searchRef, [], "collab-ai", open.fetchImpl);
+      const openRes = await openProvider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check(
+        "control: with no deny list the same search does reach .env",
+        openRes.ok === true && openRes.data.includes(".env"),
+        openRes,
+      );
+    }
+
+    {
+      const { fetchImpl } = treeStub(files, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "**/*.md", max: 50, deny: [] });
+      check(
+        "a glob narrows the tree walk",
+        res.ok === true && res.data.includes("README.md") && !res.data.includes("src/index.ts"),
+        res,
+      );
+    }
+
+    {
+      // A partial answer that looks complete is worse than a clear refusal.
+      const many: Fixture[] = [];
+      for (let i = 0; i < 200; i++) many.push({ path: `src/f${i}.ts`, text: "NEEDLE" });
+      const { urls, fetchImpl } = treeStub(many, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("too many candidates is refused, not silently sampled", res.ok === false, res);
+      check("the refusal says how to narrow it", res.ok === false && /glob/i.test(res.error), res);
+      check("nothing was fetched before refusing", !urls.some((u) => u.includes("/git/blobs/")), urls.length);
+    }
+
+    {
+      // The pattern comes from a model. Compiling model-supplied text as a
+      // regular expression is both a correctness surprise and a denial-of-
+      // service risk, so it must be matched literally.
+      const dotted: Fixture[] = [
+        { path: "a.ts", text: "abc" },
+        { path: "b.ts", text: "a.c" },
+      ];
+      const { fetchImpl } = treeStub(dotted, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "a.c", glob: "", max: 50, deny: [] });
+      check("the pattern is matched literally, not as a regex", res.ok === true && !res.data.includes("a.ts"), res);
+      check("the literal match still hits", res.ok === true && res.data.includes("b.ts"), res);
+    }
+
+    {
+      // One unreadable file must not fail the whole search.
+      const base = treeStub([{ path: "src/real.ts", text: "NEEDLE here" }], { codeSearchStatus: 403 });
+      const wrapped = (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/git/blobs/missing")) {
+          return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+        }
+        if (url.includes("/git/trees/")) {
+          return new Response(
+            JSON.stringify({
+              truncated: false,
+              tree: [
+                { path: "src/missing.ts", type: "blob", sha: "missing", size: 10 },
+                { path: "src/real.ts", type: "blob", sha: "sha-src/real.ts", size: 11 },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return base.fetchImpl(input as RequestInfo, init);
+      }) as unknown as typeof fetch;
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", wrapped);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("one unfetchable file does not fail the search", res.ok === true, res);
+      check("the readable file still matches", res.ok === true && res.data.includes("src/real.ts"), res);
+    }
+
+    {
+      const binary: Fixture[] = [
+        { path: "logo.png", text: "NEEDLE" },
+        { path: "src/keep.ts", text: "NEEDLE" },
+      ];
+      const { urls, fetchImpl } = treeStub(binary, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("a binary file is never fetched", !urls.some((u) => u.includes("logo.png")), urls);
+      check("the source file is still searched", res.ok === true && res.data.includes("src/keep.ts"), res);
+    }
+  }
+
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
