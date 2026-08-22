@@ -78,7 +78,18 @@ export type StreamHooks = {
 };
 
 /** Token counts from one response, for the cost ledger and the context gauge. */
-export type Usage = { model: string; in: number; out: number; promptTokens: number };
+export type Usage = {
+  model: string;
+  /** Uncached input tokens. Priced at the model's base input rate. */
+  in: number;
+  /** Tokens written into the prompt cache. Priced above the base rate. */
+  cacheWrite: number;
+  /** Tokens served from the prompt cache. Priced at a tenth of the base rate. */
+  cacheRead: number;
+  out: number;
+  /** Every prompt token regardless of class, for the context gauge. */
+  promptTokens: number;
+};
 
 export type ModelResult = { message: Message; usage: Usage };
 
@@ -135,7 +146,12 @@ function readUsage(message: Message, model: string): Usage {
   const read = u.cache_read_input_tokens ?? 0;
   return {
     model,
-    in: input + created + read,
+    // Kept apart rather than summed: the three classes are priced very
+    // differently, and collapsing them here is what made a turn whose prompt
+    // came almost entirely from cache look ten times as expensive as it was.
+    in: input,
+    cacheWrite: created,
+    cacheRead: read,
     out: u.output_tokens ?? 0,
     // The true prompt size: uncached remainder plus everything served from cache.
     promptTokens: input + created + read,
@@ -358,6 +374,9 @@ async function mockTurn(
   const usage: Usage = {
     model: settings.agentModel,
     in: 1200,
+    // The mock never touches the cache, so both classes are zero here.
+    cacheWrite: 0,
+    cacheRead: 0,
     out: 90,
     promptTokens: 1200 + messages.length * 40,
   };

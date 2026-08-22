@@ -5,8 +5,12 @@
  * Run: npm run check
  */
 import {
+  addUsage,
+  CACHE_READ_MULTIPLIER,
+  CACHE_WRITE_MULTIPLIER,
   DEFAULT_SETTINGS,
   effectiveWorkerCap,
+  EMPTY_LEDGER,
   modelInfo,
   sanitizeSettings,
   serverToolsFor,
@@ -616,6 +620,76 @@ console.log("\nserver tool variants per model");
       workerToolsFor(noSearch, id),
     );
   }
+}
+
+console.log("\ncost accounting prices cached tokens as cached");
+{
+  const MODEL = "claude-sonnet-5";
+  const price = modelInfo(MODEL).price;
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+
+  const only = (usage: { in: number; cacheWrite?: number; cacheRead?: number; out: number }) =>
+    addUsage(EMPTY_LEDGER, MODEL, usage).usd;
+
+  check(
+    "uncached input is billed at the base rate",
+    near(only({ in: 100_000, out: 0 }), (100_000 / 1e6) * price.in),
+    only({ in: 100_000, out: 0 }),
+  );
+  check(
+    "output is billed at the output rate",
+    near(only({ in: 0, out: 10_000 }), (10_000 / 1e6) * price.out),
+    only({ in: 0, out: 10_000 }),
+  );
+  check(
+    "a cache write costs more than plain input",
+    near(only({ in: 0, cacheWrite: 100_000, out: 0 }), (100_000 / 1e6) * price.in * CACHE_WRITE_MULTIPLIER),
+    only({ in: 0, cacheWrite: 100_000, out: 0 }),
+  );
+  check(
+    "a cache read costs a tenth of plain input",
+    near(only({ in: 0, cacheRead: 100_000, out: 0 }), (100_000 / 1e6) * price.in * CACHE_READ_MULTIPLIER),
+    only({ in: 0, cacheRead: 100_000, out: 0 }),
+  );
+
+  // THE REGRESSION. This app marks the system prompt and tool definitions as
+  // cacheable, and in a short room those are almost the entire prompt — so
+  // from the second turn onward nearly every input token is a cache read.
+  // Summing the three classes and billing the total at the base rate is what
+  // made a two-line exchange look like it cost real money.
+  const cachedTurn = only({ in: 200, cacheRead: 8_000, out: 300 });
+  const asIfFresh = only({ in: 8_200, out: 300 });
+  check(
+    "a turn served from cache costs far less than the same tokens sent fresh",
+    cachedTurn < asIfFresh / 3,
+    { cachedTurn, asIfFresh },
+  );
+  // Control: the two differ only in how the prompt tokens are classified, so
+  // if the split were ever ignored again these would collapse to equal.
+  check(
+    "control: the comparison is not trivially true",
+    !near(cachedTurn, asIfFresh),
+    { cachedTurn, asIfFresh },
+  );
+
+  // Token counts stay whole. Someone reading a summary wants to know how many
+  // prompt tokens went out, not how each one was priced.
+  const ledger = addUsage(EMPTY_LEDGER, MODEL, { in: 100, cacheWrite: 200, cacheRead: 300, out: 40 });
+  check(
+    "byModel counts every prompt token regardless of class",
+    ledger.byModel[MODEL]?.in === 600,
+    ledger.byModel,
+  );
+  check("byModel counts output separately", ledger.byModel[MODEL]?.out === 40, ledger.byModel);
+
+  // Omitting the cache fields must mean zero, not NaN — a NaN here would
+  // poison the running total for the rest of the room's life.
+  const legacy = addUsage(EMPTY_LEDGER, MODEL, { in: 1_000, out: 100 });
+  check("omitted cache fields are treated as zero", Number.isFinite(legacy.usd) && legacy.usd > 0, legacy.usd);
+
+  // Accumulation across turns.
+  const twice = addUsage(addUsage(EMPTY_LEDGER, MODEL, { in: 1_000, out: 0 }), MODEL, { in: 1_000, out: 0 });
+  check("usd accumulates across calls", near(twice.usd, only({ in: 2_000, out: 0 })), twice.usd);
 }
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);

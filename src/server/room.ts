@@ -1670,7 +1670,7 @@ export class Room extends Agent<Env, RoomState> {
     if (!usage) return;
     this.setState({
       ...this.state,
-      cost: addUsage(this.state.cost, usage.model, usage.in, usage.out),
+      cost: addUsage(this.state.cost, usage.model, usage),
       context: {
         messages: this.#convo().length,
         tokens: usage.promptTokens || this.state.context.tokens,
