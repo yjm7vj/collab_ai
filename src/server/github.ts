@@ -41,6 +41,23 @@ export type GithubConfig = {
   privateKeyPem: string;
 };
 
+/**
+ * The runtime's `fetch`, wrapped so it can be stored and passed around.
+ *
+ * `fetch` is a native global and workerd enforces its receiver: assign it to
+ * an object field and call it back as `this.#fetchImpl(url)` and the receiver
+ * becomes that object, which fails at runtime with "Illegal invocation:
+ * function called with incorrect `this` reference". Every fallback below goes
+ * through this wrapper instead of naming `fetch` directly, so it does not
+ * matter whether a caller ends up invoking it bare or as a method — the inner
+ * call is always a plain global one.
+ *
+ * Injected test stubs are ordinary functions that ignore `this`, so this class
+ * of bug is invisible to any check that supplies its own fetch. See the
+ * "receiver safety" section of scripts/check-github.ts, which does not.
+ */
+const runtimeFetch: typeof fetch = (input, init) => fetch(input, init);
+
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i++) {
@@ -170,7 +187,7 @@ export async function installationToken(
   installationId: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; token: string; expiresAt: string } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const jwt = await appJwt(cfg);
     const res = await doFetch(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
@@ -289,7 +306,7 @@ async function resolveBranchName(
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; branch: string } | { ok: false; error: string }> {
   if (ref.ref !== "HEAD") return { ok: true, branch: ref.ref };
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const res = await doFetch(repoUrl(ref, ""), { headers: ghHeaders(token) });
     if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
@@ -312,7 +329,7 @@ export async function refHead(
   ref: RepoRef,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; sha: string } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const branchRes = await resolveBranchName(token, ref, fetchImpl);
     if (!branchRes.ok) return branchRes;
@@ -340,7 +357,7 @@ export async function ensureBranch(
   fromSha: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; created: boolean } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const res = await doFetch(repoUrl(ref, "/git/refs"), {
       method: "POST",
@@ -373,7 +390,7 @@ export async function fileSha(
   branch: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; sha: string | null } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const url = repoUrl(ref, `/contents/${encodeContentsPath(path)}?ref=${encodeURIComponent(branch)}`);
     const res = await doFetch(url, { headers: ghHeaders(token) });
@@ -406,7 +423,7 @@ export async function commitFile(
   message: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; commitSha: string } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const shaRes = await fileSha(token, ref, path, branch, fetchImpl);
     if (!shaRes.ok) return shaRes;
@@ -444,7 +461,7 @@ export async function deleteFile(
   message: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const shaRes = await fileSha(token, ref, path, branch, fetchImpl);
     if (!shaRes.ok) return shaRes;
@@ -474,7 +491,7 @@ export async function openPullRequest(
   body: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; url: string; number: number } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const res = await doFetch(repoUrl(ref, "/pulls"), {
       method: "POST",
@@ -552,7 +569,7 @@ export class GithubProvider implements WorkspaceProvider {
     // therefore the same pull request, instead of each edit opening its
     // own — which is what a human reviewer actually wants to look at.
     this.#branch = branch && branch.length > 0 ? branch : "collab-ai";
-    this.#fetchImpl = fetchImpl ?? fetch;
+    this.#fetchImpl = fetchImpl ?? runtimeFetch;
     this.label = `${ref.owner}/${ref.repo}`;
   }
 
@@ -894,7 +911,7 @@ export async function listUserRepos(
   token: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? fetch;
+  const doFetch = fetchImpl ?? runtimeFetch;
   try {
     const res = await doFetch(
       "https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member",

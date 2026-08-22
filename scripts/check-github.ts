@@ -619,6 +619,68 @@ async function main() {
     check("the token is sent as a bearer credential", seenAuth.includes("super-secret-token"), seenAuth);
   }
 
+  console.log("\nreceiver safety (the workerd Illegal-invocation class of bug)");
+  {
+    // Reproduces what workerd enforces and Node does not: the runtime's
+    // `fetch` is a native function with a receiver requirement. Store it on
+    // an object and call it back as `obj.f(url)` and the receiver becomes
+    // that object, which workerd rejects at runtime with "Illegal
+    // invocation: function called with incorrect `this` reference".
+    //
+    // Every other check in this file injects its own fetch stub, and a stub
+    // is an ordinary function that ignores `this` — so this whole class of
+    // bug is invisible to them. It reached production once already, in the
+    // provider's read path, and this section exists so it cannot again.
+    const realFetch = globalThis.fetch;
+    let sawWrongReceiver = false;
+
+    // A stand-in that is receiver-sensitive the way the real one is. Must be
+    // a normal function, not an arrow, or there is no `this` to inspect.
+    globalThis.fetch = function (this: unknown, input: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        sawWrongReceiver = true;
+        throw new TypeError("Illegal invocation: function called with incorrect `this` reference.");
+      }
+      const url = String(input);
+      const body = url.includes("/contents") ? "[]" : JSON.stringify({ default_branch: "main" });
+      return Promise.resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+    } as unknown as typeof fetch;
+
+    try {
+      // The control. Without this, a passing assertion below would prove
+      // nothing — it could just mean the stand-in is not actually
+      // receiver-sensitive. This must fail, loudly, in the same way workerd
+      // would, or the real check is worthless.
+      let controlCaught = false;
+      const holder = { f: globalThis.fetch };
+      try {
+        await holder.f("https://api.github.com/anything");
+      } catch (err) {
+        controlCaught = err instanceof TypeError && /Illegal invocation/.test(err.message);
+      }
+      check("control: calling fetch as a method of another object is caught", controlCaught);
+
+      sawWrongReceiver = false;
+      // No fetchImpl argument on purpose — this is the path production takes.
+      const provider = new GithubProvider("user-token", { owner: "ada", repo: "engine", ref: "" }, []);
+      const listed = await provider.perform({ op: "list", path: "", depth: 1, deny: [] });
+
+      check("the provider never calls fetch with a wrong receiver", !sawWrongReceiver);
+      check(
+        "listing through a default-constructed provider succeeds",
+        listed.ok === true,
+        listed,
+      );
+      check(
+        "no result mentions an illegal invocation",
+        !JSON.stringify(listed).includes("Illegal invocation"),
+        listed,
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
