@@ -76,20 +76,27 @@ function providerConfig(env: Env, provider: "github" | "google"): { clientId?: s
 }
 
 /**
- * The sign-in providers this deployment has both secrets for.
+ * The sign-in providers this deployment has both secrets for. Each one
+ * becomes a button on the sign-in screen, so configuring two offers a
+ * choice rather than a single mandatory account type.
  *
- * GitHub is deliberately excluded here even when `GITHUB_OAUTH_CLIENT_ID`/
- * `SECRET` are set: those credentials also power the in-room "Connect
- * GitHub" repository flow (see repoAuthorizeUrl in ./oauth), and reusing
- * them for general sign-in would force everyone through a GitHub login
- * before they could so much as create a room, just because some room wants
- * repository access. GitHub OAuth should only ever be triggered by someone
- * actually clicking "Connect GitHub" on a room's workspace panel — never as
- * a blanket sign-in gate. Google, which has no such dual purpose, still
- * gates sign-in normally when configured.
+ * A room voted once to drop GitHub from this list, on the reasoning that
+ * `GITHUB_OAUTH_CLIENT_ID`/`SECRET` do double duty — they also power the
+ * in-room "Connect GitHub" repository flow — so their presence was forcing
+ * a login on everyone as a side effect of some room wanting repository
+ * access. The reasoning was sound; the conclusion has since been reversed
+ * deliberately. Requiring sign-in is now the intent, not an accident of
+ * which secrets happen to be set, and GitHub is offered alongside Google
+ * rather than being the only way in.
+ *
+ * The dual-duty point still stands where it matters, and is enforced
+ * elsewhere: signing in asks only for `read:user`, and the repository scope
+ * is requested separately, at the moment someone connects a repository. See
+ * authorizeUrl and repoAuthorizeUrl in ./oauth. Signing in here never grants
+ * this app access to anyone's code.
  */
-function configuredProviders(env: Env): ("google")[] {
-  return (["google"] as const).filter((provider) => isConfigured(providerConfig(env, provider)));
+function configuredProviders(env: Env): ("github" | "google")[] {
+  return (["github", "google"] as const).filter((provider) => isConfigured(providerConfig(env, provider)));
 }
 
 /**

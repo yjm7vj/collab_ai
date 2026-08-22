@@ -35,40 +35,66 @@ function future(): number {
  * they set the two secrets up front and put them back afterwards rather than
  * changing the pool's bindings for everyone.
  */
+const KEYS = [
+  "GITHUB_OAUTH_CLIENT_ID",
+  "GITHUB_OAUTH_CLIENT_SECRET",
+  "GOOGLE_OAUTH_CLIENT_ID",
+  "GOOGLE_OAUTH_CLIENT_SECRET",
+] as const;
+
 const saved: Record<string, unknown> = {};
 beforeAll(() => {
-  saved.id = (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_ID;
-  saved.secret = (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_SECRET;
-  (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_ID = "test-client-id";
-  (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_SECRET = "test-client-secret";
+  for (const key of KEYS) {
+    saved[key] = (env as Record<string, unknown>)[key];
+    (env as Record<string, unknown>)[key] = `test-${key.toLowerCase()}`;
+  }
 });
 afterAll(() => {
-  (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_ID = saved.id;
-  (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_SECRET = saved.secret;
+  for (const key of KEYS) {
+    (env as Record<string, unknown>)[key] = saved[key];
+  }
 });
 
-describe("configuring repository access does not gate the whole app", () => {
+describe("sign-in is required and offers every configured provider", () => {
   /**
-   * The GitHub OAuth credentials do double duty: they power the in-room
-   * "Connect GitHub" repository flow. Counting their presence as a sign-in
-   * provider forced everyone through a GitHub login before they could so
-   * much as create a room, purely because some room wanted repository
-   * access. These two assertions are what stop that coming back.
+   * Configuring two providers has to produce a CHOICE, not a single
+   * mandatory account type. The sign-in screen renders one button per entry
+   * here, so a provider silently missing from this list is a provider
+   * nobody can use, with no error anywhere to say so.
    */
-  it("does not advertise github as a sign-in provider", async () => {
+  it("advertises both providers when both are configured", async () => {
     const res = await SELF.fetch(`${ORIGIN}/api/auth/config`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ providers: [] });
+    expect(await res.json()).toEqual({ providers: ["github", "google"] });
   });
 
-  it("still lets someone create a room without signing in", async () => {
+  it("refuses to create a room without signing in", async () => {
     const res = await SELF.fetch(`${ORIGIN}/api/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ uid: "anon-abcdef12", name: "Anon" }),
     });
-    expect(res.status).toBe(200);
-    await res.json();
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "sign_in_required" });
+  });
+
+  it("refuses to join a room without signing in", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ roomId: ROOM_ID, uid: "anon-abcdef12", name: "Anon" }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "sign_in_required" });
+  });
+
+  it("starts Google sign-in at Google, asking only for openid profile", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/auth/google/start?returnTo=/`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+
+    const target = new URL(res.headers.get("location") ?? "");
+    expect(`${target.origin}${target.pathname}`).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(target.searchParams.get("scope")).toBe("openid profile");
   });
 
   /**
