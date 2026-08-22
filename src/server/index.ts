@@ -10,8 +10,21 @@ import { routeAgentRequest, getAgentByName } from "agents";
 
 import { mintToken, newId, verifyToken } from "./auth";
 import {
+  authorizeUrl,
+  deriveUid,
+  exchangeCode,
+  fetchProfile,
+  isConfigured,
+  isRepoConnectState,
+  signState,
+  verifyState,
+  type OAuthProvider,
+} from "./oauth";
+import {
   ROOM_ID_RE,
   UID_RE,
+  IDENTITY_MARKER,
+  type AuthConfigResponse,
   type CreateRoomRequest,
   type CreateRoomResponse,
   type JoinRoomRequest,
@@ -42,6 +55,77 @@ async function roomStub(env: Env, roomId: string) {
  */
 function githubConfigured(env: Env): boolean {
   return Boolean(env.GITHUB_APP_ID) && Boolean(env.GITHUB_APP_PRIVATE_KEY);
+}
+
+/**
+ * Whether repository access over plain OAuth is available. This reuses the
+ * sign-in OAuth App, so a deployment that has configured sign-in with GitHub
+ * gets repository connection for free — no GitHub App, no private key, no
+ * PKCS#8 conversion.
+ */
+function githubOAuthConfigured(env: Env): boolean {
+  return isConfigured(providerConfig(env, "github"));
+}
+
+/** Pull the client id/secret pair for an OAuth sign-in provider off env. */
+function providerConfig(env: Env, provider: "github" | "google"): { clientId?: string; clientSecret?: string } {
+  if (provider === "github") {
+    return { clientId: env.GITHUB_OAUTH_CLIENT_ID, clientSecret: env.GITHUB_OAUTH_CLIENT_SECRET };
+  }
+  return { clientId: env.GOOGLE_OAUTH_CLIENT_ID, clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET };
+}
+
+/**
+ * The sign-in providers this deployment has both secrets for. Each one
+ * becomes a button on the sign-in screen, so configuring two offers a
+ * choice rather than a single mandatory account type.
+ *
+ * A room voted once to drop GitHub from this list, on the reasoning that
+ * `GITHUB_OAUTH_CLIENT_ID`/`SECRET` do double duty — they also power the
+ * in-room "Connect GitHub" repository flow — so their presence was forcing
+ * a login on everyone as a side effect of some room wanting repository
+ * access. The reasoning was sound; the conclusion has since been reversed
+ * deliberately. Requiring sign-in is now the intent, not an accident of
+ * which secrets happen to be set, and GitHub is offered alongside Google
+ * rather than being the only way in.
+ *
+ * The dual-duty point still stands where it matters, and is enforced
+ * elsewhere: signing in asks only for `read:user`, and the repository scope
+ * is requested separately, at the moment someone connects a repository. See
+ * authorizeUrl and repoAuthorizeUrl in ./oauth. Signing in here never grants
+ * this app access to anyone's code.
+ */
+function configuredProviders(env: Env): ("github" | "google")[] {
+  return (["github", "google"] as const).filter((provider) => isConfigured(providerConfig(env, provider)));
+}
+
+/**
+ * Whether this deployment requires sign-in before a caller may create or join
+ * a room. A deployment with no provider configured keeps the old open
+ * behaviour on purpose, so local development and the mock model still work
+ * with no setup.
+ */
+function signInRequired(env: Env): boolean {
+  return configuredProviders(env).length > 0;
+}
+
+/**
+ * Resolve an identity token into the uid/name it was minted for.
+ *
+ * Returns null for anything that isn't a valid, current identity token —
+ * including a well-formed room token, which is rejected by the rid check
+ * below.
+ */
+async function identityFrom(env: Env, token: unknown): Promise<{ uid: string; name: string } | null> {
+  if (typeof token !== "string") return null;
+  const claims = await verifyToken(env.ROOM_SECRET, token);
+  if (!claims) return null;
+  // Without this check a room token — which always carries a real room id in
+  // rid — would authenticate as an identity, since both are minted by the
+  // same mintToken/verifyToken machinery.
+  if (claims.rid !== IDENTITY_MARKER) return null;
+  if (!UID_RE.test(claims.uid)) return null;
+  return { uid: claims.uid, name: claims.role };
 }
 
 export default {
@@ -75,14 +159,32 @@ export default {
         return json({ error: "bad_request" }, 400);
       }
 
-      const uid = String(body.uid ?? "");
+      let uid: string;
+      let name: string;
+      if (body.identity !== undefined) {
+        const identity = await identityFrom(env, body.identity);
+        if (!identity) return json({ error: "sign_in_required" }, 401);
+        // The body's uid/name are ignored once a signed identity exists —
+        // trusting them anyway would make the whole thing decorative.
+        uid = identity.uid;
+        name = identity.name;
+      } else if (signInRequired(env)) {
+        // Closes unauthenticated room creation on a deployment that has
+        // sign-in switched on: no identity and no fallback allowed.
+        return json({ error: "sign_in_required" }, 401);
+      } else {
+        // Sign-in is off on this deployment — fall back to the body fields
+        // exactly as before.
+        uid = String(body.uid ?? "");
+        name = body.name;
+      }
       if (!UID_RE.test(uid)) return json({ error: "bad_request" }, 400);
 
       const roomId = newId(22);
       const stub = await roomStub(env, roomId);
       const initRes = await stub.fetch("https://room/init", {
         method: "POST",
-        body: JSON.stringify({ uid, name: body.name, title: body.title }),
+        body: JSON.stringify({ uid, name, title: body.title }),
         headers: {
           "content-type": "application/json",
           // Proves to the room that this call came from the Worker. Without it
@@ -120,7 +222,26 @@ export default {
       }
 
       const roomId = String(body.roomId ?? "");
-      const uid = String(body.uid ?? "");
+
+      let uid: string;
+      let name: string;
+      if (body.identity !== undefined) {
+        const identity = await identityFrom(env, body.identity);
+        if (!identity) return json({ error: "sign_in_required" }, 401);
+        // The body's uid/name are ignored once a signed identity exists —
+        // trusting them anyway would make the whole thing decorative.
+        uid = identity.uid;
+        name = identity.name;
+      } else if (signInRequired(env)) {
+        // Closes unauthenticated room joining on a deployment that has
+        // sign-in switched on: no identity and no fallback allowed.
+        return json({ error: "sign_in_required" }, 401);
+      } else {
+        // Sign-in is off on this deployment — fall back to the body fields
+        // exactly as before.
+        uid = String(body.uid ?? "");
+        name = body.name;
+      }
       if (!ROOM_ID_RE.test(roomId) || !UID_RE.test(uid)) {
         return json({ error: "bad_request" }, 400);
       }
@@ -128,7 +249,7 @@ export default {
       const stub = await roomStub(env, roomId);
       const admitRes = await stub.fetch("https://room/admit", {
         method: "POST",
-        body: JSON.stringify({ uid, name: body.name, code: body.code }),
+        body: JSON.stringify({ uid, name, code: body.code }),
         headers: {
           "content-type": "application/json",
           "x-internal-auth": env.ROOM_SECRET,
@@ -151,6 +272,127 @@ export default {
       });
 
       return json({ token, role } satisfies JoinRoomResponse);
+    }
+
+    if (url.pathname === "/api/auth/config") {
+      // Never include secrets — this is how the client decides whether to
+      // render sign-in buttons at all.
+      return json({ providers: configuredProviders(env) } satisfies AuthConfigResponse);
+    }
+
+    const authStartMatch = url.pathname.match(/^\/api\/auth\/(github|google)\/start$/);
+    if (authStartMatch) {
+      const provider = authStartMatch[1] as OAuthProvider;
+      const cfg = providerConfig(env, provider);
+      if (!isConfigured(cfg)) return json({ error: "not_found" }, 404);
+
+      const returnTo = url.searchParams.get("returnTo") ?? "/";
+      const state = await signState(env.ROOM_SECRET, provider, returnTo);
+      // The redirect URI is derived from the request origin rather than
+      // configured, so the same deployment works on localhost and in
+      // production without a second setting. It must match what is
+      // registered with the provider.
+      const redirectUri = `${url.origin}/api/auth/${provider}/callback`;
+      return Response.redirect(authorizeUrl(provider, cfg.clientId!, redirectUri, state), 302);
+    }
+
+    const authCallbackMatch = url.pathname.match(/^\/api\/auth\/(github|google)\/callback$/);
+    if (authCallbackMatch) {
+      const provider = authCallbackMatch[1] as OAuthProvider;
+      const cfg = providerConfig(env, provider);
+      if (!isConfigured(cfg)) return json({ error: "not_found" }, 404);
+
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      if (!code || !state) {
+        return new Response("That sign-in link is invalid or has expired. Start again.", { status: 400 });
+      }
+
+      // The GitHub OAuth App permits exactly one registered callback URL, so
+      // repository connection cannot have a route of its own — it shares
+      // this same sign-in callback and is told apart from an ordinary
+      // sign-in purely by the signed state token (isRepoConnectState is the
+      // only thing that distinguishes them). The access token GitHub hands
+      // back is passed straight to the room's Durable Object over the
+      // internal channel below; it is never placed in a URL, a cookie, a
+      // log line, or room state.
+      if (provider === "github") {
+        const claims = await verifyToken(env.ROOM_SECRET, state);
+        if (claims && isRepoConnectState(claims)) {
+          if (!/^[A-Za-z0-9]{22}$/.test(claims.rid)) {
+            return new Response(
+              "That link is invalid or has expired. Start again from the room.",
+              { status: 400 },
+            );
+          }
+          if (!githubOAuthConfigured(env)) return json({ error: "not_found" }, 404);
+
+          const redirectUri = `${url.origin}/api/auth/github/callback`;
+          const exchanged = await exchangeCode(
+            "github",
+            cfg as { clientId: string; clientSecret: string },
+            code,
+            redirectUri,
+          );
+          if (!exchanged.ok) return new Response(exchanged.error, { status: 502 });
+
+          // A failure here is not fatal — the login is only a display label
+          // for the picker, not something the connection depends on.
+          const fetched = await fetchProfile("github", exchanged.accessToken);
+          const login = fetched.ok ? fetched.profile.name : "";
+
+          const stub = await roomStub(env, claims.rid);
+          const stored = await stub.fetch("https://room/github-oauth", {
+            method: "POST",
+            body: JSON.stringify({ uid: claims.uid, token: exchanged.accessToken, login }),
+            headers: {
+              "content-type": "application/json",
+              "x-internal-auth": env.ROOM_SECRET,
+            },
+          });
+          if (!stored.ok) {
+            return new Response(stored.body, { status: stored.status, headers: stored.headers });
+          }
+
+          return Response.redirect(`${url.origin}/?gh=connected#/r/${claims.rid}`, 302);
+        }
+        // Not a repository-connect state (or not a valid token at all) —
+        // fall through to the ordinary sign-in verification below, which
+        // rejects it on its own terms if it isn't valid sign-in state either.
+      }
+
+      // This is what stops a forged callback: verifyState only accepts a
+      // token this server minted via signState. It also rejects a room
+      // token outright (a room token's rid is never the oauth-state marker),
+      // so a room credential can never be replayed here as sign-in state.
+      const verified = await verifyState(env.ROOM_SECRET, state);
+      if (!verified || verified.provider !== provider) {
+        return new Response("That sign-in link is invalid or has expired. Start again.", { status: 400 });
+      }
+      const { returnTo } = verified;
+
+      const redirectUri = `${url.origin}/api/auth/${provider}/callback`;
+      const exchanged = await exchangeCode(provider, cfg as { clientId: string; clientSecret: string }, code, redirectUri);
+      if (!exchanged.ok) return new Response(exchanged.error, { status: 502 });
+
+      const fetched = await fetchProfile(provider, exchanged.accessToken);
+      if (!fetched.ok) return new Response(fetched.error, { status: 502 });
+
+      const uid = await deriveUid(provider, fetched.profile.providerId);
+      // rid is the identity marker rather than a room id, so an identity
+      // token can never be mistaken for admission to a room. The display
+      // name rides in `role` because the token shape is fixed.
+      const token = await mintToken(env.ROOM_SECRET, {
+        rid: IDENTITY_MARKER,
+        uid,
+        role: fetched.profile.name.slice(0, 32) || provider,
+        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+      });
+
+      // The token rides in the URL fragment, not a query parameter: a
+      // fragment is never sent to a server, so it does not land in the
+      // Worker's logs or any intermediary's.
+      return Response.redirect(`${url.origin}${returnTo}#auth=${token}`, 302);
     }
 
     if (url.pathname === "/api/github/callback") {
@@ -219,6 +461,11 @@ export default {
       // Same reasoning as x-room-uid: `set` overwrites, so a forged role header
       // on the incoming request can't survive to reach the Durable Object.
       headers.set("x-room-role", claims.role);
+      // The Durable Object needs the deployment's own origin to build an
+      // OAuth redirect URI for repository connection. It must come from the
+      // server, like the other bound headers above — `headers.set`
+      // overwrites, so a client cannot forge it.
+      headers.set("x-room-origin", reqUrl.origin);
       return new Request(req, { headers });
     }
 

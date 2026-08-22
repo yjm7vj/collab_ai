@@ -5,6 +5,7 @@ import {
   INITIAL_ROOM_STATE,
   type ClientMsg,
   type Entry,
+  type GithubRepo,
   type InviteSummary,
   type MemberSummary,
   type RoomState,
@@ -72,6 +73,10 @@ export function RoomView({
   const [members, setMembers] = useState<MemberSummary[]>([]);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  // The repository list for the GitHub picker. `null` means "not fetched
+  // yet"; an array means fetched, possibly empty.
+  const [repos, setRepos] = useState<GithubRepo[] | null>(null);
+  const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("compact");
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
@@ -140,6 +145,9 @@ export function RoomView({
         break;
       case "error":
         setError(msg.message);
+        // A refusal from the server is still an answer to whatever asked —
+        // if that was the repo list, the spinner must not spin forever.
+        setReposLoading(false);
         break;
       case "fs.req":
         // applyServerMessage is synchronous but answering a filesystem
@@ -165,6 +173,10 @@ export function RoomView({
         // socket and a full navigation would drop it, losing the transcript
         // scroll position and forcing a reconnect for everyone watching.
         window.open(msg.url, "_blank", "noopener,noreferrer");
+        break;
+      case "github.repos":
+        setRepos(msg.repos);
+        setReposLoading(false);
         break;
     }
   }, []);
@@ -297,6 +309,35 @@ export function RoomView({
   }, [roomId, send]);
 
   const connectGithub = useCallback((repo: string) => send({ t: "github.connect", repo }), [send]);
+  const authGithub = useCallback(() => send({ t: "github.auth" }), [send]);
+  const listRepos = useCallback(() => {
+    setReposLoading(true);
+    send({ t: "github.repos" });
+  }, [send]);
+  const signOutGithub = useCallback(() => {
+    setRepos(null);
+    send({ t: "github.signout" });
+  }, [send]);
+
+  /**
+   * After the GitHub round trip the browser lands back here with `?gh=connected`.
+   * Reopen the workspace panel where the person left off and fetch their
+   * repositories, then strip the marker from the address bar so a reload or a
+   * copied link does not repeat it.
+   */
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("gh") !== "connected") return;
+    setShowWorkspace(true);
+    // Wait for the socket. This effect runs on mount, which is before the
+    // WebSocket has opened, and a frame sent then is simply dropped — the
+    // panel would sit on an empty list for no visible reason. Returning
+    // early leaves the marker in the URL, so the effect runs again the
+    // moment `connected` flips and the request actually goes out.
+    if (!connected) return;
+    setReposLoading(true);
+    send({ t: "github.repos" });
+    history.replaceState(null, "", location.pathname + location.hash);
+  }, [connected, send]);
 
   const copyLink = useCallback(() => {
     void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`).then(() => {
@@ -510,9 +551,15 @@ export function RoomView({
           supported={isFileAccessSupported()}
           hosting={wsReady}
           canWrite={canWrite}
+          github={state.github}
+          repos={repos}
+          reposLoading={reposLoading}
           onAttach={attachWorkspace}
           onDetach={detachWorkspace}
           onConnectGithub={connectGithub}
+          onAuthGithub={authGithub}
+          onListRepos={listRepos}
+          onSignOutGithub={signOutGithub}
           onClose={() => setShowWorkspace(false)}
         />
       )}

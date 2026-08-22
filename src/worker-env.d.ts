@@ -28,6 +28,22 @@ interface SecretBindings {
    * of a generic settings page.
    */
   GITHUB_APP_SLUG?: string;
+  /**
+   * Optional. GitHub OAuth App client id, used for sign-in (distinct from the
+   * GitHub App above, which is for repository access). Without this (and
+   * GITHUB_OAUTH_CLIENT_SECRET), GitHub sign-in is simply unavailable — sign-in
+   * as a whole is opt-in, so the app still works with no provider configured.
+   */
+  GITHUB_OAUTH_CLIENT_ID?: string;
+  /** Optional. GitHub OAuth App client secret. See GITHUB_OAUTH_CLIENT_ID. */
+  GITHUB_OAUTH_CLIENT_SECRET?: string;
+  /**
+   * Optional. Google OAuth client id, used for sign-in. Without this (and
+   * GOOGLE_OAUTH_CLIENT_SECRET), Google sign-in is simply unavailable.
+   */
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  /** Optional. Google OAuth client secret. See GOOGLE_OAUTH_CLIENT_ID. */
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
 }
 
 // wrangler emits `Cloudflare.Env` and a global `Env` as siblings — the global

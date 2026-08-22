@@ -5,6 +5,8 @@ import {
   tally,
   type AgentBlock,
   type Entry,
+  type GithubRepo,
+  type GithubStatus,
   type InviteSummary,
   type MemberSummary,
   type PendingTool,
@@ -100,11 +102,15 @@ export function Landing({
   busy,
   problem,
   onCreate,
+  identityName,
+  onSignOut,
 }: {
   initialName: string;
   busy: boolean;
   problem: string | null;
   onCreate: (name: string) => void;
+  identityName?: string;
+  onSignOut?: () => void;
 }) {
   const [value, setValue] = useState(initialName);
   return (
@@ -113,22 +119,33 @@ export function Landing({
         className="gate-card"
         onSubmit={(e) => {
           e.preventDefault();
-          onCreate(value);
+          onCreate(identityName ?? value);
         }}
       >
         <h1>collab_ai</h1>
         <p className="gate-sub">
           One agent, many people. Make a room and share the link.
         </p>
-        <input
-          autoFocus
-          value={value}
-          maxLength={32}
-          placeholder="Your name"
-          onChange={(e) => setValue(e.target.value)}
-          aria-label="Your name"
-        />
-        <button type="submit" disabled={!value.trim() || busy}>
+        {identityName ? (
+          <p className="gate-signed-in">
+            Signed in as {identityName}
+            {onSignOut && (
+              <button type="button" className="linkbtn" onClick={onSignOut}>
+                Sign out
+              </button>
+            )}
+          </p>
+        ) : (
+          <input
+            autoFocus
+            value={value}
+            maxLength={32}
+            placeholder="Your name"
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="Your name"
+          />
+        )}
+        <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
           {busy ? "creating…" : "Create a room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
@@ -148,12 +165,16 @@ export function JoinGate({
   busy,
   problem,
   onJoin,
+  identityName,
+  onSignOut,
 }: {
   roomId: string;
   initialName: string;
   busy: boolean;
   problem: string | null;
   onJoin: (name: string) => void;
+  identityName?: string;
+  onSignOut?: () => void;
 }) {
   const [value, setValue] = useState(initialName);
   return (
@@ -162,7 +183,7 @@ export function JoinGate({
         className="gate-card"
         onSubmit={(e) => {
           e.preventDefault();
-          onJoin(value);
+          onJoin(identityName ?? value);
         }}
       >
         <h1>collab_ai</h1>
@@ -171,15 +192,26 @@ export function JoinGate({
           <br />
           room {roomId.slice(0, 6)}…
         </p>
-        <input
-          autoFocus
-          value={value}
-          maxLength={32}
-          placeholder="Your name"
-          onChange={(e) => setValue(e.target.value)}
-          aria-label="Your name"
-        />
-        <button type="submit" disabled={!value.trim() || busy}>
+        {identityName ? (
+          <p className="gate-signed-in">
+            Signed in as {identityName}
+            {onSignOut && (
+              <button type="button" className="linkbtn" onClick={onSignOut}>
+                Sign out
+              </button>
+            )}
+          </p>
+        ) : (
+          <input
+            autoFocus
+            value={value}
+            maxLength={32}
+            placeholder="Your name"
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="Your name"
+          />
+        )}
+        <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
           {busy ? "joining…" : "Join room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
@@ -187,6 +219,47 @@ export function JoinGate({
           Your name is how the room and the agent will refer to you.
         </p>
       </form>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- sign-in */
+
+const PROVIDER_LABELS: Record<string, string> = {
+  github: "Continue with GitHub",
+  google: "Continue with Google",
+};
+
+export function SignInGate({
+  providers,
+  onSignIn,
+  problem,
+}: {
+  providers: string[];
+  onSignIn: (p: string) => void;
+  problem: string | null;
+}) {
+  return (
+    <div className="gate">
+      <div className="gate-card">
+        <h1>collab_ai</h1>
+        <p className="gate-sub">
+          One agent, many people. Sign in to create or join a room.
+        </p>
+        <div className="signin-providers">
+          {providers
+            .filter((p) => p in PROVIDER_LABELS)
+            .map((p) => (
+              <button key={p} type="button" onClick={() => onSignIn(p)}>
+                {PROVIDER_LABELS[p]}
+              </button>
+            ))}
+        </div>
+        {problem && <p className="gate-error">{problem}</p>}
+        <p className="gate-foot">
+          We only read your name and avatar. Nothing is posted on your behalf.
+        </p>
+      </div>
     </div>
   );
 }
@@ -1094,23 +1167,54 @@ export function WorkspacePanel({
   supported,
   hosting,
   canWrite,
+  github,
+  repos,
+  reposLoading,
   onAttach,
   onDetach,
   onConnectGithub,
+  onAuthGithub,
+  onListRepos,
+  onSignOutGithub,
   onClose,
 }: {
   workspace: WorkspaceInfo;
   supported: boolean;
   hosting: boolean;
   canWrite: boolean;
+  github: GithubStatus;
+  repos: GithubRepo[] | null;
+  reposLoading: boolean;
   onAttach: (allowWrites: boolean) => void;
   onDetach: () => void;
   onConnectGithub: (repo: string) => void;
+  onAuthGithub: () => void;
+  onListRepos: () => void;
+  onSignOutGithub: () => void;
   onClose: () => void;
 }) {
   const attached = workspace.kind !== "none";
   const [allowWrites, setAllowWrites] = useState(false);
   const [repo, setRepo] = useState("");
+  const [filter, setFilter] = useState("");
+
+  // Fetch the repository list the moment the panel knows there is an
+  // authorised account, rather than making someone click "load" to see the
+  // thing they opened this panel for. The ref is what stops a server refusal
+  // from becoming a request loop: a failure leaves `repos` null forever, so
+  // without it this effect would fire again on every render. A retry stays
+  // available as a button below.
+  const requestedRepos = useRef(false);
+  useEffect(() => {
+    if (!github.authorized || repos !== null || requestedRepos.current) return;
+    requestedRepos.current = true;
+    onListRepos();
+  }, [github.authorized, repos, onListRepos]);
+  // Signing out clears `repos` back to null, and that must arm the fetch
+  // again for whoever authorises next.
+  useEffect(() => {
+    if (!github.authorized) requestedRepos.current = false;
+  }, [github.authorized]);
 
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -1172,36 +1276,174 @@ export function WorkspacePanel({
 
               <section className="ws-option">
                 <h3 className="ws-option-heading">A GitHub repository</h3>
-                <p className="field-note">
-                  Connect a repository instead of a folder. Works in any
-                  browser, and the agent's changes arrive as a pull request
-                  rather than edits on someone's machine.
-                </p>
-                <label className="field">
-                  <span className="field-label">Repository</span>
-                  <input
-                    type="text"
-                    placeholder="owner/repo"
-                    maxLength={140}
-                    value={repo}
-                    onChange={(e) => setRepo(e.target.value)}
-                  />
-                </label>
-                <p className="field-note">
-                  Add a branch with owner/repo@branch. Defaults to the
-                  repository's default branch.
-                </p>
-                <button
-                  className="primary"
-                  disabled={repo.trim().length === 0}
-                  onClick={() => onConnectGithub(repo.trim())}
-                >
-                  Connect repository
-                </button>
-                <p className="field-note">
-                  GitHub will ask you to choose which repositories to
-                  install on. Nothing else in the room can see them.
-                </p>
+                {!github.oauth && !github.app ? (
+                  // Nothing is configured on this deployment at all — a
+                  // button that can't work is worse than an honest message,
+                  // so this tells whoever can fix it exactly how to, rather
+                  // than leaving them to guess why "Connect" errors out.
+                  <>
+                    <p className="field-note">
+                      GitHub isn't set up on this server yet, so there's nothing to connect to.
+                      Whoever deployed this app can turn it on in about two minutes:
+                    </p>
+                    <ol className="ws-setup">
+                      <li>
+                        Create an OAuth app at{" "}
+                        <a
+                          href="https://github.com/settings/developers"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          github.com/settings/developers
+                        </a>{" "}
+                        → New OAuth App.
+                      </li>
+                      <li>
+                        Set the callback URL to{" "}
+                        <code>{location.origin}/api/auth/github/callback</code>.
+                      </li>
+                      <li>Run these two commands, pasting the client ID and client secret when asked:</li>
+                    </ol>
+                    <pre className="ws-setup-code">{"npx wrangler secret put GITHUB_OAUTH_CLIENT_ID\nnpx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET"}</pre>
+                    <p className="field-note">
+                      The same credentials also switch on signing in with GitHub. Nothing else is needed —
+                      no private key, no app installation.
+                    </p>
+                  </>
+                ) : github.oauth && !github.authorized ? (
+                  // OAuth is configured but nobody here has authorised yet —
+                  // one button starts the round trip.
+                  <>
+                    <p className="field-note">
+                      Connect your GitHub account, then pick a repository from the list. Works in any
+                      browser, and the agent's changes arrive as a pull request rather than edits on
+                      someone's machine.
+                    </p>
+                    <button className="primary" onClick={onAuthGithub}>Connect GitHub</button>
+                    <p className="field-note">
+                      GitHub will ask you to authorise this app. It can then read and open pull requests
+                      on repositories you can already reach — the room only ever touches the single
+                      repository you pick here.
+                    </p>
+                  </>
+                ) : github.authorized ? (
+                  // Authorised: pick a repository from a live, searchable list
+                  // instead of typing "owner/repo" from memory.
+                  (() => {
+                    const filtered = (repos ?? []).filter((r) =>
+                      r.fullName.toLowerCase().includes(filter.trim().toLowerCase()),
+                    );
+                    const shown = filtered.slice(0, 50);
+                    return (
+                      <>
+                        <p className="field-note">
+                          Signed in to GitHub{github.login ? ` as ${github.login}` : ""}.{" "}
+                          <button className="link" onClick={onSignOutGithub}>
+                            Use a different account
+                          </button>
+                        </p>
+                        <label className="field">
+                          <span className="field-label">Search repositories</span>
+                          <input
+                            type="text"
+                            placeholder="Filter by name"
+                            value={filter}
+                            onChange={(e) => setFilter(e.target.value)}
+                          />
+                        </label>
+                        {repos === null && !reposLoading && (
+                          <button onClick={onListRepos}>Retry loading repositories</button>
+                        )}
+                        {reposLoading && <p className="field-note">Loading your repositories…</p>}
+                        {repos !== null && !reposLoading && (
+                          shown.length === 0 ? (
+                            <p className="field-note">No repositories match.</p>
+                          ) : (
+                            <>
+                              <ul className="ws-repos">
+                                {shown.map((r) => (
+                                  <li key={r.fullName}>
+                                    <button className="ws-repo" onClick={() => onConnectGithub(r.fullName)}>
+                                      <span className="ws-repo-name">{r.fullName}</span>
+                                      {r.private && <span className="ws-repo-tag">private</span>}
+                                      {r.defaultBranch && (
+                                        <span className="ws-repo-branch">{r.defaultBranch}</span>
+                                      )}
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                              {filtered.length > 50 && (
+                                <p className="field-note">
+                                  Showing the first 50. Use the search box to narrow it down.
+                                </p>
+                              )}
+                            </>
+                          )
+                        )}
+                        <details className="ws-manual">
+                          <summary>Enter a repository by name instead</summary>
+                          <label className="field">
+                            <span className="field-label">Repository</span>
+                            <input
+                              type="text"
+                              placeholder="owner/repo"
+                              maxLength={140}
+                              value={repo}
+                              onChange={(e) => setRepo(e.target.value)}
+                            />
+                          </label>
+                          <p className="field-note">
+                            Add a branch with owner/repo@branch. Defaults to the
+                            repository's default branch.
+                          </p>
+                          <button
+                            className="primary"
+                            disabled={repo.trim().length === 0}
+                            onClick={() => onConnectGithub(repo.trim())}
+                          >
+                            Connect repository
+                          </button>
+                        </details>
+                      </>
+                    );
+                  })()
+                ) : (
+                  // No OAuth, but the GitHub App is configured — the original
+                  // install-flow path, unchanged.
+                  <>
+                    <p className="field-note">
+                      Connect a repository instead of a folder. Works in any
+                      browser, and the agent's changes arrive as a pull request
+                      rather than edits on someone's machine.
+                    </p>
+                    <label className="field">
+                      <span className="field-label">Repository</span>
+                      <input
+                        type="text"
+                        placeholder="owner/repo"
+                        maxLength={140}
+                        value={repo}
+                        onChange={(e) => setRepo(e.target.value)}
+                      />
+                    </label>
+                    <p className="field-note">
+                      Add a branch with owner/repo@branch. Defaults to the
+                      repository's default branch.
+                    </p>
+                    <button
+                      className="primary"
+                      disabled={repo.trim().length === 0}
+                      onClick={() => onConnectGithub(repo.trim())}
+                    >
+                      Connect repository
+                    </button>
+                    <p className="field-note">
+                      GitHub will ask you to choose which repositories to
+                      install on. Nothing else in the room can see them.
+                    </p>
+                  </>
+                )}
               </section>
             </div>
           ) : (

@@ -393,20 +393,52 @@ export type CostLedger = {
 
 export const EMPTY_LEDGER: CostLedger = { byModel: {}, usd: 0 };
 
-export function addUsage(
-  ledger: CostLedger,
-  model: string,
-  inTokens: number,
-  outTokens: number,
-): CostLedger {
+/**
+ * What the three classes of prompt token cost, relative to the base input
+ * price. Writing to the cache costs a little more than sending the tokens
+ * plainly; reading from it costs a tenth.
+ *
+ * Getting these wrong is not a rounding error. This app marks the system
+ * prompt and tool definitions as cacheable, and those are almost the whole
+ * prompt in a short room — so from the second turn onward nearly every input
+ * token is a cache read. Billing those at the base rate overstates the cost
+ * of a turn by roughly ten times, which is exactly the sort of number that
+ * makes someone think the app is broken.
+ */
+export const CACHE_WRITE_MULTIPLIER = 1.25;
+export const CACHE_READ_MULTIPLIER = 0.1;
+
+/** One response's token usage, split by how each class is actually priced. */
+export type UsageTokens = {
+  /** Uncached input, billed at the base rate. */
+  in: number;
+  /** Tokens written into the cache. Optional so older callers still work. */
+  cacheWrite?: number;
+  /** Tokens served from the cache. */
+  cacheRead?: number;
+  out: number;
+};
+
+export function addUsage(ledger: CostLedger, model: string, usage: UsageTokens): CostLedger {
   const prev = ledger.byModel[model] ?? { in: 0, out: 0 };
   const info = modelInfo(model);
+
+  const cacheWrite = usage.cacheWrite ?? 0;
+  const cacheRead = usage.cacheRead ?? 0;
   const delta =
-    (inTokens / 1_000_000) * info.price.in + (outTokens / 1_000_000) * info.price.out;
+    (usage.in / 1_000_000) * info.price.in +
+    (cacheWrite / 1_000_000) * info.price.in * CACHE_WRITE_MULTIPLIER +
+    (cacheRead / 1_000_000) * info.price.in * CACHE_READ_MULTIPLIER +
+    (usage.out / 1_000_000) * info.price.out;
+
+  // The per-model token counts stay whole: someone reading "in" wants to know
+  // how many prompt tokens went out, not how they were priced. Only `usd`
+  // needs the split.
+  const promptTokens = usage.in + cacheWrite + cacheRead;
   return {
     byModel: {
       ...ledger.byModel,
-      [model]: { in: prev.in + inTokens, out: prev.out + outTokens },
+      [model]: { in: prev.in + promptTokens, out: prev.out + usage.out },
     },
     usd: ledger.usd + delta,
   };

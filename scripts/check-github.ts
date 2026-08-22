@@ -16,6 +16,7 @@ import {
   GithubProvider,
   installationToken,
   openPullRequest,
+  listUserRepos,
   parseRepoRef,
   pemToPkcs8,
   refHead,
@@ -536,6 +537,437 @@ async function main() {
     }
     check("a throwing fetch on write does not propagate", !writeThrew);
     check("a throwing fetch on write yields ok:false", writeRes !== undefined && writeRes.ok === false, writeRes);
+  }
+
+  console.log("\nlisting a user's repositories");
+  {
+    const okStub = (body: unknown, status = 200) =>
+      (async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch;
+
+    const res = await listUserRepos("user-token", okStub([
+      { full_name: "ada/analytical-engine", private: false, default_branch: "main" },
+      { full_name: "ada/notes", private: true, default_branch: "trunk" },
+    ]));
+    check("listUserRepos maps a normal response", res.ok === true && res.repos.length === 2, res);
+    check(
+      "listUserRepos carries fullName, private and defaultBranch",
+      res.ok === true &&
+        res.repos[0]!.fullName === "ada/analytical-engine" &&
+        res.repos[0]!.private === false &&
+        res.repos[1]!.private === true &&
+        res.repos[1]!.defaultBranch === "trunk",
+      res,
+    );
+
+    // GitHub is a third party. A malformed or hostile-shaped response must
+    // produce a short list, never a crash and never entries with a missing
+    // name that the picker would render as an empty clickable row.
+    const messy = await listUserRepos("user-token", okStub([
+      null,
+      "not-an-object",
+      { private: true },
+      { full_name: "" },
+      { full_name: "ada/ok" },
+      42,
+    ]));
+    check(
+      "listUserRepos drops every malformed entry",
+      messy.ok === true && messy.repos.length === 1 && messy.repos[0]!.fullName === "ada/ok",
+      messy,
+    );
+    check(
+      "a repo with no default_branch gets an empty string, not undefined",
+      messy.ok === true && messy.repos[0]!.defaultBranch === "",
+      messy,
+    );
+
+    const notArray = await listUserRepos("user-token", okStub({ message: "nope" }));
+    check("a non-array body yields an empty list, not a throw", notArray.ok === true && notArray.repos.length === 0, notArray);
+
+    const failed = await listUserRepos("user-token", okStub({ message: "Bad credentials" }, 401));
+    check("a 401 yields ok:false", failed.ok === false, failed);
+
+    const throwing = (async () => {
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    let threw = false;
+    let thrownRes: Awaited<ReturnType<typeof listUserRepos>> | undefined;
+    try {
+      thrownRes = await listUserRepos("user-token", throwing);
+    } catch {
+      threw = true;
+    }
+    check("a throwing fetch does not propagate out of listUserRepos", !threw);
+    check("a throwing fetch yields ok:false", thrownRes !== undefined && thrownRes.ok === false, thrownRes);
+
+    // The token is a live credential against someone's account. It belongs in
+    // the Authorization header and absolutely nowhere else — not in the query
+    // string, where it would land in logs and proxies.
+    let seenUrl = "";
+    let seenAuth = "";
+    const recording = (async (input: unknown, init?: RequestInit) => {
+      seenUrl = String(input);
+      seenAuth = String(new Headers(init?.headers).get("authorization") ?? "");
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    await listUserRepos("super-secret-token", recording);
+    check("the token never appears in the request URL", !seenUrl.includes("super-secret-token"), seenUrl);
+    check("the token is sent as a bearer credential", seenAuth.includes("super-secret-token"), seenAuth);
+  }
+
+  console.log("\nreceiver safety (the workerd Illegal-invocation class of bug)");
+  {
+    // Reproduces what workerd enforces and Node does not: the runtime's
+    // `fetch` is a native function with a receiver requirement. Store it on
+    // an object and call it back as `obj.f(url)` and the receiver becomes
+    // that object, which workerd rejects at runtime with "Illegal
+    // invocation: function called with incorrect `this` reference".
+    //
+    // Every other check in this file injects its own fetch stub, and a stub
+    // is an ordinary function that ignores `this` — so this whole class of
+    // bug is invisible to them. It reached production once already, in the
+    // provider's read path, and this section exists so it cannot again.
+    const realFetch = globalThis.fetch;
+    let sawWrongReceiver = false;
+
+    // A stand-in that is receiver-sensitive the way the real one is. Must be
+    // a normal function, not an arrow, or there is no `this` to inspect.
+    globalThis.fetch = function (this: unknown, input: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        sawWrongReceiver = true;
+        throw new TypeError("Illegal invocation: function called with incorrect `this` reference.");
+      }
+      const url = String(input);
+      const body = url.includes("/contents") ? "[]" : JSON.stringify({ default_branch: "main" });
+      return Promise.resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+    } as unknown as typeof fetch;
+
+    try {
+      // The control. Without this, a passing assertion below would prove
+      // nothing — it could just mean the stand-in is not actually
+      // receiver-sensitive. This must fail, loudly, in the same way workerd
+      // would, or the real check is worthless.
+      let controlCaught = false;
+      const holder = { f: globalThis.fetch };
+      try {
+        await holder.f("https://api.github.com/anything");
+      } catch (err) {
+        controlCaught = err instanceof TypeError && /Illegal invocation/.test(err.message);
+      }
+      check("control: calling fetch as a method of another object is caught", controlCaught);
+
+      sawWrongReceiver = false;
+      // No fetchImpl argument on purpose — this is the path production takes.
+      const provider = new GithubProvider("user-token", { owner: "ada", repo: "engine", ref: "" }, []);
+      const listed = await provider.perform({ op: "list", path: "", depth: 1, deny: [] });
+
+      check("the provider never calls fetch with a wrong receiver", !sawWrongReceiver);
+      check(
+        "listing through a default-constructed provider succeeds",
+        listed.ok === true,
+        listed,
+      );
+      check(
+        "no result mentions an illegal invocation",
+        !JSON.stringify(listed).includes("Illegal invocation"),
+        listed,
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  console.log("\nsearch falls back to a tree walk");
+  {
+    // These drive the provider through its public `perform` API rather than
+    // any private method, so they keep testing the behaviour even if the
+    // internals are reshaped.
+    type Fixture = { path: string; text: string; size?: number };
+
+    /**
+     * A stand-in GitHub serving the endpoints a tree-walk search touches. It
+     * records every URL, so a test can assert what was NOT called — the only
+     * way to prove a file's contents were never fetched at all.
+     */
+    function treeStub(files: Fixture[], opts: { codeSearchStatus?: number; truncated?: boolean } = {}) {
+      const urls: string[] = [];
+      const fetchImpl = (async (input: unknown) => {
+        const url = String(input);
+        urls.push(url);
+        const jsonRes = (body: unknown, status = 200) =>
+          new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+        if (url.includes("/search/code")) {
+          const status = opts.codeSearchStatus ?? 403;
+          if (status !== 200) return jsonRes({ message: "rate limited" }, status);
+          return jsonRes({ items: files.map((f) => ({ path: f.path })) });
+        }
+        if (url.includes("/git/trees/")) {
+          return jsonRes({
+            truncated: opts.truncated ?? false,
+            tree: files.map((f) => ({
+              path: f.path,
+              type: "blob",
+              sha: `sha-${f.path}`,
+              size: f.size ?? f.text.length,
+            })),
+          });
+        }
+        if (url.includes("/git/blobs/")) {
+          const sha = decodeURIComponent(url.split("/git/blobs/")[1] ?? "");
+          const file = files.find((f) => `sha-${f.path}` === sha);
+          if (!file) return jsonRes({ message: "Not Found" }, 404);
+          return jsonRes({ content: btoa(file.text), encoding: "base64" });
+        }
+        // The repository itself, for resolveBranchName.
+        return jsonRes({ default_branch: "main" });
+      }) as unknown as typeof fetch;
+      return { urls, fetchImpl };
+    }
+
+    const searchRef = { owner: "ada", repo: "engine", ref: "" };
+    const files: Fixture[] = [
+      { path: "src/index.ts", text: "const answer = 42;\nexport const NEEDLE = 1;" },
+      { path: "src/other.ts", text: "nothing here" },
+      { path: "README.md", text: "a NEEDLE in the readme" },
+    ];
+
+    {
+      const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("a 403 from code search does not surface as an error", res.ok === true, res);
+      check(
+        "the tree walk finds matches the code search could not return",
+        res.ok === true && res.data.includes("src/index.ts:2") && res.data.includes("README.md:1"),
+        res,
+      );
+      check("the fallback fetched the git tree", urls.some((u) => u.includes("/git/trees/")), urls.length);
+    }
+
+    {
+      // "HEAD" is what parseRepoRef puts in `ref` for a plain "owner/repo",
+      // which is the shape almost every room actually has. If that counted as
+      // an explicit branch the code-search fast path would be dead code, and
+      // every search would pay for a tree walk it did not need.
+      const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 200 });
+      const provider = new GithubProvider("t", { ...searchRef, ref: "HEAD" }, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("HEAD is not treated as an explicit branch", urls.some((u) => u.includes("/search/code")), urls);
+      // The code-search path answers with paths, not matched lines — GitHub
+      // does not return a line number for every hit. Assert that shape rather
+      // than the tree walk's.
+      check("a HEAD room still gets results", res.ok === true && res.data.includes("src/index.ts"), res);
+    }
+
+    {
+      // GitHub's code search index only covers the default branch, so on an
+      // explicit branch it would confidently answer from the wrong code.
+      const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 200 });
+      const provider = new GithubProvider("t", { ...searchRef, ref: "feature-x" }, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("an explicit branch never calls the code-search endpoint", !urls.some((u) => u.includes("/search/code")), urls);
+      check("an explicit branch still returns matches", res.ok === true && res.data.includes("NEEDLE"), res);
+    }
+
+    {
+      // THE SECURITY CHECK. The deny list is what keeps .env and private keys
+      // out of a room, and a search walks the tree itself rather than naming
+      // one path the server can police — so if the walk ignored deny, every
+      // secret in the repository would be one search away.
+      const secrets: Fixture[] = [
+        { path: ".env", text: "DB_PASSWORD=NEEDLE-secret" },
+        { path: "deploy/id_rsa", text: "NEEDLE private key" },
+        { path: "src/app.ts", text: "const NEEDLE = true;" },
+      ];
+      const deny = [".env", ".env.*", "id_rsa*", "**/id_rsa*"];
+      const { urls, fetchImpl } = treeStub(secrets, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny });
+
+      check("a denied file never appears in search results", res.ok === true && !res.data.includes(".env"), res);
+      check("a denied key file never appears in search results", res.ok === true && !res.data.includes("id_rsa"), res);
+      check("the undenied file still matches", res.ok === true && res.data.includes("src/app.ts"), res);
+      // Stronger than checking the output: a denied file must never be
+      // FETCHED, so its contents never enter the Worker's memory at all.
+      check(
+        "a denied file's contents are never even requested",
+        !urls.some((u) => u.includes("sha-.env") || u.includes("id_rsa")),
+        urls.filter((u) => u.includes("/git/blobs/")),
+      );
+      // Control: prove the fixture would have revealed the secret without deny.
+      const open = treeStub(secrets, { codeSearchStatus: 403 });
+      const openProvider = new GithubProvider("t", searchRef, [], "collab-ai", open.fetchImpl);
+      const openRes = await openProvider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check(
+        "control: with no deny list the same search does reach .env",
+        openRes.ok === true && openRes.data.includes(".env"),
+        openRes,
+      );
+    }
+
+    {
+      const { fetchImpl } = treeStub(files, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "**/*.md", max: 50, deny: [] });
+      check(
+        "a glob narrows the tree walk",
+        res.ok === true && res.data.includes("README.md") && !res.data.includes("src/index.ts"),
+        res,
+      );
+    }
+
+    {
+      // A partial answer that looks complete is worse than a clear refusal.
+      const many: Fixture[] = [];
+      for (let i = 0; i < 200; i++) many.push({ path: `src/f${i}.ts`, text: "NEEDLE" });
+      const { urls, fetchImpl } = treeStub(many, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      // Over the cap the search must NOT grep: every candidate file costs a
+      // subrequest, and a whole agent turn shares one budget — a hundred-file
+      // search ends the turn instead of answering it. The tree request has
+      // already been paid for though, so naming the matching paths costs
+      // nothing and beats refusing outright.
+      check("an over-cap search still answers rather than erroring", res.ok === true, res);
+      check(
+        "an over-cap search fetches no file contents at all",
+        !urls.some((u) => u.includes("/git/blobs/")),
+        urls.filter((u) => u.includes("/git/blobs/")).length,
+      );
+      check("an over-cap search names matching paths", res.ok === true && res.data.includes("src/f0.ts"), res);
+      check("an over-cap search says how many matched", res.ok === true && res.data.includes("200"), res);
+      // The wording has to stop the agent reporting these as confirmed hits:
+      // they matched the glob, not the search term.
+      check(
+        "an over-cap search says the contents were not searched",
+        res.ok === true && /paths only|not.*search|too many to search/i.test(res.data),
+        res,
+      );
+      check("an over-cap search suggests narrowing with a glob", res.ok === true && /glob/i.test(res.data), res);
+    }
+
+    {
+      // The pattern comes from a model. Compiling model-supplied text as a
+      // regular expression is both a correctness surprise and a denial-of-
+      // service risk, so it must be matched literally.
+      const dotted: Fixture[] = [
+        { path: "a.ts", text: "abc" },
+        { path: "b.ts", text: "a.c" },
+      ];
+      const { fetchImpl } = treeStub(dotted, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "a.c", glob: "", max: 50, deny: [] });
+      check("the pattern is matched literally, not as a regex", res.ok === true && !res.data.includes("a.ts"), res);
+      check("the literal match still hits", res.ok === true && res.data.includes("b.ts"), res);
+    }
+
+    {
+      // One unreadable file must not fail the whole search.
+      const base = treeStub([{ path: "src/real.ts", text: "NEEDLE here" }], { codeSearchStatus: 403 });
+      const wrapped = (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/git/blobs/missing")) {
+          return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+        }
+        if (url.includes("/git/trees/")) {
+          return new Response(
+            JSON.stringify({
+              truncated: false,
+              tree: [
+                { path: "src/missing.ts", type: "blob", sha: "missing", size: 10 },
+                { path: "src/real.ts", type: "blob", sha: "sha-src/real.ts", size: 11 },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return base.fetchImpl(input as RequestInfo, init);
+      }) as unknown as typeof fetch;
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", wrapped);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("one unfetchable file does not fail the search", res.ok === true, res);
+      check("the readable file still matches", res.ok === true && res.data.includes("src/real.ts"), res);
+    }
+
+    {
+      const binary: Fixture[] = [
+        { path: "logo.png", text: "NEEDLE" },
+        { path: "src/keep.ts", text: "NEEDLE" },
+      ];
+      const { urls, fetchImpl } = treeStub(binary, { codeSearchStatus: 403 });
+      const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("a binary file is never fetched", !urls.some((u) => u.includes("logo.png")), urls);
+      check("the source file is still searched", res.ok === true && res.data.includes("src/keep.ts"), res);
+    }
+  }
+
+  console.log("\nreads follow the working branch once it exists");
+  {
+    // Writes land on the working branch so nothing here can change a
+    // repository's default branch without a pull request. That is right, but
+    // it means a room that has just approved an edit must read that branch
+    // too — otherwise it re-reads the file it changed, sees the old text, and
+    // concludes its own vote failed. That happened in production.
+    function recordingStub() {
+      const urls: string[] = [];
+      const fetchImpl = (async (input: unknown) => {
+        const url = String(input);
+        urls.push(url);
+        const body = url.includes("/contents")
+          ? JSON.stringify({ content: btoa("hello from the branch"), encoding: "base64" })
+          : JSON.stringify({ default_branch: "main" });
+        return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+      return { urls, fetchImpl };
+    }
+
+    const baseRef = { owner: "ada", repo: "engine", ref: "" };
+
+    {
+      const { urls, fetchImpl } = recordingStub();
+      const provider = new GithubProvider("t", baseRef, [], "collab-ai", fetchImpl, true);
+      const res = await provider.perform({ op: "read", path: "src/index.ts", offset: 0, limit: 1000 });
+      check("a read succeeds when pointed at the working branch", res.ok === true, res);
+      check(
+        "the read asks GitHub for the working branch",
+        urls.some((u) => u.includes("/contents") && u.includes("collab-ai")),
+        urls,
+      );
+    }
+
+    {
+      // The default. A room that has never written must not ask for a branch
+      // that does not exist, or every read 404s.
+      const { urls, fetchImpl } = recordingStub();
+      const provider = new GithubProvider("t", baseRef, [], "collab-ai", fetchImpl, false);
+      await provider.perform({ op: "read", path: "src/index.ts", offset: 0, limit: 1000 });
+      check(
+        "without the flag a read never asks for the working branch",
+        !urls.some((u) => u.includes("/contents") && u.includes("collab-ai")),
+        urls,
+      );
+    }
+
+    {
+      // A pull request whose base was the working branch would be a pull
+      // request from a branch into itself, so openPr must keep resolving the
+      // BASE branch even when reads have been redirected.
+      const { urls, fetchImpl } = recordingStub();
+      const provider = new GithubProvider("t", baseRef, [], "collab-ai", fetchImpl, true);
+      await provider.openPr("title", "body").catch(() => undefined);
+      const resolved = urls.filter((u) => !u.includes("/contents") && !u.includes("/pulls"));
+      check(
+        "openPr still resolves the base branch, not the working branch",
+        resolved.every((u) => !u.includes("collab-ai")),
+        resolved,
+      );
+    }
   }
 
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);

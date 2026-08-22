@@ -227,3 +227,81 @@ describe("websocket token gate", () => {
     expect(res.status).toBe(101);
   });
 });
+
+/**
+ * Sign-in is optional per deployment. With no provider secrets set — which is
+ * the case in this test environment — the app must behave exactly as it did
+ * before OAuth existed, and the auth routes must not half-exist.
+ */
+describe("sign-in when no provider is configured", () => {
+  it("reports no providers", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/auth/config`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ providers: [] });
+  });
+
+  it("does not expose a start route for an unconfigured provider", async () => {
+    for (const p of ["github", "google"]) {
+      const res = await SELF.fetch(`${ORIGIN}/api/auth/${p}/start?returnTo=/`);
+      expect(res.status).toBe(404);
+      await res.text();
+    }
+  });
+
+  it("still lets an anonymous caller create a room", async () => {
+    // The open path is deliberate: a deployment that has not configured a
+    // provider keeps working with no setup, so local dev and the mock model
+    // are unaffected.
+    const { roomId } = await newOwnedRoom();
+    expect(roomId).toMatch(/^[A-Za-z0-9]{22}$/);
+  });
+
+  it("rejects an unknown auth path as JSON, not the SPA", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/auth/nonsense/start`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+});
+
+/**
+ * A room token and an identity token are minted by the same signing function
+ * and differ only in their `rid` field. If that distinction ever stopped being
+ * enforced, a room credential would authenticate as a person — so this asserts
+ * it end to end through the real Worker rather than in isolation.
+ */
+describe("a room token cannot masquerade as an identity", () => {
+  it("is refused where an identity is expected", async () => {
+    const { roomId, token } = await newOwnedRoom();
+
+    const res = await SELF.fetch(`${ORIGIN}/api/join`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // A genuine, currently-valid room token offered as proof of identity.
+      body: JSON.stringify({ roomId, identity: token, name: "Impostor" }),
+    });
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "sign_in_required" });
+  });
+
+  it("is refused for room creation too", async () => {
+    const { token } = await newOwnedRoom();
+    const res = await SELF.fetch(`${ORIGIN}/api/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ identity: token, name: "Impostor" }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "sign_in_required" });
+  });
+
+  it("refuses a syntactically valid but unsigned identity", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ identity: "bm90LWEtdG9rZW4.c2ln", name: "Impostor" }),
+    });
+    expect(res.status).toBe(401);
+    await res.json();
+  });
+});
