@@ -16,7 +16,9 @@ import {
   serverToolsFor,
 } from "../src/shared/models";
 import { REDACTED, redactEntry, thresholdFor } from "../src/shared/protocol";
+import { SYSTEM_PROMPT } from "../src/server/model";
 import {
+  MODE_PRESETS,
   ROLE_CAPS,
   TOOL_NAMES,
   approvalThreshold,
@@ -690,6 +692,52 @@ console.log("\ncost accounting prices cached tokens as cached");
   // Accumulation across turns.
   const twice = addUsage(addUsage(EMPTY_LEDGER, MODEL, { in: 1_000, out: 0 }), MODEL, { in: 1_000, out: 0 });
   check("usd accumulates across calls", near(twice.usd, only({ in: 2_000, out: 0 })), twice.usd);
+}
+
+console.log("\nthe system prompt keeps up with the tools");
+{
+  // Derived from MODE_PRESETS rather than hardcoded here: read-only mode
+  // denies exactly the tools that change something, so this list grows by
+  // itself the moment a new write tool is added — and these checks then fail
+  // until the prompt mentions it.
+  //
+  // That is not hypothetical. The prompt described write_doc and edit_doc and
+  // nothing else, long after the agent had gained write_file, edit_file and
+  // delete_file. It told the model those three would run immediately, which
+  // was wrong, and nothing anywhere noticed.
+  const mutating = TOOL_NAMES.filter((name) => MODE_PRESETS.read_only[name] === "deny");
+  check("there is a set of mutating tools to check against", mutating.length > 1, mutating);
+  for (const name of mutating) {
+    check(`the system prompt names the write tool ${name}`, SYSTEM_PROMPT.includes(name), name);
+  }
+
+  // Naming the tools is not enough on its own — the ordering is the point of
+  // that section, and a rewrite could leave the list intact while losing it.
+  check(
+    "the system prompt requires a plan before the call",
+    /before you call any of them/i.test(SYSTEM_PROMPT),
+  );
+  check(
+    "the system prompt puts the plan first, not after",
+    /plan, then act/i.test(SYSTEM_PROMPT),
+  );
+  check(
+    "the system prompt requires reading before editing",
+    /read before you write/i.test(SYSTEM_PROMPT),
+  );
+
+  // The read tools have to be named as immediate, or the agent starts asking
+  // the room for permission to look at things.
+  for (const name of ["read_doc", "read_file", "list_files", "search_files"]) {
+    check(`the system prompt names the read tool ${name}`, SYSTEM_PROMPT.includes(name), name);
+  }
+
+  // A room may run unattended, and a prompt that flatly promises a vote makes
+  // the agent tell people something untrue about what just happened.
+  check(
+    "the system prompt allows for a room that acts unattended",
+    /unattended/i.test(SYSTEM_PROMPT),
+  );
 }
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
