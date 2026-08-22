@@ -60,13 +60,19 @@ const runtimeFetch: typeof fetch = (input, init) => fetch(input, init);
 
 /**
  * Budget for a tree-walk search. Searching by fetching files costs one
- * request per candidate file, so it has to be bounded or a large
- * repository would spend an entire rate limit on one query. When the
- * filters leave more candidates than this, the search refuses and asks
- * for a narrower glob rather than silently searching an arbitrary subset
- * — a partial answer that looks complete is worse than a clear refusal.
+ * request per candidate file, and that cost is not this search's alone to
+ * spend: a whole agent turn — every model call and every tool call it
+ * makes — runs inside a single Worker invocation, and shares that
+ * invocation's one subrequest budget, which can be as low as 50 on some
+ * plans. A search that fetched a hundred candidate files would exhaust the
+ * budget by itself and end the turn before it could even report back, never
+ * mind leave room for anything else the turn still needed to do. Twelve
+ * candidates costs twelve subrequests and leaves the rest of the budget for
+ * the turn.
  */
-const SEARCH_MAX_CANDIDATES = 120;
+const SEARCH_MAX_CANDIDATES = 12;
+/** How many matching paths to name when there are too many to grep. */
+const SEARCH_MAX_LISTED_PATHS = 40;
 /** Skip anything larger than this; source files are not this big. */
 const SEARCH_MAX_FILE_BYTES = 256_000;
 /** Total decoded bytes one search may scan. */
@@ -582,6 +588,21 @@ export class GithubProvider implements WorkspaceProvider {
   #deny: readonly string[];
   #branch: string;
   #fetchImpl: typeof fetch;
+  /**
+   * Whether reads should come from the working branch rather than the
+   * base branch.
+   *
+   * Writes land on `#branch` so nothing here can change a repository's
+   * default branch without a pull request a human reviews. That is
+   * right, but it means that once a room has approved an edit, reading
+   * the base branch shows content that is out of date with what the
+   * room itself just did — the agent re-reads a file it has already
+   * changed, sees the old text, and reasonably concludes the change
+   * never happened. The room sets this once a write has actually
+   * created the working branch, so from then on the room reads what it
+   * has accumulated.
+   */
+  #readWorking: boolean;
 
   constructor(
     token: string,
@@ -589,6 +610,7 @@ export class GithubProvider implements WorkspaceProvider {
     deny: readonly string[],
     branch?: string,
     fetchImpl?: typeof fetch,
+    readWorkingBranch?: boolean,
   ) {
     this.#token = token;
     this.#ref = ref;
@@ -599,7 +621,18 @@ export class GithubProvider implements WorkspaceProvider {
     // own — which is what a human reviewer actually wants to look at.
     this.#branch = branch && branch.length > 0 ? branch : "collab-ai";
     this.#fetchImpl = fetchImpl ?? runtimeFetch;
+    this.#readWorking = readWorkingBranch === true;
     this.label = `${ref.owner}/${ref.repo}`;
+  }
+
+  /**
+   * The ref reads resolve against. Deliberately NOT used by
+   * `resolveBranchName`, `ensureBranch` or `openPr`: those need the
+   * BASE branch, and a pull request whose base was the working branch
+   * would be a pull request from a branch into itself.
+   */
+  #readRef(): RepoRef {
+    return this.#readWorking ? { ...this.#ref, ref: this.#branch } : this.#ref;
   }
 
   #headers(): HeadersInit {
@@ -636,7 +669,7 @@ export class GithubProvider implements WorkspaceProvider {
       .map(encodeURIComponent)
       .join("/");
     const suffix = encoded ? `/${encoded}` : "";
-    return `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/contents${suffix}?ref=${encodeURIComponent(this.#ref.ref)}`;
+    return `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/contents${suffix}?ref=${encodeURIComponent(this.#readRef().ref)}`;
   }
 
   async #list(path: string, depth: number, deny: readonly string[]): Promise<FsResponse> {
@@ -721,10 +754,16 @@ export class GithubProvider implements WorkspaceProvider {
 
   async #search(pattern: string, glob: string, max: number, deny: readonly string[]): Promise<FsResponse> {
     // GitHub's code search index only ever covers the default branch. A room
-    // that named an explicit branch (`#ref.ref` non-empty) would get results
-    // from the wrong code — confidently, with no indication anything was
-    // off — so skip the index entirely and walk the tree instead.
-    if (this.#ref.ref.length > 0) {
+    // that named an explicit branch would get results from the wrong code —
+    // confidently, with no indication anything was off — so skip the index
+    // entirely and walk the tree instead.
+    //
+    // "HEAD" is not an explicit branch: parseRepoRef puts it there for a
+    // plain "owner/repo" with no @branch suffix, so `ref` is never empty and
+    // testing for emptiness would treat every room as having named a branch,
+    // quietly retiring the code-search path altogether.
+    const explicitBranch = this.#ref.ref.length > 0 && this.#ref.ref !== "HEAD";
+    if (explicitBranch) {
       return this.#searchByTree(pattern, glob, max, deny);
     }
 
@@ -772,7 +811,7 @@ export class GithubProvider implements WorkspaceProvider {
    * repositories the index has not (or will not) crawl.
    */
   async #searchByTree(pattern: string, glob: string, max: number, deny: readonly string[]): Promise<FsResponse> {
-    const base = await resolveBranchName(this.#token, this.#ref, this.#fetchImpl);
+    const base = await resolveBranchName(this.#token, this.#readRef(), this.#fetchImpl);
     if (!base.ok) return { ok: false, error: base.error };
 
     const treeUrl = `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/git/trees/${encodeURIComponent(base.branch)}?recursive=1`;
@@ -804,11 +843,19 @@ export class GithubProvider implements WorkspaceProvider {
       candidates.push({ path: entry.path, sha: entry.sha });
     }
 
+    // Refusing outright would throw away work already paid for: the tree
+    // request above already told us exactly which paths match the glob, and
+    // naming them costs nothing further. Returning those paths is strictly
+    // more useful than a bare refusal — but the wording has to be explicit
+    // that these are NOT confirmed matches for `pattern`, only files that
+    // matched the glob, so the agent does not go on to report them as hits.
     if (candidates.length > SEARCH_MAX_CANDIDATES) {
-      return {
-        ok: false,
-        error: `Too many files to search (${candidates.length}). Narrow it with a glob — for example "src/**/*.ts" — or search for something more specific.`,
-      };
+      const listed = candidates.slice(0, SEARCH_MAX_LISTED_PATHS).map((c) => c.path);
+      const note =
+        `${candidates.length} files match, too many to search inside ` +
+        `(each one costs a request against a budget the whole turn shares). ` +
+        `Showing paths only — narrow with a glob such as "src/**/*.ts", or read one of these directly.`;
+      return { ok: true, data: `${note}\n${listed.join("\n")}` };
     }
 
     if (candidates.length === 0) {

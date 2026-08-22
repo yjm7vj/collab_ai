@@ -750,6 +750,21 @@ async function main() {
     }
 
     {
+      // "HEAD" is what parseRepoRef puts in `ref` for a plain "owner/repo",
+      // which is the shape almost every room actually has. If that counted as
+      // an explicit branch the code-search fast path would be dead code, and
+      // every search would pay for a tree walk it did not need.
+      const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 200 });
+      const provider = new GithubProvider("t", { ...searchRef, ref: "HEAD" }, [], "collab-ai", fetchImpl);
+      const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
+      check("HEAD is not treated as an explicit branch", urls.some((u) => u.includes("/search/code")), urls);
+      // The code-search path answers with paths, not matched lines — GitHub
+      // does not return a line number for every hit. Assert that shape rather
+      // than the tree walk's.
+      check("a HEAD room still gets results", res.ok === true && res.data.includes("src/index.ts"), res);
+    }
+
+    {
       // GitHub's code search index only covers the default branch, so on an
       // explicit branch it would confidently answer from the wrong code.
       const { urls, fetchImpl } = treeStub(files, { codeSearchStatus: 200 });
@@ -813,9 +828,27 @@ async function main() {
       const { urls, fetchImpl } = treeStub(many, { codeSearchStatus: 403 });
       const provider = new GithubProvider("t", searchRef, [], "collab-ai", fetchImpl);
       const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
-      check("too many candidates is refused, not silently sampled", res.ok === false, res);
-      check("the refusal says how to narrow it", res.ok === false && /glob/i.test(res.error), res);
-      check("nothing was fetched before refusing", !urls.some((u) => u.includes("/git/blobs/")), urls.length);
+      // Over the cap the search must NOT grep: every candidate file costs a
+      // subrequest, and a whole agent turn shares one budget — a hundred-file
+      // search ends the turn instead of answering it. The tree request has
+      // already been paid for though, so naming the matching paths costs
+      // nothing and beats refusing outright.
+      check("an over-cap search still answers rather than erroring", res.ok === true, res);
+      check(
+        "an over-cap search fetches no file contents at all",
+        !urls.some((u) => u.includes("/git/blobs/")),
+        urls.filter((u) => u.includes("/git/blobs/")).length,
+      );
+      check("an over-cap search names matching paths", res.ok === true && res.data.includes("src/f0.ts"), res);
+      check("an over-cap search says how many matched", res.ok === true && res.data.includes("200"), res);
+      // The wording has to stop the agent reporting these as confirmed hits:
+      // they matched the glob, not the search term.
+      check(
+        "an over-cap search says the contents were not searched",
+        res.ok === true && /paths only|not.*search|too many to search/i.test(res.data),
+        res,
+      );
+      check("an over-cap search suggests narrowing with a glob", res.ok === true && /glob/i.test(res.data), res);
     }
 
     {
@@ -871,6 +904,69 @@ async function main() {
       const res = await provider.perform({ op: "search", pattern: "NEEDLE", glob: "", max: 50, deny: [] });
       check("a binary file is never fetched", !urls.some((u) => u.includes("logo.png")), urls);
       check("the source file is still searched", res.ok === true && res.data.includes("src/keep.ts"), res);
+    }
+  }
+
+  console.log("\nreads follow the working branch once it exists");
+  {
+    // Writes land on the working branch so nothing here can change a
+    // repository's default branch without a pull request. That is right, but
+    // it means a room that has just approved an edit must read that branch
+    // too — otherwise it re-reads the file it changed, sees the old text, and
+    // concludes its own vote failed. That happened in production.
+    function recordingStub() {
+      const urls: string[] = [];
+      const fetchImpl = (async (input: unknown) => {
+        const url = String(input);
+        urls.push(url);
+        const body = url.includes("/contents")
+          ? JSON.stringify({ content: btoa("hello from the branch"), encoding: "base64" })
+          : JSON.stringify({ default_branch: "main" });
+        return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+      return { urls, fetchImpl };
+    }
+
+    const baseRef = { owner: "ada", repo: "engine", ref: "" };
+
+    {
+      const { urls, fetchImpl } = recordingStub();
+      const provider = new GithubProvider("t", baseRef, [], "collab-ai", fetchImpl, true);
+      const res = await provider.perform({ op: "read", path: "src/index.ts", offset: 0, limit: 1000 });
+      check("a read succeeds when pointed at the working branch", res.ok === true, res);
+      check(
+        "the read asks GitHub for the working branch",
+        urls.some((u) => u.includes("/contents") && u.includes("collab-ai")),
+        urls,
+      );
+    }
+
+    {
+      // The default. A room that has never written must not ask for a branch
+      // that does not exist, or every read 404s.
+      const { urls, fetchImpl } = recordingStub();
+      const provider = new GithubProvider("t", baseRef, [], "collab-ai", fetchImpl, false);
+      await provider.perform({ op: "read", path: "src/index.ts", offset: 0, limit: 1000 });
+      check(
+        "without the flag a read never asks for the working branch",
+        !urls.some((u) => u.includes("/contents") && u.includes("collab-ai")),
+        urls,
+      );
+    }
+
+    {
+      // A pull request whose base was the working branch would be a pull
+      // request from a branch into itself, so openPr must keep resolving the
+      // BASE branch even when reads have been redirected.
+      const { urls, fetchImpl } = recordingStub();
+      const provider = new GithubProvider("t", baseRef, [], "collab-ai", fetchImpl, true);
+      await provider.openPr("title", "body").catch(() => undefined);
+      const resolved = urls.filter((u) => !u.includes("/contents") && !u.includes("/pulls"));
+      check(
+        "openPr still resolves the base branch, not the working branch",
+        resolved.every((u) => !u.includes("collab-ai")),
+        resolved,
+      );
     }
   }
 

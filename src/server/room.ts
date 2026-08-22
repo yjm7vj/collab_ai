@@ -80,7 +80,14 @@ import {
 } from "./tools";
 import { constantTimeEqual, mintToken, newInviteCode } from "./auth";
 import { GITHUB_REPO_STATE_ROLE, repoAuthorizeUrl } from "./oauth";
-import { GithubProvider, installationToken, listUserRepos, parseRepoRef, pemToPkcs8 } from "./github";
+import {
+  GithubProvider,
+  installationToken,
+  listUserRepos,
+  parseRepoRef,
+  pemToPkcs8,
+  type RepoRef,
+} from "./github";
 import { PendingRequests } from "./workspace";
 import {
   FS_LIMITS,
@@ -106,6 +113,12 @@ type QueuedLine = { name: string; text: string };
 
 /** Hard stop on tool round-trips so a confused turn can't loop forever. */
 const MAX_ROUNDS = 12;
+
+/**
+ * Set once a write has created the repository's working branch, after which
+ * reads resolve against it. See #runGithub.
+ */
+const GITHUB_WORKING_KEY = "github:working";
 
 export class Room extends Agent<Env, RoomState> {
   initialState: RoomState = INITIAL_ROOM_STATE;
@@ -1128,6 +1141,9 @@ export class Room extends Agent<Env, RoomState> {
     // table, not just in state — clear both, or a later re-attach could see
     // stale rows.
     this.sql`DELETE FROM github WHERE k = 'current'`;
+    // The working branch belonged to that connection; a later one starts
+    // over from its own base branch.
+    this.#kvDel(GITHUB_WORKING_KEY);
     // Disconnecting the workspace is the obvious moment a person expects the
     // stored credential to go away, so it does — github_oauth is not
     // per-workspace state, but leaving someone's access token behind after
@@ -1316,11 +1332,43 @@ export class Room extends Agent<Env, RoomState> {
     const workspace = connected?.auth === "oauth" ? NO_WORKSPACE : this.state.workspace;
     if (connected?.auth === "oauth") {
       this.sql`DELETE FROM github WHERE k = 'current'`;
+      this.#kvDel(GITHUB_WORKING_KEY);
       this.#pending.failAll("The GitHub connection was signed out.");
     }
 
     this.setState({ ...this.state, workspace, github: this.#githubStatus() });
     this.#system(`${this.#memberName(this.#uidOf(connection) ?? "") ?? "someone"} disconnected the GitHub account`);
+  }
+
+  /**
+   * Run one file request against a repository, and remember the moment a
+   * write has created the working branch.
+   *
+   * Writes deliberately land on a working branch so nothing here can change
+   * a repository's default branch without a pull request a human reviews.
+   * Reads have to follow it once it exists, or the room reads the base
+   * branch and sees content older than what it has itself just approved —
+   * the agent re-reads a file it changed, finds the old text, and concludes
+   * the vote failed when the commit was there the whole time. That is not a
+   * hypothetical: it is what happened in production.
+   *
+   * The flag is set only after a write actually succeeds, because a
+   * successful write is what creates the branch. Reading the working branch
+   * before it exists would 404 every read in a room that has never written.
+   */
+  async #runGithub(
+    token: string,
+    ref: RepoRef,
+    deny: readonly string[],
+    req: FsRequest,
+  ): Promise<FsResponse> {
+    const readWorking = this.#kvGet<boolean>(GITHUB_WORKING_KEY, false);
+    const provider = new GithubProvider(token, ref, deny, undefined, undefined, readWorking);
+    const res = await provider.perform(req);
+    if (res.ok && !readWorking && (req.op === "write" || req.op === "edit" || req.op === "remove")) {
+      this.#kvSet(GITHUB_WORKING_KEY, true);
+    }
+    return res;
   }
 
   /**
@@ -1413,8 +1461,7 @@ export class Room extends Agent<Env, RoomState> {
         if (!authRow) {
           return { ok: false, error: "The GitHub connection was signed out. Reconnect it." };
         }
-        const provider = new GithubProvider(authRow.token, ref, denyGlobs);
-        return provider.perform(clamped);
+        return this.#runGithub(authRow.token, ref, denyGlobs, clamped);
       }
 
       const pkcs8 = pemToPkcs8(this.env.GITHUB_APP_PRIVATE_KEY);
@@ -1433,8 +1480,7 @@ export class Room extends Agent<Env, RoomState> {
         return { ok: false, error: tokenRes.error };
       }
 
-      const provider = new GithubProvider(tokenRes.token, ref, denyGlobs);
-      return provider.perform(clamped);
+      return this.#runGithub(tokenRes.token, ref, denyGlobs, clamped);
     }
 
     const hostUid = this.state.workspace.hostUid;
