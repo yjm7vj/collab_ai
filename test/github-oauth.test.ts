@@ -47,11 +47,28 @@ afterAll(() => {
   (env as Record<string, unknown>).GITHUB_OAUTH_CLIENT_SECRET = saved.secret;
 });
 
-describe("sign-in is unaffected by repository access existing", () => {
-  it("reports github as a configured provider", async () => {
+describe("configuring repository access does not gate the whole app", () => {
+  /**
+   * The GitHub OAuth credentials do double duty: they power the in-room
+   * "Connect GitHub" repository flow. Counting their presence as a sign-in
+   * provider forced everyone through a GitHub login before they could so
+   * much as create a room, purely because some room wanted repository
+   * access. These two assertions are what stop that coming back.
+   */
+  it("does not advertise github as a sign-in provider", async () => {
     const res = await SELF.fetch(`${ORIGIN}/api/auth/config`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ providers: ["github"] });
+    expect(await res.json()).toEqual({ providers: [] });
+  });
+
+  it("still lets someone create a room without signing in", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ uid: "anon-abcdef12", name: "Anon" }),
+    });
+    expect(res.status).toBe(200);
+    await res.json();
   });
 
   /**

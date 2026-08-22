@@ -112,7 +112,24 @@ type Turn = {
 type QueuedLine = { name: string; text: string };
 
 /** Hard stop on tool round-trips so a confused turn can't loop forever. */
-const MAX_ROUNDS = 12;
+/**
+ * How many tool rounds one agent turn may take before it is cut off.
+ *
+ * Real work on a codebase is not a couple of calls: reading a file, following
+ * what it imports, checking a caller and then proposing an edit is already
+ * most of a dozen. Twelve stopped turns mid-investigation often enough to be
+ * the thing people noticed about the agent.
+ *
+ * The ceiling above this one is not a number in this file. A whole turn runs
+ * inside one Worker invocation and shares its outbound-request budget, which
+ * is as low as fifty on some plans — every round costs at least one model
+ * call, and every tool call costs more on top. Raising this too far trades a
+ * turn that stops early for one that dies outright with "Too many
+ * subrequests", which is a worse failure because it loses the work. Twenty
+ * leaves headroom for the tool calls those rounds make; see #runGithub for
+ * what happens when the budget runs out anyway.
+ */
+const MAX_ROUNDS = 20;
 
 /**
  * Set once a write has created the repository's working branch, after which
@@ -1367,6 +1384,18 @@ export class Room extends Agent<Env, RoomState> {
     const res = await provider.perform(req);
     if (res.ok && !readWorking && (req.op === "write" || req.op === "edit" || req.op === "remove")) {
       this.#kvSet(GITHUB_WORKING_KEY, true);
+    }
+    // Cloudflare's wording for this is about its own internals and tells the
+    // agent nothing it can act on, so it retried the same call and burned the
+    // rest of the turn. Say what actually happened and what would help.
+    if (!res.ok && /too many subrequests/i.test(res.error)) {
+      return {
+        ok: false,
+        error:
+          "This turn has used up the number of outbound requests it is allowed to make. " +
+          "Retrying will not help — it is a per-turn budget, and it resets on the next turn. " +
+          "Stop here, say what you found so far, and ask for a narrower next step.",
+      };
     }
     return res;
   }
