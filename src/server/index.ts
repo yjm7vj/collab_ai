@@ -75,9 +75,21 @@ function providerConfig(env: Env, provider: "github" | "google"): { clientId?: s
   return { clientId: env.GOOGLE_OAUTH_CLIENT_ID, clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET };
 }
 
-/** The sign-in providers this deployment has both secrets for. */
-function configuredProviders(env: Env): ("github" | "google")[] {
-  return (["github", "google"] as const).filter((provider) => isConfigured(providerConfig(env, provider)));
+/**
+ * The sign-in providers this deployment has both secrets for.
+ *
+ * GitHub is deliberately excluded here even when `GITHUB_OAUTH_CLIENT_ID`/
+ * `SECRET` are set: those credentials also power the in-room "Connect
+ * GitHub" repository flow (see repoAuthorizeUrl in ./oauth), and reusing
+ * them for general sign-in would force everyone through a GitHub login
+ * before they could so much as create a room, just because some room wants
+ * repository access. GitHub OAuth should only ever be triggered by someone
+ * actually clicking "Connect GitHub" on a room's workspace panel — never as
+ * a blanket sign-in gate. Google, which has no such dual purpose, still
+ * gates sign-in normally when configured.
+ */
+function configuredProviders(env: Env): ("google")[] {
+  return (["google"] as const).filter((provider) => isConfigured(providerConfig(env, provider)));
 }
 
 /**
