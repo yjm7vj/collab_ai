@@ -10,7 +10,7 @@
  * sure that token exists before `RoomView` — which owns the live socket and
  * everything downstream of it — is ever allowed to mount.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import {
   ROOM_ID_RE,
@@ -20,7 +20,7 @@ import {
   type JoinRoomRequest,
   type JoinRoomResponse,
 } from "../shared/protocol";
-import { Landing, JoinGate, SignInGate } from "./components";
+import { Landing, JoinGate, SidePane, SignInGate } from "./components";
 import { RoomView } from "./RoomView";
 
 /**
@@ -37,8 +37,48 @@ function myUid(): string {
 }
 
 const IDENTITY_KEY = "collab_ai:identity";
+const PROJECTS_KEY = "collab_ai:projects";
+const THEME_KEY = "collab_ai:theme";
 function storedIdentity(): string | null {
   return localStorage.getItem(IDENTITY_KEY);
+}
+
+type Theme = "light" | "dark";
+function storedTheme(): Theme {
+  return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
+}
+
+type SidebarProject = {
+  name: string;
+  channels: { label: string; detail: string }[];
+};
+
+function storedProjects(): SidebarProject[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROJECTS_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((p) => {
+        if (!p || typeof p !== "object") return null;
+        const rec = p as Record<string, unknown>;
+        if (typeof rec.name !== "string") return null;
+        return {
+          name: rec.name,
+          channels: Array.isArray(rec.channels)
+            ? rec.channels.flatMap((c) => {
+                if (!c || typeof c !== "object") return [];
+                const channel = c as Record<string, unknown>;
+                return typeof channel.label === "string" && typeof channel.detail === "string"
+                  ? [{ label: channel.label, detail: channel.detail }]
+                  : [];
+              })
+            : [],
+        };
+      })
+      .filter((p): p is SidebarProject => Boolean(p));
+  } catch {
+    return [];
+  }
 }
 
 function base64UrlDecode(segment: string): string {
@@ -162,6 +202,17 @@ export function App() {
     const t = storedIdentity();
     return t ? readIdentity(t) : null;
   });
+  const [projects, setProjects] = useState<SidebarProject[]>(storedProjects);
+  const [theme, setTheme] = useState<Theme>(storedTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => (current === "light" ? "dark" : "light"));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,16 +350,63 @@ export function App() {
     [route],
   );
 
+  const sideName = identity?.name ?? name;
+  const createRoomFromPane = useCallback(() => {
+    const displayName = sideName.trim() || "Guest";
+    createRoom(displayName);
+  }, [createRoom, sideName]);
+
+  const createProject = useCallback((projectName: string) => {
+    const trimmed = projectName.trim().slice(0, 42);
+    if (!trimmed) return;
+    setProjects((prev) => {
+      if (prev.some((p) => p.name.toLowerCase() === trimmed.toLowerCase())) return prev;
+      const next = [
+        ...prev,
+        {
+          name: trimmed,
+          channels: [
+            { label: "Rooms", detail: "Shared agent sessions for this project" },
+            { label: "Workspace", detail: "Files, GitHub repos, and project context" },
+          ],
+        },
+      ];
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const withSidePane = (content: ReactNode) => (
+    <div className="side-shell">
+      <SidePane
+        activeRoomId={route.kind === "room" || route.kind === "invite" ? route.roomId : undefined}
+        busy={busy}
+        projects={projects}
+        onCreateRoom={createRoomFromPane}
+        onCreateProject={createProject}
+      />
+      <main className="side-main">{content}</main>
+    </div>
+  );
+
   // `providers` is only `null` for the beat before /api/auth/config answers —
   // render nothing rather than flash the wrong gate (name entry vs. sign-in).
   if (providers === null) return null;
 
   if (providers.length > 0 && !identity) {
-    return <SignInGate providers={providers} onSignIn={signIn} problem={problem} />;
+    return (
+      <SignInGate
+        providers={providers}
+        onSignIn={signIn}
+        problem={problem}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
   }
 
   if (route.kind === "landing") {
-    return (
+    const landing = (
       <Landing
         initialName={name}
         busy={busy}
@@ -316,22 +414,28 @@ export function App() {
         onCreate={createRoom}
         identityName={identity?.name}
         onSignOut={identity ? signOut : undefined}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
     );
+    return identity ? withSidePane(landing) : landing;
   }
 
   if (token) {
-    return (
+    const room = (
       <RoomView
         roomId={route.roomId}
         token={token}
         displayName={name}
         onAccessLost={onAccessLost}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
     );
+    return identity ? withSidePane(room) : room;
   }
 
-  return (
+  const join = (
     <JoinGate
       roomId={route.roomId}
       initialName={name}
@@ -340,6 +444,9 @@ export function App() {
       onJoin={joinRoom}
       identityName={identity?.name}
       onSignOut={identity ? signOut : undefined}
+      theme={theme}
+      onToggleTheme={toggleTheme}
     />
   );
+  return identity ? withSidePane(join) : join;
 }

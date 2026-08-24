@@ -13,6 +13,13 @@ import {
 } from "../shared/models";
 
 const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
+const EFFORT_LABELS: Record<Effort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Xhigh",
+  max: "Max",
+};
 
 export function SettingsPanel({
   settings,
@@ -69,7 +76,7 @@ export function SettingsPanel({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="modal-head">
-          <h2>Room setup</h2>
+          <h2>Room Setup</h2>
           <button className="icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -99,7 +106,7 @@ export function SettingsPanel({
             </div>
             {activePreset === null && (
               <p className="field-note">
-                Custom — these settings don't match a preset.
+                Custom — These settings don't match a preset.
               </p>
             )}
           </section>
@@ -166,11 +173,11 @@ export function SettingsPanel({
                       <button
                         key={e}
                         disabled={!ok}
-                        title={ok ? undefined : `${agent.label} has no ${e} effort`}
+                        title={ok ? undefined : `${agent.label} has no ${EFFORT_LABELS[e]} effort`}
                         className={draft.effort === e ? "on" : ""}
                         onClick={() => set({ effort: e })}
                       >
-                        {e}
+                        {EFFORT_LABELS[e]}
                       </button>
                     );
                   })}
@@ -213,7 +220,7 @@ export function SettingsPanel({
                         set({ temperature: draft.temperature === null ? 1 : null })
                       }
                     >
-                      {draft.temperature === null ? "enable" : "use default"}
+                      {draft.temperature === null ? "Enable" : "Use Default"}
                     </button>
                   </div>
                   <span className="field-note">
@@ -229,7 +236,7 @@ export function SettingsPanel({
           {/* ------------------------------------------------ scaling */}
           {draft.workflow === "manager" && (
             <section>
-              <h3>Team scaling</h3>
+          <h3>Team Scaling</h3>
               <div className="field">
                 <div className="segmented">
                   <button
@@ -238,7 +245,7 @@ export function SettingsPanel({
                       set({ scaling: { ...draft.scaling, mode: "auto" } })
                     }
                   >
-                    auto
+                    Auto
                   </button>
                   <button
                     className={draft.scaling.mode === "fixed" ? "on" : ""}
@@ -246,7 +253,7 @@ export function SettingsPanel({
                       set({ scaling: { ...draft.scaling, mode: "fixed" } })
                     }
                   >
-                    fixed
+                    Fixed
                   </button>
                 </div>
                 <span className="field-note">
@@ -259,7 +266,7 @@ export function SettingsPanel({
               {draft.scaling.mode === "fixed" && (
                 <label className="field">
                   <span className="field-label">
-                    Max parallel workers
+                    Max Parallel Workers
                     <span className="field-value">{draft.scaling.maxWorkers}</span>
                   </span>
                   <input
@@ -298,11 +305,11 @@ export function SettingsPanel({
 
             <label className="field">
               <span className="field-label">
-                Compact after
+                Compact After
                 <span className="field-value">
                   {draft.context.compactAfterMessages === 0
-                    ? "never"
-                    : `${draft.context.compactAfterMessages} messages`}
+                    ? "Never"
+                    : `${draft.context.compactAfterMessages} Messages`}
                 </span>
               </span>
               <input
@@ -319,11 +326,11 @@ export function SettingsPanel({
 
             <label className="field">
               <span className="field-label">
-                Context limit
+                Context Limit
                 <span className="field-value">
                   {draft.context.maxContextTokens === 0
-                    ? "off"
-                    : `${(draft.context.maxContextTokens / 1000).toFixed(0)}k tokens`}
+                    ? "Off"
+                    : `${(draft.context.maxContextTokens / 1000).toFixed(0)}k Tokens`}
                 </span>
               </span>
               <input
@@ -343,9 +350,9 @@ export function SettingsPanel({
 
             <label className="field">
               <span className="field-label">
-                Keep verbatim
+                Keep Verbatim
                 <span className="field-value">
-                  {draft.context.keepRecentMessages} messages
+                  {draft.context.keepRecentMessages} Messages
                 </span>
               </span>
               <input
@@ -363,7 +370,7 @@ export function SettingsPanel({
             </label>
 
             <button className="mini" disabled={busy} onClick={onCompactNow}>
-              Compact now
+              Compact Now
             </button>
           </section>
         </div>
@@ -378,7 +385,7 @@ export function SettingsPanel({
               onClose();
             }}
           >
-            Apply to room
+            Apply To Room
           </button>
         </footer>
       </div>

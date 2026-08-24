@@ -12,7 +12,7 @@ import {
   type ServerMsg,
   type Vote,
 } from "../shared/protocol";
-import type { RoomSettings } from "../shared/models";
+import { modelInfo, type RoomSettings } from "../shared/models";
 import { asRole, can, canSeeFileContents, describePolicy, type Role } from "../shared/access";
 import type { AccessPolicy } from "../shared/access";
 import {
@@ -27,6 +27,8 @@ import {
   Transcript,
   WorkerStrip,
   WorkspacePanel,
+  ThemeToggle,
+  type ThemeMode,
 } from "./components";
 import { SettingsPanel } from "./Settings";
 import {
@@ -50,11 +52,15 @@ export function RoomView({
   token,
   displayName,
   onAccessLost,
+  theme,
+  onToggleTheme,
 }: {
   roomId: string;
   token: string;
   displayName: string;
   onAccessLost: (reason: string) => void;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
 }) {
   const [state, setState] = useState<RoomState>(INITIAL_ROOM_STATE);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -78,6 +84,7 @@ export function RoomView({
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
   const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("compact");
+  const [showDocument, setShowDocument] = useState(true);
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
   const rootRef = useRef<FileSystemDirectoryHandle | null>(null);
@@ -347,26 +354,39 @@ export function RoomView({
   }, [roomId]);
 
   const statusLabel = useMemo(() => {
-    if (!connected) return "reconnecting…";
+    if (!connected) return "Reconnecting...";
     switch (state.status) {
       case "thinking":
-        return "agent is working";
+        return "Agent Is Working";
       case "awaiting_approval":
-        return "waiting on the room";
+        return "Waiting On The Room";
       default:
-        return "ready";
+        return "Ready";
     }
   }, [connected, state.status]);
+
+  const toolDisplayLabel =
+    toolDisplay === "compact" ? "Activity: Compact" : toolDisplay === "full" ? "Activity: Full" : "Activity: Hidden";
+  const effortLabel = state.settings.effort === "xhigh" ? "Xhigh" : state.settings.effort[0]!.toUpperCase() + state.settings.effort.slice(1);
+  const modelLabel = `${modelInfo(state.settings.agentModel).label}, ${effortLabel}`;
 
   return (
     <div className="app">
       <header className="bar">
         <div className="bar-left">
-          <span className="logo">collab_ai</span>
-          <div className="room-chip">
-            <span className="room" title={roomId}>room {roomId.slice(0, 6)}…</span>
+          <div className="room-title-block">
+            <span className="logo-mark" aria-label="collab_ai" title="collab_ai">
+              <span />
+              <span />
+              <span />
+              <span />
+            </span>
+            <span className={`status status-${state.status}`}>{statusLabel}</span>
+          </div>
+          <div className="room-chip" title={roomId}>
+            <span className="room">Room {roomId.slice(0, 6)}...</span>
             <button className="linkbtn" onClick={copyLink}>
-              {copied ? "copied" : "copy link"}
+              {copied ? "Copied" : "Copy Link"}
             </button>
           </div>
           {renaming ? (
@@ -388,7 +408,7 @@ export function RoomView({
                 aria-label="Your name"
                 onBlur={() => setRenaming(false)}
               />
-              <button type="submit">save</button>
+              <button type="submit">Save</button>
             </form>
           ) : (
             <button className="namebtn" onClick={() => setRenaming(true)}>
@@ -397,122 +417,42 @@ export function RoomView({
           )}
         </div>
         <div className="bar-right">
-          <ContextGauge
-            context={state.context}
-            settings={state.settings}
-            cost={state.cost}
-          />
-          <span className={`status status-${state.status}`}>{statusLabel}</span>
-          <span
-            className={`policy-chip policy-${state.policy.mode}`}
-            title={describePolicy(state.policy)}
-          >
-            {state.policy.mode === "read_only"
-              ? "read-only"
-              : state.policy.mode === "auto"
-                ? "auto-accept"
-                : state.policy.mode === "custom"
-                  ? "custom"
-                  : "ask first"}
-          </span>
-          {state.workspace.kind !== "none" && (
+          <div className="bar-control-group" aria-label="Room controls">
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <ContextGauge
+              context={state.context}
+              settings={state.settings}
+              cost={state.cost}
+            />
             <span
-              className={`ws-chip ${state.workspace.online ? "ws-online" : "ws-offline"}`}
-              title={
-                state.workspace.online
-                  ? `Workspace: ${state.workspace.label}`
-                  : "The workspace host is offline"
-              }
+              className={`policy-chip policy-${state.policy.mode}`}
+              title={describePolicy(state.policy)}
             >
-              📁 {state.workspace.label}
-              {state.workspace.online ? "" : " (offline)"}
+              {state.policy.mode === "read_only"
+                ? "Read-Only"
+                : state.policy.mode === "auto"
+                  ? "Auto-Accept"
+                  : state.policy.mode === "custom"
+                    ? "Custom"
+                    : "Ask First"}
             </span>
-          )}
-          <Presence users={state.users} me={me} />
-          {mayManage && (
-            <button
-              className="icon"
-              onClick={openMembers}
-              title="Members"
-              aria-label="Members"
-            >
-              👥
-            </button>
-          )}
-          {/*
-            This check is only a UI courtesy — it hides the button so people who
-            can't mint invites don't see one. The server re-checks the role on
-            every invite.* message; a hidden button is not a permission.
-          */}
-          {mayInvite && (
-            <button
-              className="icon"
-              onClick={openInvites}
-              title="Invite people"
-              aria-label="Invite people"
-            >
-              🔗
-            </button>
-          )}
-          {/*
-            Visible to every role — a viewer reads the transcript too and
-            needs to be able to quiet it down just as much as anyone who can
-            actually act on the room.
-          */}
-          <button
-            className="icon"
-            onClick={() =>
-              setToolDisplay((d) =>
-                d === "compact" ? "full" : d === "full" ? "hidden" : "compact",
-              )
-            }
-            title={
-              toolDisplay === "compact"
-                ? "Tool activity: collapsed"
-                : toolDisplay === "full"
-                  ? "Tool activity: expanded"
-                  : "Tool activity: hidden"
-            }
-            aria-label={
-              toolDisplay === "compact"
-                ? "Tool activity: collapsed"
-                : toolDisplay === "full"
-                  ? "Tool activity: expanded"
-                  : "Tool activity: hidden"
-            }
-          >
-            {toolDisplay === "compact" ? "📋" : toolDisplay === "full" ? "📖" : "🙈"}
-          </button>
-          {mayPolicy && (
-            <button
-              className="icon"
-              onClick={() => setShowWorkspace(true)}
-              title="Workspace"
-              aria-label="Workspace"
-            >
-              📁
-            </button>
-          )}
-          {mayPolicy && (
-            <button
-              className="icon"
-              onClick={() => setShowPermissions(true)}
-              title="What the agent may do"
-              aria-label="What the agent may do"
-            >
-              🛡
-            </button>
-          )}
-          {maySettings && (
-            <button
-              className="icon"
-              onClick={() => setShowSettings(true)}
-              title="Room setup"
-              aria-label="Room setup"
-            >
-              ⚙
-            </button>
-          )}
+            {state.workspace.kind !== "none" && (
+              <span
+                className={`ws-chip ${state.workspace.online ? "ws-online" : "ws-offline"}`}
+                title={
+                  state.workspace.online
+                    ? `Workspace: ${state.workspace.label}`
+                    : "The workspace host is offline"
+                }
+              >
+                📁 {state.workspace.label}
+                {state.workspace.online ? "" : " (Offline)"}
+              </span>
+            )}
+          </div>
+          <div className="bar-presence" aria-label="People in room">
+            <Presence users={state.users} me={me} />
+          </div>
         </div>
       </header>
 
@@ -585,7 +525,7 @@ export function RoomView({
         />
       )}
 
-      <div className="columns">
+      <div className={`columns ${showDocument ? "" : "columns-doc-closed"}`}>
         <section className="chat">
           <Transcript entries={entries} me={me} toolDisplay={toolDisplay} />
 
@@ -594,7 +534,7 @@ export function RoomView({
           {state.pending.length > 0 && (
             <div className="approvals">
               <div className="approvals-head">
-                The agent needs the room's approval
+                Approval Needed
                 {/*
                   The server computes the threshold from eligible voters and the
                   approval rule (e.g. owner_only needs one vote regardless of
@@ -604,7 +544,7 @@ export function RoomView({
                 */}
                 <span className="hint">
                   {state.pending[0]!.threshold}{" "}
-                  {state.pending[0]!.threshold === 1 ? "approval" : "approvals"} needed
+                  {state.pending[0]!.threshold === 1 ? "Person" : "People"} Required
                 </span>
               </div>
               {state.pending.map((p) => (
@@ -623,12 +563,90 @@ export function RoomView({
             disabled={!connected}
             busy={state.status !== "idle"}
             readOnly={!maySpeak}
+            modelLabel={modelLabel}
+            quickActions={
+              <>
+                {mayManage && (
+                  <button type="button" className="chat-action" onClick={openMembers}>
+                    Members
+                  </button>
+                )}
+                {mayInvite && (
+                  <button type="button" className="chat-action" onClick={openInvites}>
+                    Invite
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="chat-action"
+                  onClick={() =>
+                    setToolDisplay((d) =>
+                      d === "compact" ? "full" : d === "full" ? "hidden" : "compact",
+                    )
+                  }
+                  title={toolDisplayLabel}
+                >
+                  {toolDisplayLabel}
+                </button>
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowWorkspace(true)}
+                  >
+                    Workspace
+                  </button>
+                )}
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowPermissions(true)}
+                  >
+                    Permissions
+                  </button>
+                )}
+                {maySettings && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowSettings(true)}
+                  >
+                    Setup
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="chat-action"
+                  onClick={() => setShowDocument((open) => !open)}
+                  aria-pressed={showDocument}
+                >
+                  {showDocument ? "Hide Document" : "Show Document"}
+                </button>
+              </>
+            }
             onSend={say}
             onInterrupt={interrupt}
           />
         </section>
 
-        <DocPanel doc={state.doc} revision={state.docRevision} />
+        {showDocument && (
+          <DocPanel
+            doc={state.doc}
+            revision={state.docRevision}
+            onClose={() => setShowDocument(false)}
+          />
+        )}
+        {!showDocument && (
+          <button
+            type="button"
+            className="doc-reopen"
+            onClick={() => setShowDocument(true)}
+            aria-label="Open shared document"
+          >
+            Open Document
+          </button>
+        )}
       </div>
     </div>
   );

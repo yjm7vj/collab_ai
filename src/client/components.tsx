@@ -1,4 +1,12 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import {
   INVITABLE_ROLES,
   REDACTED,
@@ -30,6 +38,59 @@ import {
 } from "../shared/access";
 
 /* --------------------------------------------------- context + spend */
+
+export type ThemeMode = "light" | "dark";
+
+function titleCaseWords(value: string): string {
+  return value
+    .split(/([_\s-]+)/)
+    .map((part) =>
+      /^[a-z]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part,
+    )
+    .join("");
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  read_doc: "Review Document",
+  write_doc: "Document Update",
+  edit_doc: "Document Edit",
+  delegate: "Delegate Task",
+  web_search: "Search Web",
+  web_fetch: "Open Web Page",
+  list_files: "Browse Files",
+  read_file: "Read File",
+  search_files: "Search Files",
+  write_file: "Create File",
+  edit_file: "Edit File",
+  delete_file: "Delete File",
+};
+
+function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? titleCaseWords(name.replaceAll("_", " "));
+}
+
+export function ThemeToggle({
+  theme,
+  onToggle,
+}: {
+  theme: ThemeMode;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={onToggle}
+      title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+      aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+    >
+      <span className="theme-toggle-track" aria-hidden="true">
+        <span className="theme-toggle-thumb" />
+      </span>
+      <span>{theme === "light" ? "Light" : "Dark"}</span>
+    </button>
+  );
+}
 
 /**
  * Live context usage against the room's configured limit, plus running spend.
@@ -80,8 +141,8 @@ export function WorkerStrip({ workers }: { workers: WorkerStatus[] }) {
   return (
     <div className="workers">
       <div className="workers-head">
-        {done}/{workers.length} delegated tasks
-        <span className="hint">running on {model}</span>
+        {done}/{workers.length} Delegated Tasks
+        <span className="hint">Running On {model}</span>
       </div>
       <div className="workers-list">
         {workers.map((w) => (
@@ -104,6 +165,8 @@ export function Landing({
   onCreate,
   identityName,
   onSignOut,
+  theme,
+  onToggleTheme,
 }: {
   initialName: string;
   busy: boolean;
@@ -111,6 +174,8 @@ export function Landing({
   onCreate: (name: string) => void;
   identityName?: string;
   onSignOut?: () => void;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
 }) {
   const [value, setValue] = useState(initialName);
   return (
@@ -122,7 +187,10 @@ export function Landing({
           onCreate(identityName ?? value);
         }}
       >
-        <h1>collab_ai</h1>
+        <div className="gate-top">
+          <h1>collab_ai</h1>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
         <p className="gate-sub">
           One agent, many people. Make a room and share the link.
         </p>
@@ -131,7 +199,7 @@ export function Landing({
             Signed in as {identityName}
             {onSignOut && (
               <button type="button" className="linkbtn" onClick={onSignOut}>
-                Sign out
+                Sign Out
               </button>
             )}
           </p>
@@ -146,7 +214,7 @@ export function Landing({
           />
         )}
         <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
-          {busy ? "creating…" : "Create a room"}
+          {busy ? "Creating..." : "Create a Room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
         <p className="gate-foot">
@@ -167,6 +235,8 @@ export function JoinGate({
   onJoin,
   identityName,
   onSignOut,
+  theme,
+  onToggleTheme,
 }: {
   roomId: string;
   initialName: string;
@@ -175,6 +245,8 @@ export function JoinGate({
   onJoin: (name: string) => void;
   identityName?: string;
   onSignOut?: () => void;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
 }) {
   const [value, setValue] = useState(initialName);
   return (
@@ -186,18 +258,21 @@ export function JoinGate({
           onJoin(identityName ?? value);
         }}
       >
-        <h1>collab_ai</h1>
+        <div className="gate-top">
+          <h1>collab_ai</h1>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
         <p className="gate-sub">
           You've been invited to a room.
           <br />
-          room {roomId.slice(0, 6)}…
+          Room {roomId.slice(0, 6)}...
         </p>
         {identityName ? (
           <p className="gate-signed-in">
             Signed in as {identityName}
             {onSignOut && (
               <button type="button" className="linkbtn" onClick={onSignOut}>
-                Sign out
+                Sign Out
               </button>
             )}
           </p>
@@ -212,7 +287,7 @@ export function JoinGate({
           />
         )}
         <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
-          {busy ? "joining…" : "Join room"}
+          {busy ? "Joining..." : "Join Room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
         <p className="gate-foot">
@@ -234,15 +309,22 @@ export function SignInGate({
   providers,
   onSignIn,
   problem,
+  theme,
+  onToggleTheme,
 }: {
   providers: string[];
   onSignIn: (p: string) => void;
   problem: string | null;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
 }) {
   return (
     <div className="gate">
       <div className="gate-card">
-        <h1>collab_ai</h1>
+        <div className="gate-top">
+          <h1>collab_ai</h1>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
         <p className="gate-sub">
           One agent, many people. Sign in to create or join a room.
         </p>
@@ -264,6 +346,168 @@ export function SignInGate({
   );
 }
 
+/* --------------------------------------------------------------- side pane */
+
+type SideProject = {
+  name: string;
+  channels: { label: string; detail: string }[];
+};
+
+export function SidePane({
+  activeRoomId,
+  busy,
+  projects,
+  onCreateRoom,
+  onCreateProject,
+}: {
+  activeRoomId?: string;
+  busy: boolean;
+  projects: SideProject[];
+  onCreateRoom: () => void;
+  onCreateProject: (name: string) => void;
+}) {
+  const [addingProject, setAddingProject] = useState(false);
+  const [projectName, setProjectName] = useState("");
+
+  const submitProject = () => {
+    const name = projectName.trim().slice(0, 42);
+    if (!name) return;
+    onCreateProject(name);
+    setProjectName("");
+    setAddingProject(false);
+  };
+
+  return (
+    <aside className="side-pane" aria-label="Workspace navigation">
+      <div className="side-head">
+        <div>
+          <div className="side-kicker">Workspace</div>
+          <div className="side-title">collab_ai</div>
+        </div>
+        <button
+          type="button"
+          className="side-icon-btn"
+          onClick={onCreateRoom}
+          disabled={busy}
+          title="Create a new room"
+          aria-label="Create a new room"
+        >
+          +
+        </button>
+      </div>
+
+      <nav className="side-scroll" aria-label="Projects">
+        <section className="side-section">
+          <div className="side-section-label">Rooms</div>
+          <button
+            type="button"
+            className="side-room-card"
+            onClick={onCreateRoom}
+            disabled={busy}
+          >
+            <span className="side-item-title">{busy ? "Creating Room" : "Create a Room"}</span>
+            <span className="side-item-detail">
+              {activeRoomId ? `Current Room ${activeRoomId.slice(0, 6)}...` : "Start a Shared Agent Session"}
+            </span>
+          </button>
+        </section>
+
+        <section className="side-section">
+          <div className="side-section-row">
+            <div className="side-section-label">Projects</div>
+            <button
+              type="button"
+              className="side-small-action"
+              onClick={() => setAddingProject(true)}
+            >
+              New
+            </button>
+          </div>
+
+          {addingProject && (
+            <form
+              className="side-project-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitProject();
+              }}
+            >
+              <input
+                autoFocus
+                value={projectName}
+                maxLength={42}
+                placeholder="Project name"
+                onChange={(e) => setProjectName(e.target.value)}
+                aria-label="Project name"
+              />
+              <div className="side-form-actions">
+                <button type="button" onClick={() => setAddingProject(false)}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={!projectName.trim()}>
+                  Create
+                </button>
+              </div>
+            </form>
+          )}
+
+          {projects.length === 0 ? (
+            <div className="side-empty">
+              <strong>Create a new project to get started.</strong>
+              <span>
+                Projects will collect rooms, workspace context, and channels for a
+                shared effort.
+              </span>
+              {!addingProject && (
+                <button type="button" onClick={() => setAddingProject(true)}>
+                  Create Project
+                </button>
+              )}
+            </div>
+          ) : (
+            projects.map((project) => (
+              <div className="side-project" key={project.name}>
+                <button type="button" className="side-project-head">
+                  <span className="side-folder" aria-hidden="true" />
+                  <span>{project.name}</span>
+                </button>
+                <div className="side-channels">
+                  {project.channels.map((channel) => (
+                    <button
+                      type="button"
+                      key={`${project.name}-${channel.label}`}
+                      className="side-item"
+                    >
+                      <span className="side-item-title">{channel.label}</span>
+                      <span className="side-item-detail">{channel.detail}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </section>
+
+        <section className="side-section">
+          <div className="side-section-label">Menus</div>
+          <button type="button" className="side-item">
+            <span className="side-item-title">Approvals</span>
+            <span className="side-item-detail">Pending votes and file changes</span>
+          </button>
+          <button type="button" className="side-item">
+            <span className="side-item-title">Members</span>
+            <span className="side-item-detail">Roles, invites, and presence</span>
+          </button>
+          <button type="button" className="side-item">
+            <span className="side-item-title">Agent Setup</span>
+            <span className="side-item-detail">Models, cost, permissions</span>
+          </button>
+        </section>
+      </nav>
+    </aside>
+  );
+}
+
 /* -------------------------------------------------------------- presence */
 
 export function Presence({ users, me }: { users: PresenceUser[]; me: string | null }) {
@@ -279,7 +523,7 @@ export function Presence({ users, me }: { users: PresenceUser[]; me: string | nu
           {u.name}
         </span>
       ))}
-      {users.length === 0 && <span className="chip chip-empty">nobody yet</span>}
+      {users.length === 0 && <span className="chip chip-empty">Nobody Yet</span>}
     </div>
   );
 }
@@ -362,7 +606,7 @@ const EntryView = memo(function EntryView({
     if (hiddenRun > 0) {
       rendered.push(
         <div className="steps-hidden" key={key}>
-          {hiddenRun} {hiddenRun === 1 ? "step" : "steps"} hidden
+          {hiddenRun} {hiddenRun === 1 ? "Step" : "Steps"} Hidden
         </div>,
       );
       hiddenRun = 0;
@@ -387,9 +631,9 @@ const EntryView = memo(function EntryView({
 
   return (
     <div className="msg agent">
-      <div className="who agent-who">agent</div>
+      <div className="who agent-who">Agent</div>
       <div className="body">
-        {entry.blocks.length === 0 && <span className="dots" aria-label="working" />}
+        {entry.blocks.length === 0 && <span className="dots" aria-label="Working" />}
         {rendered}
       </div>
     </div>
@@ -408,15 +652,15 @@ function describeCall(name: string, input: unknown): string {
     case "delete_file":
       return str(rec.path);
     case "list_files": {
-      const path = str(rec.path) || "workspace root";
+      const path = str(rec.path) || "Workspace Root";
       const depth = rec.depth;
-      return typeof depth === "number" ? `${path} · depth ${depth}` : path;
+      return typeof depth === "number" ? `${path} · Depth ${depth}` : path;
     }
     case "search_files": {
       const pattern = str(rec.pattern);
       const glob = str(rec.glob);
       const base = pattern ? `"${pattern}"` : "";
-      return glob ? `${base} · in ${glob}` : base;
+      return glob ? `${base} · In ${glob}` : base;
     }
     case "read_doc":
     case "write_doc":
@@ -424,7 +668,7 @@ function describeCall(name: string, input: unknown): string {
       return "";
     case "delegate": {
       const tasks = Array.isArray(rec.tasks) ? rec.tasks.length : 0;
-      return `${tasks} tasks`;
+      return `${tasks} Tasks`;
     }
     case "web_search": {
       const query = str(rec.query);
@@ -438,7 +682,7 @@ function describeCall(name: string, input: unknown): string {
 /** Human-readable byte size, matching the `18 lines` / `340 B` hint format. */
 function sizeHint(result: string): string {
   if (result.includes("\n")) {
-    return `${result.split("\n").length} lines`;
+    return `${result.split("\n").length} Lines`;
   }
   const bytes = result.length;
   if (bytes < 1000) return `${bytes} B`;
@@ -468,7 +712,7 @@ function ThinkingBlock({ block }: { block: Extract<AgentBlock, { type: "thinking
   return (
     <div className="thinking">
       <button className="thinking-toggle" onClick={() => setOpen((v) => !v)}>
-        {open ? "▾" : "▸"} reasoning
+        {open ? "▾" : "▸"} Reasoning
       </button>
       {open && <div className="thinking-body">{block.text}</div>}
     </div>
@@ -499,17 +743,17 @@ function ToolBlock({
     <div className={`tool tool-${block.status}`}>
       <div className="tool-head" onClick={() => setOpen((v) => !v)} role="button">
         <span className="tool-disclosure">{open ? "▾" : "▸"}</span>
-        <code>{block.name}</code>
+        <span className="tool-name">{toolLabel(block.name)}</span>
         {summary && <span className="tool-summary">{summary}</span>}
         <span className={`tool-pip tool-pip-${block.status}`} aria-hidden="true" />
         <span className="tool-status">
           {block.status === "running"
-            ? "running"
+            ? "Running"
             : block.status === "denied"
-              ? "denied by the room"
+              ? "Denied By The Room"
               : block.status === "error"
-                ? "failed"
-                : "done"}
+                ? "Failed"
+                : "Done"}
         </span>
         {hint && <span className="tool-hint">{hint}</span>}
       </div>
@@ -550,7 +794,7 @@ export function ApprovalCard({
   return (
     <div className="approval">
       <div className="approval-top">
-        <code className="approval-tool">{pending.name}</code>
+        <span className="approval-tool">{toolLabel(pending.name)}</span>
         <span className="approval-summary">{pending.summary}</span>
       </div>
 
@@ -591,7 +835,7 @@ export function ApprovalCard({
             {counts.deny}/{pending.threshold}
           </span>
         </button>
-        {mine && <span className="voted">you voted to {mine}</span>}
+        {mine && <span className="voted">You Voted To {titleCaseWords(mine)}</span>}
       </div>
       {!canDecide && (
         <div className="hint redacted" style={{ fontStyle: "italic" }}>
@@ -604,7 +848,15 @@ export function ApprovalCard({
 
 /* ------------------------------------------------------------------ doc */
 
-export function DocPanel({ doc, revision }: { doc: string; revision: number }) {
+export function DocPanel({
+  doc,
+  revision,
+  onClose,
+}: {
+  doc: string;
+  revision: number;
+  onClose?: () => void;
+}) {
   const [flash, setFlash] = useState(false);
   const first = useRef(true);
 
@@ -621,8 +873,21 @@ export function DocPanel({ doc, revision }: { doc: string; revision: number }) {
   return (
     <aside className={`doc ${flash ? "doc-flash" : ""}`}>
       <div className="doc-head">
-        <span>Shared document</span>
-        <span className="rev">rev {revision}</span>
+        <div className="doc-title">
+          <span>Shared Document</span>
+          <span className="rev">Rev {revision}</span>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            className="doc-close"
+            onClick={onClose}
+            aria-label="Close shared document"
+            title="Close Shared Document"
+          >
+            ×
+          </button>
+        )}
       </div>
       {doc.trim() ? (
         <pre className="doc-body">{doc}</pre>
@@ -642,12 +907,16 @@ export function Composer({
   disabled,
   busy,
   readOnly,
+  modelLabel,
+  quickActions,
   onSend,
   onInterrupt,
 }: {
   disabled: boolean;
   busy: boolean;
   readOnly?: boolean;
+  modelLabel: string;
+  quickActions?: ReactNode;
   onSend: (text: string) => void;
   onInterrupt: () => void;
 }) {
@@ -662,6 +931,7 @@ export function Composer({
 
   return (
     <div className="composer">
+      {quickActions && <div className="composer-toolbar">{quickActions}</div>}
       <textarea
         value={value}
         disabled={disabled || readOnly}
@@ -683,6 +953,7 @@ export function Composer({
       />
       {!readOnly && (
         <div className="composer-actions">
+          <span className="composer-model">{modelLabel}</span>
           {busy && (
             <button className="stop" onClick={onInterrupt} title="Stop the current turn">
               Stop
@@ -707,26 +978,26 @@ export function Composer({
 function describeInvite(i: InviteSummary): string {
   if (i.revoked) return "Revoked";
 
-  const parts: string[] = [`Joins as ${i.role}`];
+  const parts: string[] = [`Joins As ${titleCaseWords(i.role)}`];
 
   // With no cap, "3 used" alone reads as if a limit exists and is unmet, so
   // the absence of one is stated outright rather than implied by omission.
   parts.push(
-    i.maxUses > 0 ? `${i.uses} of ${i.maxUses} used` : `${i.uses} used · no limit`,
+    i.maxUses > 0 ? `${i.uses} Of ${i.maxUses} Used` : `${i.uses} Used · No Limit`,
   );
 
   if (i.expiresAt === 0) {
-    parts.push("never expires");
+    parts.push("Never Expires");
   } else if (i.expiresAt <= Date.now()) {
-    parts.push("expired");
+    parts.push("Expired");
   } else {
     const hoursLeft = (i.expiresAt - Date.now()) / (1000 * 60 * 60);
     if (hoursLeft > 48) {
-      parts.push(`expires in ${Math.round(hoursLeft / 24)} days`);
+      parts.push(`Expires In ${Math.round(hoursLeft / 24)} Days`);
     } else if (hoursLeft < 1) {
-      parts.push("expires soon");
+      parts.push("Expires Soon");
     } else {
-      parts.push(`expires in ${Math.round(hoursLeft)} hours`);
+      parts.push(`Expires In ${Math.round(hoursLeft)} Hours`);
     }
   }
 
@@ -764,11 +1035,11 @@ export function InvitePanel({
       <div
         className="modal"
         role="dialog"
-        aria-label="Invite people"
+        aria-label="Invite People"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="modal-head">
-          <h2>Invite people</h2>
+          <h2>Invite People</h2>
           <button className="icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -781,7 +1052,7 @@ export function InvitePanel({
           </p>
 
           <section>
-            <h3>Create an invite</h3>
+            <h3>Create An Invite</h3>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -790,7 +1061,7 @@ export function InvitePanel({
               }}
             >
               <label className="field">
-                <span className="field-label">Joins as</span>
+                <span className="field-label">Joins As</span>
                 <select value={role} onChange={(e) => setRole(e.target.value)}>
                   {INVITABLE_ROLES.map((r) => (
                     <option key={r} value={r}>
@@ -803,10 +1074,10 @@ export function InvitePanel({
               <label className="field">
                 <span className="field-label">Uses</span>
                 <select value={maxUses} onChange={(e) => setMaxUses(Number(e.target.value))}>
-                  <option value={1}>one person</option>
-                  <option value={5}>5 people</option>
-                  <option value={25}>25 people</option>
-                  <option value={0}>no limit</option>
+                  <option value={1}>One Person</option>
+                  <option value={5}>5 People</option>
+                  <option value={25}>25 People</option>
+                  <option value={0}>No Limit</option>
                 </select>
               </label>
 
@@ -816,10 +1087,10 @@ export function InvitePanel({
                   value={expiresInHours}
                   onChange={(e) => setExpiresInHours(Number(e.target.value))}
                 >
-                  <option value={24}>24 hours</option>
-                  <option value={168}>7 days</option>
-                  <option value={720}>30 days</option>
-                  <option value={0}>never</option>
+                  <option value={24}>24 Hours</option>
+                  <option value={168}>7 Days</option>
+                  <option value={720}>30 Days</option>
+                  <option value={0}>Never</option>
                 </select>
               </label>
 
@@ -834,13 +1105,13 @@ export function InvitePanel({
               </label>
 
               <button type="submit" className="primary">
-                Create invite link
+                Create Invite Link
               </button>
             </form>
           </section>
 
           <section>
-            <h3>Active links</h3>
+            <h3>Active Links</h3>
             {invites.length === 0 ? (
               <p className="invite-empty">
                 No invite links yet. Create one to let someone in.
@@ -857,11 +1128,11 @@ export function InvitePanel({
                         <span>{describeInvite(i)}</span>
                         <div className="invite-actions">
                           <button className="mini" onClick={() => copy(i.code, url)}>
-                            {copiedCode === i.code ? "copied" : "copy"}
+                            {copiedCode === i.code ? "Copied" : "Copy"}
                           </button>
                           {!i.revoked && (
                             <button className="mini" onClick={() => onRevoke(i.code)}>
-                              revoke
+                              Revoke
                             </button>
                           )}
                         </div>
@@ -949,11 +1220,11 @@ export function MembersPanel({
                   <div key={m.uid} className="member-row" title={title}>
                     <span
                       className={m.online ? "dot-online" : "dot-offline"}
-                      title={m.online ? "online" : "offline"}
+                      title={m.online ? "Online" : "Offline"}
                     />
                     <span className="member-name">
                       {m.name}
-                      {m.uid === me ? " (you)" : ""}
+                      {m.uid === me ? " (You)" : ""}
                     </span>
                     <select
                       value={m.role}
@@ -962,7 +1233,7 @@ export function MembersPanel({
                     >
                       {(actionable ? selectableRoles : [m.role]).map((r) => (
                         <option key={r} value={r}>
-                          {r}
+                          {titleCaseWords(r)}
                         </option>
                       ))}
                     </select>
@@ -987,19 +1258,19 @@ export function MembersPanel({
 const MODE_OPTIONS: { mode: PermissionMode; label: string; desc: string }[] = [
   {
     mode: "read_only",
-    label: "Read-only",
+    label: "Read-Only",
     desc:
       "The agent can read, search and discuss, but cannot change the document at all. " +
       "Editing tools are withheld entirely, so it proposes in words instead.",
   },
   {
     mode: "ask",
-    label: "Ask first",
+    label: "Ask First",
     desc: "The agent can propose edits, and the room votes on each one before it takes effect.",
   },
   {
     mode: "auto",
-    label: "Auto-accept",
+    label: "Auto-Accept",
     desc: "The agent edits the document without asking. Every change is still recorded in the transcript.",
   },
   {
@@ -1010,9 +1281,9 @@ const MODE_OPTIONS: { mode: PermissionMode; label: string; desc: string }[] = [
 ];
 
 const TOOL_DECISIONS: { value: ToolDecision; label: string }[] = [
-  { value: "allow", label: "always" },
-  { value: "ask", label: "vote" },
-  { value: "deny", label: "never" },
+  { value: "allow", label: "Always" },
+  { value: "ask", label: "Vote" },
+  { value: "deny", label: "Never" },
 ];
 
 /**
@@ -1049,7 +1320,7 @@ export function PermissionsPanel({
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div
-        className="modal"
+        className="modal permissions-modal"
         role="dialog"
         aria-label="What the agent may do"
         onClick={(e) => e.stopPropagation()}
@@ -1101,7 +1372,7 @@ export function PermissionsPanel({
             <div className="policy-tools">
               {TOOL_NAMES.map((name) => (
                 <div key={name} className="policy-tool-row">
-                  <code>{name}</code>
+                  <span className="policy-tool-name">{toolLabel(name)}</span>
                   <div className="policy-tool-options">
                     {TOOL_DECISIONS.map((d) => (
                       <label key={d.value} className="policy-tool-opt">
@@ -1124,17 +1395,17 @@ export function PermissionsPanel({
           <section>
             <h3>Approval rule</h3>
             <label className="field">
-              <span className="field-label">When a vote is needed</span>
+              <span className="field-label">When A Vote Is Needed</span>
               <select
                 value={draft.approval}
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, approval: e.target.value as ApprovalPolicy }))
                 }
               >
-                <option value="majority">Majority of eligible voters</option>
-                <option value="unanimous">Everyone must agree</option>
-                <option value="any_editor">Any one editor can approve</option>
-                <option value="owner_only">Only the owner can approve</option>
+                <option value="majority">Majority Of Eligible Voters</option>
+                <option value="unanimous">Everyone Must Agree</option>
+                <option value="any_editor">Any One Editor Can Approve</option>
+                <option value="owner_only">Only The Owner Can Approve</option>
               </select>
               <span className="field-note">Viewers are never counted, because they cannot vote.</span>
             </label>
@@ -1236,7 +1507,7 @@ export function WorkspacePanel({
             <div className="ws-options">
               {supported ? (
                 <section className="ws-option">
-                  <h3 className="ws-option-heading">A folder on your computer</h3>
+                  <h3 className="ws-option-heading">A Folder On Your Computer</h3>
                   <p className="field-note">
                     Connect a real folder from this device. The agent can read
                     files from it and search within it.
@@ -1257,7 +1528,7 @@ export function WorkspacePanel({
                     </p>
                   )}
                   <button className="primary" onClick={() => onAttach(allowWrites)}>
-                    Choose a folder…
+                    Choose a Folder...
                   </button>
                   <p className="field-warn ws-warning">
                     Everyone in this room can ask the agent to read files from the
@@ -1275,7 +1546,7 @@ export function WorkspacePanel({
               )}
 
               <section className="ws-option">
-                <h3 className="ws-option-heading">A GitHub repository</h3>
+                <h3 className="ws-option-heading">A GitHub Repository</h3>
                 {!github.oauth && !github.app ? (
                   // Nothing is configured on this deployment at all — a
                   // button that can't work is worse than an honest message,
@@ -1288,7 +1559,7 @@ export function WorkspacePanel({
                     </p>
                     <ol className="ws-setup">
                       <li>
-                        Create an OAuth app at{" "}
+                        Create an OAuth App at{" "}
                         <a
                           href="https://github.com/settings/developers"
                           target="_blank"
@@ -1299,10 +1570,10 @@ export function WorkspacePanel({
                         → New OAuth App.
                       </li>
                       <li>
-                        Set the callback URL to{" "}
+                        Set the Callback URL to{" "}
                         <code>{location.origin}/api/auth/github/callback</code>.
                       </li>
-                      <li>Run these two commands, pasting the client ID and client secret when asked:</li>
+                      <li>Run these two commands, pasting the Client ID and Client Secret when asked:</li>
                     </ol>
                     <pre className="ws-setup-code">{"npx wrangler secret put GITHUB_OAUTH_CLIENT_ID\nnpx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET"}</pre>
                     <p className="field-note">
@@ -1337,27 +1608,27 @@ export function WorkspacePanel({
                     return (
                       <>
                         <p className="field-note">
-                          Signed in to GitHub{github.login ? ` as ${github.login}` : ""}.{" "}
+                          Signed In To GitHub{github.login ? ` As ${github.login}` : ""}.{" "}
                           <button className="link" onClick={onSignOutGithub}>
-                            Use a different account
+                            Use a Different Account
                           </button>
                         </p>
                         <label className="field">
-                          <span className="field-label">Search repositories</span>
+                          <span className="field-label">Search Repositories</span>
                           <input
                             type="text"
-                            placeholder="Filter by name"
+                            placeholder="Filter By Name"
                             value={filter}
                             onChange={(e) => setFilter(e.target.value)}
                           />
                         </label>
                         {repos === null && !reposLoading && (
-                          <button onClick={onListRepos}>Retry loading repositories</button>
+                          <button onClick={onListRepos}>Retry Loading Repositories</button>
                         )}
-                        {reposLoading && <p className="field-note">Loading your repositories…</p>}
+                        {reposLoading && <p className="field-note">Loading Your Repositories...</p>}
                         {repos !== null && !reposLoading && (
                           shown.length === 0 ? (
-                            <p className="field-note">No repositories match.</p>
+                            <p className="field-note">No Repositories Match.</p>
                           ) : (
                             <>
                               <ul className="ws-repos">
@@ -1365,7 +1636,7 @@ export function WorkspacePanel({
                                   <li key={r.fullName}>
                                     <button className="ws-repo" onClick={() => onConnectGithub(r.fullName)}>
                                       <span className="ws-repo-name">{r.fullName}</span>
-                                      {r.private && <span className="ws-repo-tag">private</span>}
+                                      {r.private && <span className="ws-repo-tag">Private</span>}
                                       {r.defaultBranch && (
                                         <span className="ws-repo-branch">{r.defaultBranch}</span>
                                       )}
@@ -1382,7 +1653,7 @@ export function WorkspacePanel({
                           )
                         )}
                         <details className="ws-manual">
-                          <summary>Enter a repository by name instead</summary>
+                          <summary>Enter a Repository By Name Instead</summary>
                           <label className="field">
                             <span className="field-label">Repository</span>
                             <input
@@ -1402,7 +1673,7 @@ export function WorkspacePanel({
                             disabled={repo.trim().length === 0}
                             onClick={() => onConnectGithub(repo.trim())}
                           >
-                            Connect repository
+                            Connect Repository
                           </button>
                         </details>
                       </>
@@ -1450,7 +1721,7 @@ export function WorkspacePanel({
             <section>
               <p className="field-note">
                 Connected: <strong>{workspace.label}</strong> ·{" "}
-                {workspace.online ? "online" : "offline"}
+                {workspace.online ? "Online" : "Offline"}
               </p>
               <p className="field-note">
                 {canWrite ? "The agent can propose changes" : "Read-only"}
