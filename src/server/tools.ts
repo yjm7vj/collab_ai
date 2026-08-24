@@ -35,16 +35,11 @@ export function gatedFor(policy: AccessPolicy): Set<string> {
 const DELEGATE_DEF = {
   name: "delegate",
   description:
-    "Hand independent subtasks to cheaper worker models that run in parallel. " +
-    "Use this when the work splits into pieces that do not depend on each " +
-    "other — several sources to read, several questions to answer. Send them " +
-    "all in one call so they run at the same time.\n\n" +
-    "Workers are read-only: they can read the shared document, search, and " +
-    "fetch pages, but cannot edit anything. Each starts with no knowledge of " +
-    "this conversation, so write every task so it stands completely alone — " +
-    "state the question, the constraints, and what to report back. Excess " +
-    "tasks beyond the room's worker cap are dropped, so send the important " +
-    "ones first.",
+    "Hand independent subtasks to parallel worker models; send them all in " +
+    "one call. Workers are read-only: they can read the shared document, " +
+    "search, and fetch, but not edit. They share no context, so write self-" +
+    "contained tasks — question, constraints, expected report. Tasks beyond " +
+    "the worker cap are dropped; send important ones first.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -56,13 +51,11 @@ const DELEGATE_DEF = {
           properties: {
             title: {
               type: "string",
-              description: "Short label shown to the room, e.g. 'Read the Q3 filing'.",
+              description: "Short label shown to the room.",
             },
             instructions: {
               type: "string",
-              description:
-                "The complete self-contained brief: the question, any " +
-                "constraints, and the form the answer should take.",
+              description: "Self-contained brief: question, constraints, and expected output.",
             },
           },
           required: ["title", "instructions"],
@@ -85,9 +78,8 @@ export const TOOL_DEFS = [
   {
     name: "read_doc",
     description:
-      "Read the room's shared document in full. Always read before editing so " +
-      "your edit is based on the current text — other agents' turns and approved " +
-      "writes may have changed it since you last looked.",
+      "Read the shared document in full. Read before editing — other turns or " +
+      "approved writes may have changed it since you last looked.",
     input_schema: {
       type: "object" as const,
       properties: {},
@@ -97,10 +89,9 @@ export const TOOL_DEFS = [
   {
     name: "write_doc",
     description:
-      "Replace the entire shared document with new content. Destructive — it " +
-      "discards whatever is there now. Prefer edit_doc for targeted changes and " +
-      "use this only for the first draft or a full rewrite. Requires approval " +
-      "from the room before it takes effect.",
+      "Replace the entire shared document. Destructive — discards existing " +
+      "content. Prefer edit_doc for targeted changes; use this only for a " +
+      "first draft or full rewrite.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -116,9 +107,7 @@ export const TOOL_DEFS = [
     name: "edit_doc",
     description:
       "Replace one exact span of text in the shared document. old_text must " +
-      "appear exactly once — if it appears zero times or more than once the edit " +
-      "is rejected and nothing changes. Requires approval from the room before it " +
-      "takes effect.",
+      "match exactly once; zero or multiple matches reject the edit.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -126,7 +115,7 @@ export const TOOL_DEFS = [
           type: "string",
           description:
             "Exact text to replace, including whitespace. Include enough " +
-            "surrounding context to make it unique.",
+            "context to make it unique.",
         },
         new_text: {
           type: "string",
@@ -139,20 +128,19 @@ export const TOOL_DEFS = [
   {
     name: "list_files",
     description:
-      "List files and directories in the room's connected workspace. Start " +
-      "here before reading — you cannot guess paths. Paths are relative to " +
-      "the workspace root; use \"\" for the root itself. Requires a " +
-      "connected workspace. Some paths are off-limits and will be refused.",
+      "List files and directories in the workspace. Start here before " +
+      "reading — paths cannot be guessed. Relative to workspace root; use " +
+      "\"\" for root. Some paths are off-limits and refused.",
     input_schema: {
       type: "object" as const,
       properties: {
         path: {
           type: "string",
-          description: "Directory to list, relative to the workspace root. Empty string for the root.",
+          description: "Directory to list, relative to workspace root. Empty string for root.",
         },
         depth: {
           type: "integer",
-          description: "How many levels to descend. Higher values return far more, and the result is capped.",
+          description: "Levels to descend; result is capped.",
         },
       },
       required: ["path"],
@@ -161,16 +149,15 @@ export const TOOL_DEFS = [
   {
     name: "read_file",
     description:
-      "Read one file from the room's connected workspace. Large files are " +
-      "truncated, so use offset to page through one if you need the rest. " +
-      "Requires a connected workspace. Some paths are off-limits and will be refused.",
+      "Read one file from the workspace. Large files are truncated; use " +
+      "offset to page through the rest. Some paths are off-limits and refused.",
     input_schema: {
       type: "object" as const,
       properties: {
-        path: { type: "string", description: "File to read, relative to the workspace root." },
+        path: { type: "string", description: "File to read, relative to workspace root." },
         offset: {
           type: "integer",
-          description: "Byte offset to start from. Use it to continue a truncated read.",
+          description: "Byte offset to resume a truncated read.",
         },
         limit: { type: "integer", description: "Maximum bytes to return." },
       },
@@ -180,10 +167,8 @@ export const TOOL_DEFS = [
   {
     name: "search_files",
     description:
-      "Search the workspace for a literal substring, case-insensitively. " +
-      "Much cheaper than reading many files — use it to find where something " +
-      "lives, then read that file. Requires a connected workspace. Some " +
-      "paths are off-limits and will be refused.",
+      "Search the workspace for a literal substring, case-insensitive. Some " +
+      "paths are off-limits and refused.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -200,14 +185,13 @@ export const TOOL_DEFS = [
   {
     name: "write_file",
     description:
-      "Replace the entire contents of a file in the connected workspace, " +
-      "creating it if it does not exist. Destructive — it discards whatever " +
-      "is there. Prefer edit_file for targeted changes. The room votes before " +
-      "this takes effect. Requires a connected workspace that allows writes.",
+      "Replace a file's entire contents, creating it if missing. Destructive " +
+      "— discards existing content. Prefer edit_file for targeted changes. " +
+      "Workspace must allow writes.",
     input_schema: {
       type: "object" as const,
       properties: {
-        path: { type: "string", description: "File to write, relative to the workspace root." },
+        path: { type: "string", description: "File to write, relative to workspace root." },
         content: { type: "string", description: "The complete new contents of the file." },
       },
       required: ["path", "content"],
@@ -216,19 +200,17 @@ export const TOOL_DEFS = [
   {
     name: "edit_file",
     description:
-      "Replace one exact span of text in a file in the connected workspace. " +
-      "old_text must appear exactly once — if it appears zero times or more " +
-      "than once the edit is rejected and nothing changes. The room votes " +
-      "before this takes effect. Requires a connected workspace that allows writes.",
+      "Replace one exact span of text in a file. old_text must match exactly " +
+      "once; zero or multiple matches reject the edit. Workspace must allow writes.",
     input_schema: {
       type: "object" as const,
       properties: {
-        path: { type: "string", description: "File to edit, relative to the workspace root." },
+        path: { type: "string", description: "File to edit, relative to workspace root." },
         old_text: {
           type: "string",
           description:
             "Exact text to replace, including whitespace. Include enough " +
-            "surrounding context to make it unique.",
+            "context to make it unique.",
         },
         new_text: {
           type: "string",
@@ -241,12 +223,11 @@ export const TOOL_DEFS = [
   {
     name: "delete_file",
     description:
-      "Delete a file from the connected workspace. Irreversible. The room " +
-      "votes before this takes effect. Requires a connected workspace that allows writes.",
+      "Delete a file from the workspace. Irreversible. Workspace must allow writes.",
     input_schema: {
       type: "object" as const,
       properties: {
-        path: { type: "string", description: "File to delete, relative to the workspace root." },
+        path: { type: "string", description: "File to delete, relative to workspace root." },
       },
       required: ["path"],
     },
