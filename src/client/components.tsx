@@ -92,6 +92,22 @@ export function ThemeToggle({
   );
 }
 
+export function LogoMark() {
+  return (
+    <img className="logo-mark" src="/collab-logo.svg" alt="collab_ai" title="collab_ai" />
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <svg className="archive-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M2.5 5.5h11v7.25a.75.75 0 0 1-.75.75h-9.5a.75.75 0 0 1-.75-.75V5.5Z" />
+      <path d="M1.75 2.5h12.5v3H1.75v-3Z" />
+      <path d="M6 8.5h4" />
+    </svg>
+  );
+}
+
 /**
  * Live context usage against the room's configured limit, plus running spend.
  * Both are read from real `usage` on every response, not estimated.
@@ -193,7 +209,7 @@ export function Landing({
         }}
       >
         <div className="gate-top">
-          <h1>collab_ai</h1>
+          <LogoMark />
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
         <p className="gate-sub">
@@ -264,7 +280,7 @@ export function JoinGate({
         }}
       >
         <div className="gate-top">
-          <h1>collab_ai</h1>
+          <LogoMark />
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
         <p className="gate-sub">
@@ -327,7 +343,7 @@ export function SignInGate({
     <div className="gate">
       <div className="gate-card">
         <div className="gate-top">
-          <h1>collab_ai</h1>
+          <LogoMark />
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
         <p className="gate-sub">
@@ -354,25 +370,61 @@ export function SignInGate({
 /* --------------------------------------------------------------- side pane */
 
 type SideProject = {
+  id: string;
   name: string;
-  channels: { label: string; detail: string }[];
+  archived: boolean;
+  rooms: SideRoom[];
+  workspace: WorkspaceInfo;
+};
+
+type SideRoom = {
+  roomId: string;
+  label: string;
+  projectId?: string;
+  archived: boolean;
+  workspace: WorkspaceInfo;
 };
 
 export function SidePane({
   activeRoomId,
   busy,
   projects,
+  rooms,
   onCreateRoom,
   onCreateProject,
+  onOpenRoom,
+  onRenameRoom,
+  onCopyRoomLink,
+  onArchiveRoom,
+  onRestoreRoom,
+  onDeleteRoom,
+  onArchiveProject,
+  onRestoreProject,
+  onDeleteProject,
 }: {
   activeRoomId?: string;
   busy: boolean;
   projects: SideProject[];
-  onCreateRoom: () => void;
+  rooms: SideRoom[];
+  onCreateRoom: (projectId?: string) => void;
   onCreateProject: (name: string) => void;
+  onOpenRoom: (roomId: string) => void;
+  onRenameRoom: (roomId: string, label: string) => void;
+  onCopyRoomLink: (roomId: string) => void;
+  onArchiveRoom: (roomId: string) => void;
+  onRestoreRoom: (roomId: string) => void;
+  onDeleteRoom: (roomId: string) => void;
+  onArchiveProject: (projectId: string) => void;
+  onRestoreProject: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
 }) {
   const [addingProject, setAddingProject] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [openProjectMenu, setOpenProjectMenu] = useState<string | null>(null);
+  const archivedRooms = [
+    ...rooms.filter((room) => room.archived),
+    ...projects.flatMap((project) => project.rooms.filter((room) => room.archived)),
+  ];
 
   const submitProject = () => {
     const name = projectName.trim().slice(0, 42);
@@ -382,39 +434,78 @@ export function SidePane({
     setAddingProject(false);
   };
 
+  const promptRename = (room: SideRoom) => {
+    const label = window.prompt("Room name", room.label);
+    if (label !== null) onRenameRoom(room.roomId, label);
+  };
+
   return (
     <aside className="side-pane" aria-label="Workspace navigation">
       <div className="side-head">
-        <div>
-          <div className="side-kicker">Workspace</div>
-          <div className="side-title">collab_ai</div>
-        </div>
-        <button
-          type="button"
-          className="side-icon-btn"
-          onClick={onCreateRoom}
-          disabled={busy}
-          title="Create a new room"
-          aria-label="Create a new room"
-        >
-          +
-        </button>
+        <LogoMark />
+        <div className="side-title">Collab.AI</div>
       </div>
 
       <nav className="side-scroll" aria-label="Projects">
         <section className="side-section">
-          <div className="side-section-label">Rooms</div>
-          <button
-            type="button"
-            className="side-room-card"
-            onClick={onCreateRoom}
-            disabled={busy}
-          >
-            <span className="side-item-title">{busy ? "Creating Room" : "Create a Room"}</span>
-            <span className="side-item-detail">
-              {activeRoomId ? `Current Room ${activeRoomId.slice(0, 6)}...` : "Start a Shared Agent Session"}
-            </span>
-          </button>
+          <div className="side-section-row">
+            <div className="side-section-label">Rooms</div>
+            <button
+              type="button"
+              className="side-small-action side-add-room"
+              onClick={() => onCreateRoom()}
+              disabled={busy}
+              title="Create a standalone room"
+              aria-label="Create a standalone room"
+            >
+              +
+            </button>
+          </div>
+          {rooms.length > 0 && (
+            <div className="side-room-list">
+              {rooms.filter((room) => !room.archived).map((room) => (
+                <div className="side-room-row" key={room.roomId}>
+                  <button
+                    type="button"
+                    className={`side-item ${room.roomId === activeRoomId ? "active" : ""}`}
+                    onClick={() => onOpenRoom(room.roomId)}
+                  >
+                    <span className="side-item-title">{room.label}</span>
+                    <span className="side-item-detail">
+                      {room.workspace.label ? `Workspace: ${room.workspace.label}` : room.roomId}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="side-room-action side-copy-room"
+                    onClick={() => onCopyRoomLink(room.roomId)}
+                    aria-label={`Copy link for ${room.label}`}
+                    title="Copy room link"
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
+                    className="side-room-action side-rename-room"
+                    onClick={() => promptRename(room)}
+                    aria-label={`Rename ${room.label}`}
+                    title={`Rename ${room.label}`}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="side-archive-room"
+                    onClick={() => onArchiveRoom(room.roomId)}
+                    aria-label={`Archive ${room.label}`}
+                    title={`Archive ${room.label}`}
+                  >
+                    <ArchiveIcon />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="side-section">
@@ -470,44 +561,186 @@ export function SidePane({
               )}
             </div>
           ) : (
-            projects.map((project) => (
-              <div className="side-project" key={project.name}>
-                <button type="button" className="side-project-head">
+            projects.filter((project) => !project.archived).map((project) => (
+              <div className="side-project" key={project.id}>
+                <div className="side-project-head">
                   <span className="side-folder" aria-hidden="true" />
                   <span>{project.name}</span>
-                </button>
-                <div className="side-channels">
-                  {project.channels.map((channel) => (
+                  <div className="side-project-actions">
                     <button
                       type="button"
-                      key={`${project.name}-${channel.label}`}
-                      className="side-item"
+                      className="side-project-add"
+                      onClick={() => onCreateRoom(project.id)}
+                      disabled={busy}
+                      aria-label={`Create a room in ${project.name}`}
+                      title={`Create a room in ${project.name}`}
                     >
-                      <span className="side-item-title">{channel.label}</span>
-                      <span className="side-item-detail">{channel.detail}</span>
+                      +
                     </button>
+                    <button
+                      type="button"
+                      className="side-project-menu-trigger"
+                      onClick={() => setOpenProjectMenu((open) => open === project.id ? null : project.id)}
+                      aria-label={`Project actions for ${project.name}`}
+                      aria-expanded={openProjectMenu === project.id}
+                      title={`Project actions for ${project.name}`}
+                    >
+                      ⋯
+                    </button>
+                    {openProjectMenu === project.id && (
+                      <div className="side-project-menu" role="menu">
+                        <button type="button" role="menuitem" onClick={() => {
+                          setOpenProjectMenu(null);
+                          onArchiveProject(project.id);
+                        }}>Archive project</button>
+                        <button type="button" role="menuitem" onClick={() => {
+                          setOpenProjectMenu(null);
+                          onDeleteProject(project.id);
+                        }}>Delete project</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="side-channels">
+                  {project.rooms.filter((room) => !room.archived).map((room) => (
+                    <div className="side-room-row" key={room.roomId}>
+                      <button
+                        type="button"
+                        className={`side-item ${room.roomId === activeRoomId ? "active" : ""}`}
+                        onClick={() => onOpenRoom(room.roomId)}
+                      >
+                        <span className="side-item-title">{room.label}</span>
+                        <span className="side-item-detail">
+                          {room.workspace.label ? `Workspace: ${room.workspace.label}` : room.roomId}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="side-room-action side-copy-room"
+                        onClick={() => onCopyRoomLink(room.roomId)}
+                        aria-label={`Copy link for ${room.label}`}
+                        title="Copy room link"
+                      >
+                        ⧉
+                      </button>
+                      <button
+                        type="button"
+                        className="side-room-action side-rename-room"
+                        onClick={() => promptRename(room)}
+                        aria-label={`Rename ${room.label}`}
+                        title={`Rename ${room.label}`}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="side-archive-room"
+                        onClick={() => onArchiveRoom(room.roomId)}
+                        aria-label={`Archive ${room.label}`}
+                        title={`Archive ${room.label}`}
+                      >
+                        <ArchiveIcon />
+                      </button>
+                    </div>
                   ))}
+                  {project.rooms.filter((room) => !room.archived).length === 0 && (
+                    <span className="side-item-detail side-project-empty">No rooms yet · use + to add one</span>
+                  )}
+                  {project.workspace.label && (
+                    <span className="side-item-detail side-project-workspace">
+                      Workspace · {project.workspace.label}
+                    </span>
+                  )}
                 </div>
               </div>
             ))
           )}
         </section>
 
-        <section className="side-section">
-          <div className="side-section-label">Menus</div>
-          <button type="button" className="side-item">
-            <span className="side-item-title">Approvals</span>
-            <span className="side-item-detail">Pending votes and file changes</span>
-          </button>
-          <button type="button" className="side-item">
-            <span className="side-item-title">Members</span>
-            <span className="side-item-detail">Roles, invites, and presence</span>
-          </button>
-          <button type="button" className="side-item">
-            <span className="side-item-title">Agent Setup</span>
-            <span className="side-item-detail">Models, cost, permissions</span>
-          </button>
-        </section>
+        {archivedRooms.length > 0 && (
+          <section className="side-section">
+            <div className="side-section-label">Archived</div>
+            <div className="side-room-list">
+              {archivedRooms.map((room) => (
+                <div className="side-room-row" key={room.roomId}>
+                  <button
+                    type="button"
+                    className="side-item side-item-muted"
+                    onClick={() => onOpenRoom(room.roomId)}
+                  >
+                    <span className="side-item-title">{room.label}</span>
+                    <span className="side-item-detail">{room.projectId ? "Archived project room" : "Archived standalone room"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="side-room-action side-copy-room"
+                    onClick={() => onCopyRoomLink(room.roomId)}
+                    aria-label={`Copy link for ${room.label}`}
+                    title="Copy room link"
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
+                    className="side-room-action side-rename-room"
+                    onClick={() => promptRename(room)}
+                    aria-label={`Rename ${room.label}`}
+                    title={`Rename ${room.label}`}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="side-restore-room"
+                    onClick={() => onRestoreRoom(room.roomId)}
+                    aria-label={`Restore ${room.label}`}
+                    title={`Restore ${room.label}`}
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    className="side-delete-archived-room"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeleteRoom(room.roomId);
+                    }}
+                    aria-label={`Delete ${room.label}`}
+                    title={`Delete ${room.label}`}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {projects.some((project) => project.archived) && (
+          <section className="side-section">
+            <div className="side-section-label">Archived projects</div>
+            <div className="side-room-list">
+              {projects.filter((project) => project.archived).map((project) => (
+                <div className="side-room-row" key={project.id}>
+                  <span className="side-item side-item-muted">
+                    <span className="side-item-title">{project.name}</span>
+                    <span className="side-item-detail">{project.rooms.length} archived room{project.rooms.length === 1 ? "" : "s"}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="side-restore-room"
+                    onClick={() => onRestoreProject(project.id)}
+                    aria-label={`Restore ${project.name}`}
+                    title={`Restore ${project.name}`}
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
       </nav>
     </aside>
   );
@@ -516,9 +749,10 @@ export function SidePane({
 /* -------------------------------------------------------------- presence */
 
 export function Presence({ users, me }: { users: PresenceUser[]; me: string | null }) {
+  const visibleUsers = users.filter((u) => u.uid !== me);
   return (
     <div className="presence" title={`${users.length} in the room`}>
-      {users.map((u) => (
+      {visibleUsers.map((u) => (
         <span
           key={u.uid}
           className={`chip chip-${u.role} ${u.uid === me ? "chip-me" : ""}`}
@@ -913,6 +1147,8 @@ export function Composer({
   busy,
   readOnly,
   modelLabel,
+  policyLabel,
+  statusLabel,
   quickActions,
   onSend,
   onInterrupt,
@@ -921,6 +1157,8 @@ export function Composer({
   busy: boolean;
   readOnly?: boolean;
   modelLabel: string;
+  policyLabel: string;
+  statusLabel: string;
   quickActions?: ReactNode;
   onSend: (text: string) => void;
   onInterrupt: () => void;
@@ -958,7 +1196,9 @@ export function Composer({
       />
       {!readOnly && (
         <div className="composer-actions">
+          <span className="composer-status">{statusLabel}</span>
           <span className="composer-model">{modelLabel}</span>
+          <span className="composer-policy">{policyLabel}</span>
           {busy && (
             <button className="stop" onClick={onInterrupt} title="Stop the current turn">
               Stop

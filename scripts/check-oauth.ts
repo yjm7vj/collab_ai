@@ -270,6 +270,13 @@ async function main() {
     check("isConfigured with clientId empty is false", isConfigured({ clientId: "", clientSecret: "secret" }) === false);
     check("isConfigured with clientSecret empty is false", isConfigured({ clientId: "id", clientSecret: "" }) === false);
     check("isConfigured with undefined config is false", isConfigured(undefined) === false);
+    check(
+      "isConfigured with example placeholders is false",
+      isConfigured({
+        clientId: "replace-with-github-oauth-client-id",
+        clientSecret: "replace-with-github-oauth-client-secret",
+      }) === false,
+    );
   }
 
   console.log("\nrepository authorisation");

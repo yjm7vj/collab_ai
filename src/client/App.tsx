@@ -22,6 +22,7 @@ import {
 } from "../shared/protocol";
 import { Landing, JoinGate, SidePane, SignInGate } from "./components";
 import { RoomView } from "./RoomView";
+import type { WorkspaceInfo } from "../shared/workspace";
 
 /**
  * A durable id for this browser, so a reload or a second tab is the same person.
@@ -38,6 +39,7 @@ function myUid(): string {
 
 const IDENTITY_KEY = "collab_ai:identity";
 const PROJECTS_KEY = "collab_ai:projects";
+const ROOMS_KEY = "collab_ai:rooms";
 const THEME_KEY = "collab_ai:theme";
 function storedIdentity(): string | null {
   return localStorage.getItem(IDENTITY_KEY);
@@ -49,36 +51,80 @@ function storedTheme(): Theme {
 }
 
 type SidebarProject = {
+  id: string;
   name: string;
-  channels: { label: string; detail: string }[];
+  archived: boolean;
+  rooms: SidebarRoom[];
+  workspace: WorkspaceInfo;
 };
+
+type SidebarRoom = {
+  roomId: string;
+  label: string;
+  projectId?: string;
+  archived: boolean;
+  workspace: WorkspaceInfo;
+};
+
+const EMPTY_WORKSPACE: WorkspaceInfo = { kind: "none", online: false, hostUid: null, label: "" };
+
+function safeWorkspace(value: unknown): WorkspaceInfo {
+  if (!value || typeof value !== "object") return EMPTY_WORKSPACE;
+  const rec = value as Record<string, unknown>;
+  const kind = rec.kind === "local" || rec.kind === "github" ? rec.kind : "none";
+  return {
+    kind,
+    online: kind !== "none" && rec.online === true,
+    hostUid: typeof rec.hostUid === "string" ? rec.hostUid : null,
+    label: typeof rec.label === "string" ? rec.label : "",
+  };
+}
+
+function safeRoom(value: unknown): SidebarRoom | null {
+  if (!value || typeof value !== "object") return null;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.roomId !== "string" || typeof rec.label !== "string") return null;
+  return {
+    roomId: rec.roomId,
+    label: rec.label,
+    projectId: typeof rec.projectId === "string" ? rec.projectId : undefined,
+    archived: rec.archived === true,
+    workspace: safeWorkspace(rec.workspace),
+  };
+}
+
+function storedRooms(): SidebarRoom[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ROOMS_KEY) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(safeRoom).filter((room): room is SidebarRoom => Boolean(room));
+  } catch {
+    return [];
+  }
+}
 
 function storedProjects(): SidebarProject[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(PROJECTS_KEY) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((p) => {
-        if (!p || typeof p !== "object") return null;
-        const rec = p as Record<string, unknown>;
-        if (typeof rec.name !== "string") return null;
-        return {
-          name: rec.name,
-          channels: Array.isArray(rec.channels)
-            ? rec.channels.flatMap((c) => {
-                if (!c || typeof c !== "object") return [];
-                const channel = c as Record<string, unknown>;
-                return typeof channel.label === "string" && typeof channel.detail === "string"
-                  ? [{ label: channel.label, detail: channel.detail }]
-                  : [];
-              })
-            : [],
-        };
-      })
-      .filter((p): p is SidebarProject => Boolean(p));
+    return parsed.flatMap((value, index) => {
+      if (!value || typeof value !== "object") return [];
+      const rec = value as Record<string, unknown>;
+      if (typeof rec.name !== "string") return [];
+      const id = typeof rec.id === "string" ? rec.id : `project-${index}-${rec.name}`;
+      const rooms = Array.isArray(rec.rooms)
+        ? rec.rooms.map(safeRoom).filter((room): room is SidebarRoom => Boolean(room))
+        : [];
+      return [{ id, name: rec.name, archived: rec.archived === true, rooms, workspace: safeWorkspace(rec.workspace) }];
+    });
   } catch {
     return [];
   }
+}
+
+function persistSidebar(projects: SidebarProject[], rooms: SidebarRoom[]) {
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms));
 }
 
 function base64UrlDecode(segment: string): string {
@@ -203,7 +249,12 @@ export function App() {
     return t ? readIdentity(t) : null;
   });
   const [projects, setProjects] = useState<SidebarProject[]>(storedProjects);
+  const [rooms, setRooms] = useState<SidebarRoom[]>(storedRooms);
   const [theme, setTheme] = useState<Theme>(storedTheme);
+
+  useEffect(() => {
+    persistSidebar(projects, rooms);
+  }, [projects, rooms]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -247,7 +298,7 @@ export function App() {
   }, [route]);
 
   const createRoom = useCallback(
-    async (displayName: string) => {
+    async (displayName: string, projectId?: string) => {
       setBusy(true);
       try {
         const res = await fetch("/api/rooms", {
@@ -272,6 +323,19 @@ export function App() {
         }
         const { roomId, token: tok } = (await res.json()) as CreateRoomResponse;
         writeToken(roomId, tok);
+        const room = {
+          roomId,
+          label: `Room ${roomId.slice(0, 6)}`,
+          projectId,
+          archived: false,
+          workspace: EMPTY_WORKSPACE,
+        };
+        setRooms((prevRooms) => (projectId ? prevRooms : [...prevRooms, room]));
+        if (projectId) {
+          setProjects((prevProjects) => prevProjects.map((project) =>
+            project.id === projectId ? { ...project, rooms: [...project.rooms, room] } : project,
+          ));
+        }
         localStorage.setItem("collab_ai:name", displayName);
         setName(displayName);
         location.hash = "#/r/" + roomId;
@@ -351,9 +415,9 @@ export function App() {
   );
 
   const sideName = identity?.name ?? name;
-  const createRoomFromPane = useCallback(() => {
+  const createRoomFromPane = useCallback((projectId?: string) => {
     const displayName = sideName.trim() || "Guest";
-    createRoom(displayName);
+    createRoom(displayName, projectId);
   }, [createRoom, sideName]);
 
   const createProject = useCallback((projectName: string) => {
@@ -364,16 +428,115 @@ export function App() {
       const next = [
         ...prev,
         {
+          id: crypto.randomUUID(),
           name: trimmed,
-          channels: [
-            { label: "Rooms", detail: "Shared agent sessions for this project" },
-            { label: "Workspace", detail: "Files, GitHub repos, and project context" },
-          ],
+          archived: false,
+          rooms: [],
+          workspace: EMPTY_WORKSPACE,
         },
       ];
-      localStorage.setItem(PROJECTS_KEY, JSON.stringify(next));
       return next;
     });
+  }, []);
+
+  const openRoom = useCallback((roomId: string) => {
+    location.hash = `#/r/${roomId}`;
+  }, []);
+
+  const renameRoom = useCallback((roomId: string, label: string) => {
+    const nextLabel = label.trim().slice(0, 42);
+    if (!nextLabel) return;
+    setRooms((prevRooms) => prevRooms.map((room) => room.roomId === roomId ? { ...room, label: nextLabel } : room));
+    setProjects((prevProjects) => prevProjects.map((project) => ({
+      ...project,
+      rooms: project.rooms.map((room) => room.roomId === roomId ? { ...room, label: nextLabel } : room),
+    })));
+  }, []);
+
+  const copyRoomLink = useCallback((roomId: string) => {
+    void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`);
+  }, []);
+
+  const archiveRoom = useCallback((roomId: string) => {
+    const room = [...rooms, ...projects.flatMap((project) => project.rooms)]
+      .find((candidate) => candidate.roomId === roomId);
+    if (!room || room.archived || !window.confirm(`Archive ${room.label}?`)) return;
+    setRooms((prevRooms) => prevRooms.map((candidate) =>
+      candidate.roomId === roomId ? { ...candidate, archived: true } : candidate,
+    ));
+    setProjects((prevProjects) => prevProjects.map((project) => ({
+      ...project,
+      rooms: project.rooms.map((candidate) =>
+        candidate.roomId === roomId ? { ...candidate, archived: true } : candidate,
+      ),
+    })));
+  }, [projects, rooms]);
+
+  const restoreRoom = useCallback((roomId: string) => {
+    setRooms((prevRooms) => prevRooms.map((candidate) =>
+      candidate.roomId === roomId ? { ...candidate, archived: false } : candidate,
+    ));
+    setProjects((prevProjects) => prevProjects.map((project) => ({
+      ...project,
+      rooms: project.rooms.map((candidate) =>
+        candidate.roomId === roomId ? { ...candidate, archived: false } : candidate,
+      ),
+    })));
+  }, []);
+
+  const deleteArchivedRoom = useCallback((roomId: string) => {
+    const room = [...rooms, ...projects.flatMap((project) => project.rooms)]
+      .find((candidate) => candidate.roomId === roomId);
+    if (!room || !room.archived || !window.confirm(`Delete ${room.label} permanently?`)) return;
+    clearToken(roomId);
+    const nextRooms = rooms.filter((candidate) => candidate.roomId !== roomId);
+    const nextProjects = projects.map((project) => ({
+      ...project,
+      rooms: project.rooms.filter((candidate) => candidate.roomId !== roomId),
+    }));
+    setRooms(nextRooms);
+    setProjects(nextProjects);
+    persistSidebar(nextProjects, nextRooms);
+    if ((route.kind === "room" || route.kind === "invite") && route.roomId === roomId) {
+      location.hash = "";
+    }
+  }, [projects, rooms, route]);
+
+  const archiveProject = useCallback((projectId: string) => {
+    const project = projects.find((candidate) => candidate.id === projectId);
+    if (!project || project.archived || !window.confirm(`Archive ${project.name} and its rooms?`)) return;
+    setProjects((prevProjects) => prevProjects.map((candidate) => candidate.id === projectId
+      ? { ...candidate, archived: true, rooms: candidate.rooms.map((room) => ({ ...room, archived: true })) }
+      : candidate,
+    ));
+  }, [projects]);
+
+  const restoreProject = useCallback((projectId: string) => {
+    setProjects((prevProjects) => prevProjects.map((candidate) => candidate.id === projectId
+      ? { ...candidate, archived: false, rooms: candidate.rooms.map((room) => ({ ...room, archived: false })) }
+      : candidate,
+    ));
+  }, []);
+
+  const deleteProject = useCallback((projectId: string) => {
+    const project = projects.find((candidate) => candidate.id === projectId);
+    if (!project || !window.confirm(`Delete ${project.name} and its room records?`)) return;
+    project.rooms.forEach((room) => clearToken(room.roomId));
+    setProjects((prevProjects) => prevProjects.filter((candidate) => candidate.id !== projectId));
+  }, [projects]);
+
+  const updateWorkspace = useCallback((roomId: string, workspace: WorkspaceInfo) => {
+    setRooms((prevRooms) => prevRooms.map((room) => (room.roomId === roomId ? { ...room, workspace } : room)));
+    setProjects((prevProjects) => prevProjects.map((project) => {
+      const projectRoom = project.rooms.find((room) => room.roomId === roomId);
+      return projectRoom
+        ? {
+            ...project,
+            workspace,
+            rooms: project.rooms.map((room) => room.roomId === roomId ? { ...room, workspace } : room),
+          }
+        : project;
+    }));
   }, []);
 
   const withSidePane = (content: ReactNode) => (
@@ -382,8 +545,18 @@ export function App() {
         activeRoomId={route.kind === "room" || route.kind === "invite" ? route.roomId : undefined}
         busy={busy}
         projects={projects}
+        rooms={rooms}
         onCreateRoom={createRoomFromPane}
         onCreateProject={createProject}
+        onOpenRoom={openRoom}
+        onRenameRoom={renameRoom}
+        onCopyRoomLink={copyRoomLink}
+        onArchiveRoom={archiveRoom}
+        onRestoreRoom={restoreRoom}
+        onDeleteRoom={deleteArchivedRoom}
+        onArchiveProject={archiveProject}
+        onRestoreProject={restoreProject}
+        onDeleteProject={deleteProject}
       />
       <main className="side-main">{content}</main>
     </div>
@@ -428,6 +601,7 @@ export function App() {
         token={token}
         displayName={name}
         onAccessLost={onAccessLost}
+        onWorkspaceChange={updateWorkspace}
         theme={theme}
         onToggleTheme={toggleTheme}
       />

@@ -432,6 +432,25 @@ npx wrangler secret put GITHUB_APP_PRIVATE_KEY
 npx wrangler secret put GITHUB_APP_SLUG
 ```
 
+Sign-in uses separate OAuth credentials. Put the provider client id and
+secret in local `.dev.vars` (never in the client bundle), and register these
+exact callback URLs with the providers when running locally:
+
+```
+http://localhost:5173/api/auth/google/callback
+http://localhost:5173/api/auth/github/callback
+```
+
+The host is significant: `127.0.0.1` and `localhost` are different callback
+URLs to OAuth providers. Register the `127.0.0.1:5173` versions instead if
+that is the address you use in your browser.
+
+Google OAuth clients can list multiple callback URLs. GitHub OAuth Apps are
+normally limited to one callback URL, so use a separate GitHub OAuth App for
+local development if the production app already points at a deployed Worker.
+The local GitHub client id and secret must be real values; the example
+placeholders are treated as unconfigured by the Worker.
+
 GitHub hands out its App private key in **PKCS#1** (`BEGIN RSA PRIVATE KEY`).
 WebCrypto, which is all that's available in a Worker, only imports **PKCS#8**
 (`BEGIN PRIVATE KEY`). Convert it once before storing it:

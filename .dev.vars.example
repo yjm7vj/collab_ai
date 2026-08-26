@@ -12,3 +12,13 @@ ROOM_SECRET=change-me-to-a-long-random-string
 GITHUB_APP_ID=
 GITHUB_APP_PRIVATE_KEY=
 GITHUB_APP_SLUG=
+
+# Optional sign-in providers. The callback URL must also be registered with
+# each provider. For local Vite development, use:
+# http://localhost:5173/api/auth/google/callback
+# http://localhost:5173/api/auth/github/callback
+# If you open 127.0.0.1 instead, register the equivalent 127.0.0.1 URLs.
+GITHUB_OAUTH_CLIENT_ID=
+GITHUB_OAUTH_CLIENT_SECRET=
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=

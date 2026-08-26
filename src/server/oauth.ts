@@ -257,8 +257,21 @@ export async function fetchProfile(
 
 /** Whether a provider is configured on this deployment. */
 export function isConfigured(cfg: Partial<OAuthConfig> | undefined): boolean {
-  return !!cfg && typeof cfg.clientId === "string" && cfg.clientId.length > 0
-    && typeof cfg.clientSecret === "string" && cfg.clientSecret.length > 0;
+  if (!cfg || typeof cfg.clientId !== "string" || typeof cfg.clientSecret !== "string") {
+    return false;
+  }
+
+  // Treat the values from .dev.vars.example as unset. Otherwise a fresh local
+  // checkout advertises an OAuth button that can only fail at the provider.
+  const placeholders = new Set([
+    "replace-with-github-oauth-client-id",
+    "replace-with-github-oauth-client-secret",
+    "replace-with-google-oauth-client-id",
+    "replace-with-google-oauth-client-secret",
+  ]);
+  return cfg.clientId.length > 0 && cfg.clientSecret.length > 0
+    && !placeholders.has(cfg.clientId)
+    && !placeholders.has(cfg.clientSecret);
 }
 
 // Marks a state token so it can never be mistaken for a room token even

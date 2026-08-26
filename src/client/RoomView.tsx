@@ -14,7 +14,7 @@ import {
 } from "../shared/protocol";
 import { modelInfo, type RoomSettings } from "../shared/models";
 import { delegatesOf, leadOf, type WorkflowGraph } from "../shared/workflow";
-import { asRole, can, canSeeFileContents, describePolicy, type Role } from "../shared/access";
+import { asRole, can, canSeeFileContents, type Role } from "../shared/access";
 import type { AccessPolicy } from "../shared/access";
 import {
   ApprovalCard,
@@ -54,6 +54,7 @@ export function RoomView({
   token,
   displayName,
   onAccessLost,
+  onWorkspaceChange,
   theme,
   onToggleTheme,
 }: {
@@ -61,6 +62,7 @@ export function RoomView({
   token: string;
   displayName: string;
   onAccessLost: (reason: string) => void;
+  onWorkspaceChange: (roomId: string, workspace: RoomState["workspace"]) => void;
   theme: ThemeMode;
   onToggleTheme: () => void;
 }) {
@@ -73,10 +75,11 @@ export function RoomView({
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
   const [showPermissions, setShowPermissions] = useState(false);
   const [showWorkflow, setShowWorkflow] = useState(false);
   const [renaming, setRenaming] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
   const [showInvites, setShowInvites] = useState(false);
   const [members, setMembers] = useState<MemberSummary[]>([]);
@@ -87,7 +90,7 @@ export function RoomView({
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
   const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("compact");
-  const [showDocument, setShowDocument] = useState(true);
+  const [showDocument, setShowDocument] = useState(false);
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
   const rootRef = useRef<FileSystemDirectoryHandle | null>(null);
@@ -98,6 +101,25 @@ export function RoomView({
   // descriptive — the server, not this flag, decides whether a write is ever
   // attempted; it only shapes what the workspace panel tells the user.
   const [canWrite, setCanWrite] = useState(false);
+
+  useEffect(() => {
+    if (!showSettingsMenu) return;
+    const closeWhenOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !settingsMenuRef.current?.contains(target)) {
+        setShowSettingsMenu(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowSettingsMenu(false);
+    };
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showSettingsMenu]);
 
   // These hide controls the server would refuse anyway; the server is the
   // boundary, this is only so nobody clicks into a refusal.
@@ -196,7 +218,10 @@ export function RoomView({
     agent: "room",
     name: roomId,
     query: { tk: token },
-    onStateUpdate: (s: RoomState) => setState(s),
+    onStateUpdate: (s: RoomState) => {
+      setState(s);
+      onWorkspaceChange(roomId, s.workspace);
+    },
     onOpen: () => {
       setConnected(true);
       setError(null);
@@ -354,13 +379,6 @@ export function RoomView({
     history.replaceState(null, "", location.pathname + location.hash);
   }, [connected, send]);
 
-  const copyLink = useCallback(() => {
-    void navigator.clipboard.writeText(`${location.origin}/#/r/${roomId}`).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [roomId]);
-
   const statusLabel = useMemo(() => {
     if (!connected) return "Reconnecting...";
     switch (state.status) {
@@ -373,34 +391,28 @@ export function RoomView({
     }
   }, [connected, state.status]);
 
-  const toolDisplayLabel =
-    toolDisplay === "compact" ? "Activity: Compact" : toolDisplay === "full" ? "Activity: Full" : "Activity: Hidden";
   const effortLabel = state.settings.effort === "xhigh" ? "Xhigh" : state.settings.effort[0]!.toUpperCase() + state.settings.effort.slice(1);
   // Under a custom workflow the room is answered by the graph's lead, so naming
   // `agentModel` here would put a model in the header that is not the one running.
   const custom = state.settings.workflow === "custom";
   const leadModel = custom ? leadOf(state.graph).model : state.settings.agentModel;
   const modelLabel = `${modelInfo(leadModel).label}, ${effortLabel}`;
+  const policyLabel =
+    state.policy.mode === "read_only"
+      ? "Read-only"
+      : state.policy.mode === "auto"
+        ? "Auto-accept"
+        : state.policy.mode === "custom"
+          ? "Custom"
+          : "Ask first";
   const teamCount = custom ? delegatesOf(state.graph).length : 0;
 
   return (
     <div className="app">
       <header className="bar">
         <div className="bar-left">
-          <div className="room-title-block">
-            <span className="logo-mark" aria-label="collab_ai" title="collab_ai">
-              <span />
-              <span />
-              <span />
-              <span />
-            </span>
-            <span className={`status status-${state.status}`}>{statusLabel}</span>
-          </div>
           <div className="room-chip" title={roomId}>
             <span className="room">Room {roomId.slice(0, 6)}...</span>
-            <button className="linkbtn" onClick={copyLink}>
-              {copied ? "Copied" : "Copy Link"}
-            </button>
           </div>
           {renaming ? (
             <form
@@ -431,12 +443,6 @@ export function RoomView({
         </div>
         <div className="bar-right">
           <div className="bar-control-group" aria-label="Room controls">
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-            <ContextGauge
-              context={state.context}
-              settings={state.settings}
-              cost={state.cost}
-            />
             {custom && (
               <button
                 className="wf-chip"
@@ -448,18 +454,6 @@ export function RoomView({
                 {leadOf(state.graph).name} +{teamCount}
               </button>
             )}
-            <span
-              className={`policy-chip policy-${state.policy.mode}`}
-              title={describePolicy(state.policy)}
-            >
-              {state.policy.mode === "read_only"
-                ? "Read-Only"
-                : state.policy.mode === "auto"
-                  ? "Auto-Accept"
-                  : state.policy.mode === "custom"
-                    ? "Custom"
-                    : "Ask First"}
-            </span>
             {state.workspace.kind !== "none" && (
               <span
                 className={`ws-chip ${state.workspace.online ? "ws-online" : "ws-offline"}`}
@@ -476,6 +470,130 @@ export function RoomView({
           </div>
           <div className="bar-presence" aria-label="People in room">
             <Presence users={state.users} me={me} />
+          </div>
+          <div className="settings-menu-wrap" ref={settingsMenuRef}>
+            <button
+              type="button"
+              className="settings-trigger"
+              aria-label="Open settings"
+              aria-expanded={showSettingsMenu}
+              onClick={() => setShowSettingsMenu((open) => !open)}
+            >
+              <span aria-hidden="true">⚙</span>
+            </button>
+            {showSettingsMenu && (
+              <div className="settings-menu" role="menu" aria-label="Settings">
+                <div className="settings-menu-title">Settings</div>
+
+                <section className="settings-menu-section">
+                  <div className="settings-menu-label">Agent</div>
+                  {maySettings && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowSettings(true);
+                      }}
+                    >
+                      Agent setup
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowSettingsMenu(false);
+                      setShowWorkflow(true);
+                    }}
+                  >
+                    {mayWorkflow ? "Workflow" : "View workflow"}
+                  </button>
+                  {mayPolicy && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowPermissions(true);
+                      }}
+                    >
+                      Permissions
+                    </button>
+                  )}
+                </section>
+
+                <section className="settings-menu-section">
+                  <div className="settings-menu-label">Room</div>
+                  {mayManage && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        openMembers();
+                      }}
+                    >
+                      Members
+                    </button>
+                  )}
+                  {mayInvite && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        openInvites();
+                      }}
+                    >
+                      Invite people
+                    </button>
+                  )}
+                  {mayPolicy && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowWorkspace(true);
+                      }}
+                    >
+                      Workspace
+                    </button>
+                  )}
+                </section>
+
+                <section className="settings-menu-section">
+                  <div className="settings-menu-label">Usage</div>
+                  <ContextGauge
+                    context={state.context}
+                    settings={state.settings}
+                    cost={state.cost}
+                  />
+                </section>
+
+                <section className="settings-menu-section">
+                  <div className="settings-menu-label">Appearance</div>
+                  <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setToolDisplay((d) =>
+                      d === "compact" ? "full" : d === "full" ? "hidden" : "compact",
+                    )}
+                  >
+                    Tool details: {toolDisplay === "compact" ? "Compact" : toolDisplay === "full" ? "Full" : "Hidden"}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setShowDocument((open) => !open)}
+                  >
+                    {showDocument ? "Hide document" : "Show document"}
+                  </button>
+                </section>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -603,71 +721,16 @@ export function RoomView({
             busy={state.status !== "idle"}
             readOnly={!maySpeak}
             modelLabel={modelLabel}
+            policyLabel={policyLabel}
+            statusLabel={statusLabel}
             quickActions={
               <>
-                {mayManage && (
-                  <button type="button" className="chat-action" onClick={openMembers}>
-                    Members
-                  </button>
-                )}
-                {mayInvite && (
-                  <button type="button" className="chat-action" onClick={openInvites}>
-                    Invite
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="chat-action"
-                  onClick={() =>
-                    setToolDisplay((d) =>
-                      d === "compact" ? "full" : d === "full" ? "hidden" : "compact",
-                    )
-                  }
-                  title={toolDisplayLabel}
-                >
-                  {toolDisplayLabel}
-                </button>
                 <button
                   type="button"
                   className="chat-action"
                   onClick={() => setShowWorkflow(true)}
                 >
                   {mayWorkflow ? "Workflow" : "View Workflow"}
-                </button>
-                {mayPolicy && (
-                  <button
-                    type="button"
-                    className="chat-action"
-                    onClick={() => setShowWorkspace(true)}
-                  >
-                    Workspace
-                  </button>
-                )}
-                {mayPolicy && (
-                  <button
-                    type="button"
-                    className="chat-action"
-                    onClick={() => setShowPermissions(true)}
-                  >
-                    Permissions
-                  </button>
-                )}
-                {maySettings && (
-                  <button
-                    type="button"
-                    className="chat-action"
-                    onClick={() => setShowSettings(true)}
-                  >
-                    Setup
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="chat-action"
-                  onClick={() => setShowDocument((open) => !open)}
-                  aria-pressed={showDocument}
-                >
-                  {showDocument ? "Hide Document" : "Show Document"}
                 </button>
               </>
             }
