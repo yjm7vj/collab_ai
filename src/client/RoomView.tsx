@@ -410,37 +410,7 @@ export function RoomView({
   return (
     <div className="app">
       <header className="bar">
-        <div className="bar-left">
-          <div className="room-chip" title={roomId}>
-            <span className="room">Room {roomId.slice(0, 6)}...</span>
-          </div>
-          {renaming ? (
-            <form
-              className="rename-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const input = e.currentTarget.elements.namedItem(
-                  "name",
-                ) as HTMLInputElement;
-                rename(input.value);
-              }}
-            >
-              <input
-                name="name"
-                autoFocus
-                defaultValue={displayName}
-                maxLength={32}
-                aria-label="Your name"
-                onBlur={() => setRenaming(false)}
-              />
-              <button type="submit">Save</button>
-            </form>
-          ) : (
-            <button className="namebtn" onClick={() => setRenaming(true)}>
-              {displayName}
-            </button>
-          )}
-        </div>
+        <div className="bar-left" />
         <div className="bar-right">
           <div className="bar-control-group" aria-label="Room controls">
             {custom && (
@@ -471,6 +441,32 @@ export function RoomView({
           <div className="bar-presence" aria-label="People in room">
             <Presence users={state.users} me={me} />
           </div>
+          {renaming ? (
+            <form
+              className="rename-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const input = e.currentTarget.elements.namedItem(
+                  "name",
+                ) as HTMLInputElement;
+                rename(input.value);
+              }}
+            >
+              <input
+                name="name"
+                autoFocus
+                defaultValue={displayName}
+                maxLength={32}
+                aria-label="Your name"
+                onBlur={() => setRenaming(false)}
+              />
+              <button type="submit">Save</button>
+            </form>
+          ) : (
+            <button className="namebtn" onClick={() => setRenaming(true)}>
+              Welcome, {displayName}
+            </button>
+          )}
           <div className="settings-menu-wrap" ref={settingsMenuRef}>
             <button
               type="button"
