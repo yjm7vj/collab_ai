@@ -62,9 +62,24 @@ import {
   type RoomSettings,
 } from "../shared/models";
 import {
+  DEFAULT_GRAPH,
+  delegatesOf,
+  describeGraph,
+  handoffChain,
+  leadOf,
+  promptOf,
+  reviewersOf,
+  sanitizeGraph,
+  type AgentNode,
+  type WorkflowGraph,
+} from "../shared/workflow";
+import {
   runModel,
+  runStage,
   runWorker,
+  stageSystemFor,
   summarize as summarizeConversation,
+  workerSystemFor,
   type ModelConfig,
   type Usage,
   type WorkerTask,
@@ -148,13 +163,6 @@ export class Room extends Agent<Env, RoomState> {
    * why this lives in memory rather than storage.
    */
   #pending = new PendingRequests();
-
-  /**
-   * This deployment's own origin, learned from the Worker on connect rather
-   * than configured. It is needed to build an OAuth redirect URI, and it is
-   * set with `headers.set` on the server side, so a client cannot forge it.
-   */
-  #origin = "";
 
   // ---------------------------------------------------------------- storage
 
@@ -265,6 +273,23 @@ export class Room extends Agent<Env, RoomState> {
   #setTurn(t: Turn | null) {
     if (t === null) this.#kvDel("turn");
     else this.#kvSet("turn", t);
+  }
+
+  /**
+   * This deployment's own origin, learned from the Worker on connect rather
+   * than configured. It is needed to build an OAuth redirect URI, and it is
+   * set with `headers.set` on the server side, so a client cannot forge it.
+   *
+   * It lives in storage rather than a field because a hibernated room wakes on
+   * a message without `onConnect` running again — an in-memory copy would be
+   * empty exactly when someone clicks "connect a repository" in a room that
+   * has been idle, which is most of the time.
+   */
+  #origin(): string {
+    return this.#kvGet<string>("origin", "");
+  }
+  #setOrigin(origin: string) {
+    this.#kvSet("origin", origin);
   }
 
   // -------------------------------------------------------------- transcript
@@ -708,7 +733,7 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     const origin = ctx.request.headers.get("x-room-origin");
-    if (origin) this.#origin = origin;
+    if (origin) this.#setOrigin(origin);
 
     // RoomState is rebuilt from initialState on a fresh instance, so the
     // stored visibility has to be read back or the room would report itself
@@ -809,6 +834,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onSettings(connection, msg.settings);
       case "policy":
         return this.#onPolicy(connection, msg.policy);
+      case "workflow":
+        return this.#onWorkflow(connection, msg.graph, msg.useCustom);
       case "compact":
         return this.#onCompact(connection);
       case "invite.create":
@@ -873,6 +900,66 @@ export class Room extends Agent<Env, RoomState> {
     this.setState({ ...this.state, settings });
     this.#system(
       `${name} changed the setup — ${describeSettings(settings, this.state.users.length)}`,
+    );
+  }
+
+  /**
+   * Replace the room's agent graph.
+   *
+   * Editors hold `workflow` without holding `settings`, which is the whole
+   * point of the split: shaping the team is design work, choosing which models
+   * get billed is a spend decision. So a frame from anyone without `settings`
+   * keeps every existing node on the model it already had, and any node they
+   * added runs on the room's configured worker model. The editor draws the
+   * shape; the owner decides what it costs.
+   *
+   * Held until idle for the same reason settings and policy are: the graph
+   * decides the system prompt, the tool list and the worker roster, and none of
+   * those may change between one round of a live turn and the next.
+   */
+  async #onWorkflow(connection: Connection, incoming: unknown, useCustom: boolean) {
+    if (
+      !this.#allow(
+        connection,
+        "workflow",
+        "You need to be an editor or above to change the workflow.",
+      )
+    )
+      return;
+    const name = this.#nameOf(connection);
+    if (!name) return;
+
+    if (this.state.status !== "idle") {
+      this.#refuse(connection, "The workflow can only change while the agent is idle.");
+      return;
+    }
+
+    let graph = sanitizeGraph(incoming);
+
+    if (!can(this.#roleOf(connection), "settings")) {
+      const before = this.#graph();
+      const settings = this.#settings();
+      graph = {
+        ...graph,
+        nodes: graph.nodes.map((n) => {
+          const prior = before.nodes.find((o) => o.id === n.id);
+          return { ...n, model: prior?.model ?? settings.workerModel };
+        }),
+      };
+      // Re-sanitize: a preserved model may be a worker model that has just been
+      // promoted into the lead slot, which sanitizeGraph is the thing that knows
+      // how to correct. Running it twice is cheap and keeps one source of truth.
+      graph = sanitizeGraph(graph);
+    }
+
+    const settings = this.#settings();
+    const workflow = useCustom ? "custom" : settings.workflow === "custom" ? "manager" : settings.workflow;
+
+    this.setState({ ...this.state, graph, settings: { ...settings, workflow } });
+    this.#system(
+      useCustom
+        ? `${name} changed the workflow — ${describeGraph(graph)}`
+        : `${name} saved the workflow and switched the room back to ${workflow}`,
     );
   }
 
@@ -1273,7 +1360,8 @@ export class Room extends Agent<Env, RoomState> {
       );
       return;
     }
-    if (!this.#origin) {
+    const origin = this.#origin();
+    if (!origin) {
       this.#refuse(connection, "Couldn't work out this server's address. Reload the page and try again.");
       return;
     }
@@ -1290,7 +1378,7 @@ export class Room extends Agent<Env, RoomState> {
 
     const url = repoAuthorizeUrl(
       this.env.GITHUB_OAUTH_CLIENT_ID,
-      `${this.#origin}/api/auth/github/callback`,
+      `${origin}/api/auth/github/callback`,
       token,
     );
 
@@ -1665,6 +1753,16 @@ export class Room extends Agent<Env, RoomState> {
     return this.state.policy ?? DEFAULT_POLICY;
   }
 
+  /** The room's agent graph, defaulted for rooms created before it existed. */
+  #graph(): WorkflowGraph {
+    return this.state.graph ?? DEFAULT_GRAPH;
+  }
+
+  /** The graph, but only when the room is actually running on it. */
+  #activeGraph(): WorkflowGraph | null {
+    return this.#settings().workflow === "custom" ? this.#graph() : null;
+  }
+
   /** Fold one response's token counts into the room's running ledger. */
   #recordUsage(usage: Usage | null | undefined) {
     if (!usage) return;
@@ -1796,28 +1894,56 @@ export class Room extends Agent<Env, RoomState> {
    */
   async #delegate(rawTasks: unknown, ctx: ToolCtx): Promise<{ ok: boolean; text: string }> {
     const settings = this.#settings();
+    const graph = this.#activeGraph();
+    const roster = graph ? delegatesOf(graph) : [];
     const cap = effectiveWorkerCap(settings, this.state.users.length);
 
     const parsed = Array.isArray(rawTasks) ? rawTasks : [];
-    const tasks: WorkerTask[] = parsed
-      .filter((t): t is WorkerTask => !!t && typeof (t as WorkerTask).title === "string")
-      .map((t) => ({
-        title: String(t.title).slice(0, 120),
-        instructions: String(t.instructions ?? ""),
-      }));
 
-    if (tasks.length === 0) {
-      return { ok: false, text: "delegate requires a non-empty `tasks` array." };
+    /** One accepted task, and the teammate it is addressed to under a graph. */
+    type Job = { task: WorkerTask; node: AgentNode | null; unknownAgent: string };
+
+    const jobs: Job[] = [];
+    for (const raw of parsed) {
+      const t = raw as { title?: unknown; instructions?: unknown; agent?: unknown };
+      if (!t || typeof t.title !== "string") continue;
+      const task: WorkerTask = {
+        title: t.title.slice(0, 120),
+        instructions: String(t.instructions ?? ""),
+      };
+      if (!graph) {
+        jobs.push({ task, node: null, unknownAgent: "" });
+        continue;
+      }
+      // The `agent` field is an enum in the tool definition, so a name that is
+      // not on the roster is a model error rather than a user one. The task is
+      // refused by name instead of being quietly reassigned: sending someone
+      // else's work to whichever teammate happened to be first would produce a
+      // plausible answer to a question nobody asked.
+      const wanted = typeof t.agent === "string" ? t.agent.trim().toLowerCase() : "";
+      const node = roster.find((n) => n.name.toLowerCase() === wanted) ?? null;
+      jobs.push({ task, node, unknownAgent: node ? "" : String(t.agent ?? "") });
     }
 
-    const dropped = Math.max(0, tasks.length - cap);
-    const accepted = tasks.slice(0, cap);
+    if (jobs.length === 0) {
+      return { ok: false, text: "delegate requires a non-empty `tasks` array." };
+    }
+    if (graph && roster.length === 0) {
+      return {
+        ok: false,
+        text: "This room has no teammates wired up to you. Do the work yourself.",
+      };
+    }
 
-    const statuses: WorkerStatus[] = accepted.map((t) => ({
+    const dropped = Math.max(0, jobs.length - cap);
+    const accepted = jobs.slice(0, cap);
+
+    const statuses: WorkerStatus[] = accepted.map((j) => ({
       id: crypto.randomUUID(),
-      title: t.title,
-      model: settings.workerModel,
+      title: j.task.title,
+      model: j.node?.model ?? settings.workerModel,
       state: "running",
+      agent: j.node?.name,
     }));
     this.setState({ ...this.state, workers: statuses });
 
@@ -1828,24 +1954,48 @@ export class Room extends Agent<Env, RoomState> {
       });
     };
 
+    const stage = (id: string, label: string | undefined) => {
+      this.setState({
+        ...this.state,
+        workers: this.state.workers.map((w) => (w.id === id ? { ...w, stage: label } : w)),
+      });
+    };
+
     const results = await Promise.all(
-      accepted.map(async (task, i) => {
+      accepted.map(async (job, i) => {
         const id = statuses[i]!.id;
+        const { task, node } = job;
+        const heading = node ? `## ${task.title} — ${node.name}` : `## ${task.title}`;
+
+        if (graph && !node) {
+          settle(id, "failed");
+          return (
+            `${heading}\n\n(no teammate named "${job.unknownAgent}". Your team is: ` +
+            `${roster.map((n) => n.name).join(", ")}. Re-send this task to one of them.)`
+          );
+        }
+
         try {
           const r = await runWorker(
             this.#config(),
             settings,
             task,
             ctx,
-            workerToolsFor(this.#policy(), this.#settings().workerModel),
+            workerToolsFor(this.#policy(), node?.model ?? settings.workerModel),
+            node && graph ? { model: node.model, system: workerSystemFor(graph, node) } : null,
           );
           r.usage.forEach((u) => this.#recordUsage(u));
+
+          const text =
+            graph && node ? await this.#runStages(graph, node, task.title, r.text, (l) => stage(id, l)) : r.text;
+
+          stage(id, undefined);
           settle(id, "done");
-          return `## ${task.title}\n\n${r.text}`;
+          return `${heading}\n\n${text}`;
         } catch (err) {
           settle(id, "failed");
           const msg = err instanceof Error ? err.message : String(err);
-          return `## ${task.title}\n\n(worker failed: ${msg})`;
+          return `${heading}\n\n(worker failed: ${msg})`;
         }
       }),
     );
@@ -1858,6 +2008,88 @@ export class Room extends Agent<Env, RoomState> {
       : "";
 
     return { ok: true, text: results.join("\n\n---\n\n") + notice };
+  }
+
+  /**
+   * Walk the review and handoff links hanging off one teammate's result.
+   *
+   * Reviews attach; handoffs replace. A node is reviewed by its own reviewers
+   * before its output moves down the chain, so a critique always refers to the
+   * text the critic actually read rather than to a later rewrite of it.
+   *
+   * `handoffChain` bounds the walk and drops cycles, so a graph drawn with a
+   * loop in it costs a fixed number of calls rather than running until the room
+   * runs out of money. A stage that throws is reported inline and does not take
+   * the teammate's own work down with it — a failed reviewer should not lose the
+   * research it was reviewing.
+   */
+  async #runStages(
+    graph: WorkflowGraph,
+    start: AgentNode,
+    title: string,
+    text: string,
+    onStage: (label: string | undefined) => void,
+  ): Promise<string> {
+    const cfg = this.#config();
+    const hops = [start, ...handoffChain(graph, start.id)];
+    const critiques: string[] = [];
+    let current = text;
+
+    for (let i = 0; i < hops.length; i++) {
+      const from = hops[i]!;
+      const body = `Task: ${title}\n\nWork by ${from.name}:\n\n${current}`;
+
+      for (const reviewer of reviewersOf(graph, from.id)) {
+        const link = graph.edges.find(
+          (e) => e.kind === "reviews" && e.from === from.id && e.to === reviewer.id,
+        );
+        onStage(`reviewed by ${reviewer.name}`);
+        try {
+          const out = await runStage(
+            cfg,
+            reviewer.model,
+            stageSystemFor("reviews", reviewer, from, link ? promptOf(link) : ""),
+            body,
+          );
+          this.#recordUsage(out.usage);
+          if (out.text) critiques.push(`**${reviewer.name} on ${from.name}:** ${out.text}`);
+        } catch (err) {
+          critiques.push(
+            `**${reviewer.name} on ${from.name}:** (review failed: ${
+              err instanceof Error ? err.message : String(err)
+            })`,
+          );
+        }
+      }
+
+      const next = hops[i + 1];
+      if (!next) break;
+
+      const link = graph.edges.find(
+        (e) => e.kind === "handoff" && e.from === from.id && e.to === next.id,
+      );
+      onStage(`handed to ${next.name}`);
+      try {
+        const out = await runStage(
+          cfg,
+          next.model,
+          stageSystemFor("handoff", next, from, link ? promptOf(link) : ""),
+          body,
+        );
+        this.#recordUsage(out.usage);
+        // An empty handoff keeps the upstream text rather than replacing good
+        // work with nothing.
+        if (out.text) current = out.text;
+      } catch (err) {
+        critiques.push(
+          `**${next.name} handoff failed:** ${err instanceof Error ? err.message : String(err)} ` +
+            `(you are seeing ${from.name}'s version)`,
+        );
+        break;
+      }
+    }
+
+    return critiques.length ? `${current}\n\n**Review notes**\n\n${critiques.join("\n\n")}` : current;
   }
 
   /** Drain the inbox into one user turn and hand it to the model. */
@@ -1909,15 +2141,18 @@ export class Room extends Agent<Env, RoomState> {
         // Map API content-block index -> index in the entry we render.
         const slots = new Map<number, number>();
 
+        const graph = this.#activeGraph();
         const { message, usage } = await runModel(
           this.#config(),
           this.#settings(),
+          graph,
           this.#convo(),
           toolsForRoom(
             this.#policy(),
             this.#settings().workflow,
             this.state.workspace.kind !== "none" && this.state.workspace.online,
-            this.#settings().agentModel,
+            graph ? leadOf(graph).model : this.#settings().agentModel,
+            graph ?? undefined,
           ),
           {
             onBlockStart: (index, type) => {

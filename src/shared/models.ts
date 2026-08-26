@@ -138,8 +138,16 @@ export function serverToolsFor(modelId: string): unknown[] {
 
 /* -------------------------------------------------------------- workflows */
 
-/** The orchestration mechanism. Presets are bundles of settings on top of these. */
-export type Workflow = "solo" | "manager";
+/**
+ * The orchestration mechanism. Presets are bundles of settings on top of these.
+ *
+ * `custom` hands the shape to the room's own agent graph (see shared/workflow.ts
+ * and `RoomState.graph`). The graph is deliberately NOT a field on RoomSettings:
+ * it is edited by a different set of people under a different capability, and
+ * keeping it beside `policy` on the room state rather than inside `settings`
+ * means one screen's Apply can never overwrite the other's work.
+ */
+export type Workflow = "solo" | "manager" | "custom";
 
 export type ScalingMode = "auto" | "fixed";
 
@@ -313,7 +321,8 @@ export function sanitizeSettings(input: unknown): RoomSettings {
   const raw = (input ?? {}) as Partial<RoomSettings>;
   const base = DEFAULT_SETTINGS;
 
-  const workflow: Workflow = raw.workflow === "solo" ? "solo" : "manager";
+  const workflow: Workflow =
+    raw.workflow === "solo" ? "solo" : raw.workflow === "custom" ? "custom" : "manager";
 
   const agent = MODELS.find((m) => m.id === raw.agentModel && m.canManage);
   const agentModel = agent?.id ?? base.agentModel;
@@ -447,6 +456,14 @@ export function addUsage(ledger: CostLedger, model: string, usage: UsageTokens):
 /** Short human summary for the transcript audit line. */
 export function describeSettings(s: RoomSettings, userCount: number): string {
   const agent = modelInfo(s.agentModel).label;
+  // In custom mode the models come from the graph's own nodes, so naming this
+  // room's agentModel here would report a model that is not the one running.
+  if (s.workflow === "custom") {
+    return `custom workflow · effort ${s.effort} · up to ${effectiveWorkerCap(
+      s,
+      userCount,
+    )} teammates at once (${s.scaling.mode})`;
+  }
   if (s.workflow === "solo") {
     return `solo · ${agent} · effort ${s.effort}${
       s.temperature === null ? "" : ` · temp ${s.temperature}`

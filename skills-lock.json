@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "VibeSec-Skill": {
+      "source": "BehiSecc/VibeSec-Skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1ecc71d212ca31e9cec683649adeff193ad1326f3d4eca24f618cb1a1c8457ee"
+    },
+    "unlazy": {
+      "source": "Leonxlnx/unlazy",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "1868bc455df98413f6d513022172ecfce9a560760f5bfe0d66074d5a99e9d6de"
+    }
+  }
+}

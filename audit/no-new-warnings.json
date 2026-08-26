@@ -1,0 +1,15 @@
+{
+  "baseRules": {
+    "side-tab": 3,
+    "overused-font": 1,
+    "layout-transition": 1
+  },
+  "nowRules": {
+    "overused-font": 1,
+    "layout-transition": 1
+  },
+  "regressions": [],
+  "improvements": [
+    "side-tab: 3 -> 0"
+  ]
+}

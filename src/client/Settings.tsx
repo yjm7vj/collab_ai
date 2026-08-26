@@ -104,10 +104,23 @@ export function SettingsPanel({
                 </button>
               ))}
             </div>
-            {activePreset === null && (
+            {/*
+              Two screens can set the room's workflow, so whichever one is not
+              in charge has to say so. Picking a preset here switches the room
+              off the drawn workflow, and someone who has not been told that
+              would read the models below as the ones answering the room when
+              they are not — the graph's own nodes are.
+            */}
+            {draft.workflow === "custom" ? (
               <p className="field-note">
-                Custom — These settings don't match a preset.
+                This room is running the workflow drawn on the Workflow screen, so the
+                agents and models below are not in use. Choosing a preset here switches
+                back to a built-in workflow.
               </p>
+            ) : (
+              activePreset === null && (
+                <p className="field-note">Custom — These settings don't match a preset.</p>
+              )
             )}
           </section>
 

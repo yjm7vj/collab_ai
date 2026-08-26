@@ -15,6 +15,7 @@ import {
   type RoomSettings,
 } from "./models";
 import { DEFAULT_POLICY, type AccessPolicy, type Role } from "./access";
+import { DEFAULT_GRAPH, type WorkflowGraph } from "./workflow";
 import { NO_WORKSPACE, type FsRequest, type FsResponse, type WorkspaceInfo, type WorkspaceKind } from "./workspace";
 
 export type Vote = "approve" | "deny";
@@ -107,6 +108,15 @@ export type RoomState = {
   settings: RoomSettings;
   /** What the agent may do unattended. Independent of what people may do. */
   policy: AccessPolicy;
+  /**
+   * The room's agent graph, used when `settings.workflow` is "custom".
+   *
+   * Synced to everyone rather than fetched on demand, unlike invites or members:
+   * the graph decides which models answer the room, so seeing it is part of
+   * knowing what you are talking to. Only holders of the `workflow` capability
+   * may change it.
+   */
+  graph: WorkflowGraph;
   /** How the room admits people. Everyone sees this; only the owner sets it. */
   visibility: RoomVisibility;
   /** The room's connected workspace, if any. Everyone sees this. */
@@ -127,6 +137,13 @@ export type WorkerStatus = {
   title: string;
   model: string;
   state: "running" | "done" | "failed";
+  /**
+   * Which teammate took this task, under a custom workflow. Absent in the
+   * built-in manager workflow, where every worker is the same anonymous one.
+   */
+  agent?: string;
+  /** What is happening to this result now — "reviewed by Critic". */
+  stage?: string;
 };
 
 export const INITIAL_ROOM_STATE: RoomState = {
@@ -137,6 +154,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   pending: [],
   settings: DEFAULT_SETTINGS,
   policy: DEFAULT_POLICY,
+  graph: DEFAULT_GRAPH,
   visibility: "invite",
   workspace: NO_WORKSPACE,
   github: NO_GITHUB,
@@ -241,6 +259,14 @@ export type ClientMsg =
   | { t: "settings"; settings: RoomSettings }
   /** Replace the room's agent-permission policy. Server re-validates. */
   | { t: "policy"; policy: AccessPolicy }
+  /**
+   * Replace the room's agent graph, and say whether the room should run on it.
+   *
+   * Carries `useCustom` rather than a whole RoomSettings because editors may
+   * hold `workflow` without holding `settings`: this frame can turn the custom
+   * workflow on and off and redraw the team, and can change nothing else.
+   */
+  | { t: "workflow"; graph: WorkflowGraph; useCustom: boolean }
   /** Compact the conversation now, rather than waiting for a threshold. */
   | { t: "compact" }
   /** Mint an invite. Owners and admins only; the server re-checks. */

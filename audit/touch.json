@@ -1,0 +1,524 @@
+{
+  "measuredRules": 28,
+  "underAA": 5,
+  "underAAA": 24,
+  "aaFailures": [
+    {
+      "selector": ".theme-toggle-thumb",
+      "line": 195,
+      "media": null,
+      "height": 12,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".theme-toggle-track",
+      "line": 185,
+      "media": null,
+      "height": 16,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".ws-repo-tag, .ws-repo-branch",
+      "line": 1625,
+      "media": null,
+      "height": 17.8,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".side-small-action",
+      "line": 466,
+      "media": null,
+      "height": 21,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".side-form-actions button",
+      "line": 585,
+      "media": null,
+      "height": 23,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    }
+  ],
+  "aaaFailures": [
+    {
+      "selector": ".theme-toggle-thumb",
+      "line": 195,
+      "media": null,
+      "height": 12,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".theme-toggle-track",
+      "line": 185,
+      "media": null,
+      "height": 16,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".ws-repo-tag, .ws-repo-branch",
+      "line": 1625,
+      "media": null,
+      "height": 17.8,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".side-small-action",
+      "line": 466,
+      "media": null,
+      "height": 21,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".side-form-actions button",
+      "line": 585,
+      "media": null,
+      "height": 23,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".rename-form input",
+      "line": 1272,
+      "media": null,
+      "height": 26,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".rename-form button",
+      "line": 1278,
+      "media": null,
+      "height": 26,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".icon",
+      "line": 974,
+      "media": null,
+      "height": 26.8,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".chat-action",
+      "line": 815,
+      "media": null,
+      "height": 27,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".doc-close",
+      "line": 882,
+      "media": null,
+      "height": 28,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".linkbtn",
+      "line": 1219,
+      "media": null,
+      "height": 28,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".tool-head",
+      "line": 1517,
+      "media": null,
+      "height": 29.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-icon-btn",
+      "line": 419,
+      "media": null,
+      "height": 30,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-project-form input",
+      "line": 574,
+      "media": null,
+      "height": 30.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".doc-reopen",
+      "line": 913,
+      "media": null,
+      "height": 31,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".theme-toggle",
+      "line": 158,
+      "media": null,
+      "height": 32,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-project-head",
+      "line": 491,
+      "media": null,
+      "height": 32,
+      "basis": "min-height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-empty button",
+      "line": 616,
+      "media": null,
+      "height": 33.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-item",
+      "line": 529,
+      "media": null,
+      "height": 34,
+      "basis": "min-height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".namebtn",
+      "line": 1239,
+      "media": null,
+      "height": 34,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": "button",
+      "line": 84,
+      "media": null,
+      "height": 39.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": "select",
+      "line": 1119,
+      "media": null,
+      "height": 41.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": "input, textarea",
+      "line": 97,
+      "media": null,
+      "height": 43.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".signin-providers button",
+      "line": 1664,
+      "media": null,
+      "height": 43.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    }
+  ],
+  "all": [
+    {
+      "selector": ".theme-toggle-thumb",
+      "line": 195,
+      "media": null,
+      "height": 12,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".theme-toggle-track",
+      "line": 185,
+      "media": null,
+      "height": 16,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".ws-repo-tag, .ws-repo-branch",
+      "line": 1625,
+      "media": null,
+      "height": 17.8,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".side-small-action",
+      "line": 466,
+      "media": null,
+      "height": 21,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".side-form-actions button",
+      "line": 585,
+      "media": null,
+      "height": 23,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": false
+    },
+    {
+      "selector": ".rename-form input",
+      "line": 1272,
+      "media": null,
+      "height": 26,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".rename-form button",
+      "line": 1278,
+      "media": null,
+      "height": 26,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".icon",
+      "line": 974,
+      "media": null,
+      "height": 26.8,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".chat-action",
+      "line": 815,
+      "media": null,
+      "height": 27,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".doc-close",
+      "line": 882,
+      "media": null,
+      "height": 28,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".linkbtn",
+      "line": 1219,
+      "media": null,
+      "height": 28,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".tool-head",
+      "line": 1517,
+      "media": null,
+      "height": 29.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-icon-btn",
+      "line": 419,
+      "media": null,
+      "height": 30,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-project-form input",
+      "line": 574,
+      "media": null,
+      "height": 30.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".doc-reopen",
+      "line": 913,
+      "media": null,
+      "height": 31,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".theme-toggle",
+      "line": 158,
+      "media": null,
+      "height": 32,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-project-head",
+      "line": 491,
+      "media": null,
+      "height": 32,
+      "basis": "min-height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-empty button",
+      "line": 616,
+      "media": null,
+      "height": 33.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-item",
+      "line": 529,
+      "media": null,
+      "height": 34,
+      "basis": "min-height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".namebtn",
+      "line": 1239,
+      "media": null,
+      "height": 34,
+      "basis": "height",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": "button",
+      "line": 84,
+      "media": null,
+      "height": 39.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": "select",
+      "line": 1119,
+      "media": null,
+      "height": 41.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": "input, textarea",
+      "line": 97,
+      "media": null,
+      "height": 43.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".signin-providers button",
+      "line": 1664,
+      "media": null,
+      "height": 43.3,
+      "basis": "padding+text",
+      "meetsAAA": false,
+      "meetsAA": true
+    },
+    {
+      "selector": ".side-room-card",
+      "line": 472,
+      "media": null,
+      "height": 45.3,
+      "basis": "padding+text",
+      "meetsAAA": true,
+      "meetsAA": true
+    },
+    {
+      "selector": ".preset",
+      "line": 1086,
+      "media": null,
+      "height": 45.3,
+      "basis": "padding+text",
+      "meetsAAA": true,
+      "meetsAA": true
+    },
+    {
+      "selector": ".policy-mode-opt",
+      "line": 1405,
+      "media": null,
+      "height": 49.3,
+      "basis": "padding+text",
+      "meetsAAA": true,
+      "meetsAA": true
+    },
+    {
+      "selector": ".composer textarea",
+      "line": 829,
+      "media": null,
+      "height": 54,
+      "basis": "min-height",
+      "meetsAAA": true,
+      "meetsAA": true
+    }
+  ]
+}

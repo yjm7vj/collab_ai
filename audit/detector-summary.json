@@ -1,0 +1,168 @@
+{
+  "totalFindings": 49,
+  "blockingCount": 5,
+  "advisoryCount": 44,
+  "filesWithFindings": [
+    "styles.css"
+  ],
+  "byRule": {
+    "side-tab": {
+      "count": 3,
+      "severity": "warning",
+      "category": "slop",
+      "lines": [
+        720,
+        721,
+        723
+      ]
+    },
+    "overused-font": {
+      "count": 1,
+      "severity": "warning",
+      "category": "slop",
+      "lines": [
+        1
+      ]
+    },
+    "layout-transition": {
+      "count": 1,
+      "severity": "warning",
+      "category": "quality",
+      "lines": [
+        955
+      ]
+    },
+    "design-system-font-size": {
+      "count": 26,
+      "severity": "advisory",
+      "category": "quality",
+      "lines": [
+        135,
+        144,
+        308,
+        337,
+        428,
+        500,
+        551,
+        576,
+        604,
+        644,
+        699,
+        748,
+        873,
+        906,
+        911,
+        1051,
+        1094,
+        1103,
+        1203,
+        1287,
+        1338,
+        1425,
+        1441,
+        1485,
+        1623,
+        1676
+      ]
+    },
+    "design-system-radius": {
+      "count": 17,
+      "severity": "advisory",
+      "category": "quality",
+      "lines": [
+        267,
+        383,
+        507,
+        520,
+        772,
+        783,
+        832,
+        888,
+        919,
+        942,
+        1114,
+        1222,
+        1362,
+        1376,
+        1413,
+        1519,
+        1587
+      ]
+    },
+    "design-system-color": {
+      "count": 1,
+      "severity": "advisory",
+      "category": "quality",
+      "lines": [
+        295
+      ]
+    }
+  },
+  "blocking": [
+    {
+      "antipattern": "side-tab",
+      "name": "Side-tab accent border",
+      "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+      "severity": "warning",
+      "category": "slop",
+      "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+      "line": 720,
+      "snippet": "border-left: 3px solid var(--ok)",
+      "importedBy": [
+        "main.tsx"
+      ]
+    },
+    {
+      "antipattern": "side-tab",
+      "name": "Side-tab accent border",
+      "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+      "severity": "warning",
+      "category": "slop",
+      "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+      "line": 721,
+      "snippet": "border-left: 3px solid var(--bad)",
+      "importedBy": [
+        "main.tsx"
+      ]
+    },
+    {
+      "antipattern": "side-tab",
+      "name": "Side-tab accent border",
+      "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+      "severity": "warning",
+      "category": "slop",
+      "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+      "line": 723,
+      "snippet": "border-left: 3px solid var(--accent)",
+      "importedBy": [
+        "main.tsx"
+      ]
+    },
+    {
+      "antipattern": "overused-font",
+      "name": "Overused font",
+      "description": "Inter, Roboto, Fraunces, Geist, Plus Jakarta Sans, and Space Grotesk are used on so many sites they no longer feel distinctive. Each new wave of AI-generated UIs converges on the same handful of faces. Choose a face that gives your interface personality.",
+      "severity": "warning",
+      "category": "slop",
+      "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+      "line": 1,
+      "snippet": "Google Fonts: inter",
+      "importedBy": [
+        "main.tsx"
+      ]
+    },
+    {
+      "antipattern": "layout-transition",
+      "name": "Layout property animation",
+      "description": "Animating width, height, padding, or margin causes layout thrash and janky performance. Use transform and opacity instead, or grid-template-rows for height animations.",
+      "severity": "warning",
+      "category": "quality",
+      "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+      "line": 955,
+      "snippet": "transition: width",
+      "importedBy": [
+        "main.tsx"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "priorLiterals": [
+    "#2d96ee",
+    "#1683e8",
+    "#7dc6ff"
+  ],
+  "stillLiteral": [],
+  "anyLiteral": [],
+  "tokenRefs": [
+    "logo-mid",
+    "logo-key",
+    "logo-lift"
+  ],
+  "tintChecks": [
+    {
+      "token": "--logo-mid",
+      "theme": "light",
+      "ratio": 4.03,
+      "pass": true
+    },
+    {
+      "token": "--logo-mid",
+      "theme": "dark",
+      "ratio": 5.42,
+      "pass": true
+    },
+    {
+      "token": "--logo-key",
+      "theme": "light",
+      "ratio": 5.01,
+      "pass": true
+    },
+    {
+      "token": "--logo-key",
+      "theme": "dark",
+      "ratio": 6.73,
+      "pass": true
+    },
+    {
+      "token": "--logo-lift",
+      "theme": "light",
+      "ratio": 8.03,
+      "pass": true
+    },
+    {
+      "token": "--logo-lift",
+      "theme": "dark",
+      "ratio": 10.79,
+      "pass": true
+    }
+  ]
+}

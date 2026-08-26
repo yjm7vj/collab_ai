@@ -136,19 +136,24 @@ export function ContextGauge({
 
 /** Delegated subtasks in flight, so the room can watch the fan-out. */
 export function WorkerStrip({ workers }: { workers: WorkerStatus[] }) {
-  const model = workers[0] ? modelInfo(workers[0].model).label : "";
+  // A custom workflow can put every task on a different model, so the header
+  // names all of them rather than reporting the first one as if it spoke for
+  // the fan-out.
+  const models = [...new Set(workers.map((w) => modelInfo(w.model).label))].join(", ");
   const done = workers.filter((w) => w.state !== "running").length;
   return (
     <div className="workers">
       <div className="workers-head">
         {done}/{workers.length} Delegated Tasks
-        <span className="hint">Running On {model}</span>
+        <span className="hint">Running On {models}</span>
       </div>
       <div className="workers-list">
         {workers.map((w) => (
           <div key={w.id} className={`worker worker-${w.state}`}>
             <span className="worker-dot" />
+            {w.agent && <span className="worker-agent">{w.agent}</span>}
             <span className="worker-title">{w.title}</span>
+            {w.stage && <span className="worker-stage">{w.stage}</span>}
           </div>
         ))}
       </div>

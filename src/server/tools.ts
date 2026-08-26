@@ -9,7 +9,8 @@
  */
 
 import { resolveTools, type AccessPolicy, type ToolName } from "../shared/access";
-import { serverToolsFor } from "../shared/models";
+import { serverToolsFor, type Workflow } from "../shared/models";
+import { delegatesOf, type WorkflowGraph } from "../shared/workflow";
 
 export type ToolCtx = {
   getDoc(): string;
@@ -65,6 +66,60 @@ const DELEGATE_DEF = {
     required: ["tasks"],
   },
 };
+
+/**
+ * `delegate`, narrowed to the teammates a custom graph actually wired up.
+ *
+ * The roster goes in as an `enum` rather than as prose in the description: an
+ * enum is the only part of a tool definition the model cannot talk itself out
+ * of, and a task addressed to a teammate that is not on the canvas has nowhere
+ * to run. The per-teammate blurb still goes in the description, because the
+ * model needs to know what each one is FOR, not merely that it exists.
+ */
+export function delegateDefFor(graph: WorkflowGraph) {
+  const roster = delegatesOf(graph);
+  const names = roster.map((n) => n.name);
+  const lines = roster
+    .map((n) => `- ${n.name}: ${n.prompt.trim().split("\n")[0] || "no brief given"}`)
+    .join("\n");
+
+  return {
+    name: "delegate",
+    description:
+      "Hand independent subtasks to your teammates; send them all in one call " +
+      "so they run at the same time. Name the teammate in each task's `agent` " +
+      "field. Teammates are read-only and share none of your context, so write " +
+      "self-contained briefs. Tasks beyond the room's worker cap are dropped.\n\n" +
+      `Your team:\n${lines}`,
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        tasks: {
+          type: "array",
+          description: "Independent subtasks to run in parallel.",
+          items: {
+            type: "object",
+            properties: {
+              agent: {
+                type: "string",
+                enum: names,
+                description: "Which teammate takes this task.",
+              },
+              title: { type: "string", description: "Short label shown to the room." },
+              instructions: {
+                type: "string",
+                description:
+                  "Self-contained brief: question, constraints, and expected output.",
+              },
+            },
+            required: ["agent", "title", "instructions"],
+          },
+        },
+      },
+      required: ["tasks"],
+    },
+  };
+}
 
 /**
  * Anthropic custom tool definitions.
@@ -281,11 +336,21 @@ function toolName(def: unknown): string {
  */
 export function toolsFor(
   policy: AccessPolicy,
-  workflow: "solo" | "manager",
+  workflow: Workflow,
   modelId: string,
+  graph?: WorkflowGraph,
 ): unknown[] {
   const decisions = resolveTools(policy);
-  const base = workflow === "manager" ? MANAGER_TOOLS : AGENT_TOOLS;
+  // A custom graph with nothing wired to the lead is a solo room, and a lead
+  // handed a delegate tool with an empty roster would keep trying to use it.
+  const base =
+    workflow === "custom"
+      ? graph && delegatesOf(graph).length > 0
+        ? [...TOOL_DEFS, delegateDefFor(graph)]
+        : AGENT_TOOLS
+      : workflow === "manager"
+        ? MANAGER_TOOLS
+        : AGENT_TOOLS;
   const withServerTools = [...base, ...serverToolsFor(modelId)];
   return withServerTools.filter((def) => {
     const name = toolName(def);
@@ -310,11 +375,12 @@ const WORKSPACE_TOOL_NAMES = new Set([
  */
 export function toolsForRoom(
   policy: AccessPolicy,
-  workflow: "solo" | "manager",
+  workflow: Workflow,
   workspaceOnline: boolean,
   modelId: string,
+  graph?: WorkflowGraph,
 ): unknown[] {
-  const base = toolsFor(policy, workflow, modelId);
+  const base = toolsFor(policy, workflow, modelId, graph);
   if (workspaceOnline) return base;
   return base.filter((def) => !WORKSPACE_TOOL_NAMES.has(toolName(def)));
 }
@@ -373,6 +439,21 @@ export function summarize(name: string, input: any): string {
     }
     case "delete_file":
       return `Delete ${String(input?.path ?? "")}`;
+    case "delegate": {
+      const tasks: any[] = Array.isArray(input?.tasks) ? input.tasks : [];
+      if (tasks.length === 0) return "Delegate nothing";
+      // Names the teammate as well as the task: under a custom graph the choice
+      // of who does the work is the interesting half of what is being approved.
+      const shown = tasks
+        .slice(0, 3)
+        .map((t) =>
+          t?.agent ? `${String(t.agent)}: ${String(t?.title ?? "")}` : String(t?.title ?? ""),
+        );
+      const more = tasks.length - shown.length;
+      return `Delegate ${tasks.length} task${tasks.length === 1 ? "" : "s"} — ${shown.join(
+        "; ",
+      )}${more > 0 ? `; +${more} more` : ""}`;
+    }
     default:
       return `Run ${name}`;
   }

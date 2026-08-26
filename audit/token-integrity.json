@@ -1,0 +1,11 @@
+{
+  "lightTokenCount": 45,
+  "darkOverrideCount": 42,
+  "baselineTokenCount": 32,
+  "currentTokenCount": 45,
+  "missingInDark": [],
+  "extraInDark": [],
+  "unresolved": [],
+  "unused": [],
+  "dropped": []
+}

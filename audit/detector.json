@@ -1,0 +1,683 @@
+[
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 720,
+    "snippet": "border-left: 3px solid var(--ok)",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 721,
+    "snippet": "border-left: 3px solid var(--bad)",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "side-tab",
+    "name": "Side-tab accent border",
+    "description": "Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 723,
+    "snippet": "border-left: 3px solid var(--accent)",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "overused-font",
+    "name": "Overused font",
+    "description": "Inter, Roboto, Fraunces, Geist, Plus Jakarta Sans, and Space Grotesk are used on so many sites they no longer feel distinctive. Each new wave of AI-generated UIs converges on the same handful of faces. Choose a face that gives your interface personality.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1,
+    "snippet": "Google Fonts: inter",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "layout-transition",
+    "name": "Layout property animation",
+    "description": "Animating width, height, padding, or margin causes layout thrash and janky performance. Use transform and opacity instead, or grid-template-rows for height animations.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 955,
+    "snippet": "transition: width",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 135,
+    "snippet": "font-size: 22px is off the DESIGN.md type ramp",
+    "ignoreValue": "22px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 144,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 267,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 295,
+    "snippet": "Undocumented color #7dc6ff is outside DESIGN.md colors",
+    "ignoreValue": "#7dc6ff",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 308,
+    "snippet": "font-size: 10px is off the DESIGN.md type ramp",
+    "ignoreValue": "10px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 337,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 383,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 428,
+    "snippet": "font-size: 18px is off the DESIGN.md type ramp",
+    "ignoreValue": "18px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 500,
+    "snippet": "font-size: 14px is off the DESIGN.md type ramp",
+    "ignoreValue": "14px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 507,
+    "snippet": "border-radius: 2px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "2px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 520,
+    "snippet": "border-radius: 2px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "2px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 551,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 576,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 604,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 644,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 699,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 748,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 772,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 783,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 832,
+    "snippet": "border-radius: 14px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "14px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 873,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 888,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 906,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 911,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 919,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 942,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1051,
+    "snippet": "font-size: 16px is off the DESIGN.md type ramp",
+    "ignoreValue": "16px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1094,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1103,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1114,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1203,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1222,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1287,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1338,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1362,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1376,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1413,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1425,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1441,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1485,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1519,
+    "snippet": "border-radius: 6px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "6px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-radius",
+    "name": "Radius outside DESIGN.md",
+    "description": "A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1587,
+    "snippet": "border-radius: 8px is outside the DESIGN.md rounded scale",
+    "ignoreValue": "8px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1623,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "C:\\Users\\brahm\\repos\\collab_ai\\src\\client\\styles.css",
+    "line": 1676,
+    "snippet": "font-size: 13px is off the DESIGN.md type ramp",
+    "ignoreValue": "13px",
+    "importedBy": [
+      "main.tsx"
+    ]
+  }
+]

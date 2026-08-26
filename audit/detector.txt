@@ -1,0 +1,102 @@
+
+C:\Users\brahm\repos\collab_ai\src\client\styles.css (imported by main.tsx)
+  line 720: [side-tab] border-left: 3px solid var(--ok)
+    → Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.
+  line 721: [side-tab] border-left: 3px solid var(--bad)
+    → Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.
+  line 723: [side-tab] border-left: 3px solid var(--accent)
+    → Thick colored border on one side of a card — the most recognizable tell of AI-generated UIs. Use a subtler accent or remove it entirely.
+  line 1: [overused-font] Google Fonts: inter
+    → Inter, Roboto, Fraunces, Geist, Plus Jakarta Sans, and Space Grotesk are used on so many sites they no longer feel distinctive. Each new wave of AI-generated UIs converges on the same handful of faces. Choose a face that gives your interface personality.
+  line 955: [layout-transition] transition: width
+    → Animating width, height, padding, or margin causes layout thrash and janky performance. Use transform and opacity instead, or grid-template-rows for height animations.
+  line 135: [design-system-font-size] font-size: 22px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 144: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 267: [design-system-radius] border-radius: 6px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 295: [design-system-color] Undocumented color #7dc6ff is outside DESIGN.md colors
+    → A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.
+  line 308: [design-system-font-size] font-size: 10px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 337: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 383: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 428: [design-system-font-size] font-size: 18px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 500: [design-system-font-size] font-size: 14px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 507: [design-system-radius] border-radius: 2px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 520: [design-system-radius] border-radius: 2px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 551: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 576: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 604: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 644: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 699: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 748: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 772: [design-system-radius] border-radius: 6px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 783: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 832: [design-system-radius] border-radius: 14px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 873: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 888: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 906: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 911: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 919: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 942: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1051: [design-system-font-size] font-size: 16px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1094: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1103: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1114: [design-system-radius] border-radius: 6px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1203: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1222: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1287: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1338: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1362: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1376: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1413: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1425: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1441: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1485: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1519: [design-system-radius] border-radius: 6px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1587: [design-system-radius] border-radius: 8px is outside the DESIGN.md rounded scale
+    → A border-radius value is outside the DESIGN.md rounded scale. Use a documented radius token or update the design system if the new shape is intentional.
+  line 1623: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+  line 1676: [design-system-font-size] font-size: 13px is off the DESIGN.md type ramp
+    → A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.
+
+49 anti-patterns found.

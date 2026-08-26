@@ -14,6 +14,17 @@ import type {
   ToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
 import { modelInfo, type RoomSettings } from "../shared/models";
+import {
+  customLinksFor,
+  delegatesOf,
+  handoffChain,
+  leadOf,
+  promptOf,
+  reviewersOf,
+  type AgentNode,
+  type RelationKind,
+  type WorkflowGraph,
+} from "../shared/workflow";
 import { execute, type ToolCtx } from "./tools";
 
 export const SYSTEM_PROMPT = `You are the shared agent of a live room that several people are talking to at the same time. This is not a private one-to-one chat, and that changes how you should behave.
@@ -82,6 +93,152 @@ const WORKER_SYSTEM = `You are a worker handling one self-contained research tas
 Answer exactly the task you are given, and nothing beyond it. Search and read as much as you need, then report concise findings. Give a source URL or document location for every factual claim. If you could not find something, say so explicitly rather than guessing — a clear "not found" is more useful to the coordinator than a plausible invention.
 
 Your reply goes straight back to the coordinator, not to a human. Skip greetings, preamble, and offers of further help.`;
+
+/* ------------------------------------------------------ custom workflows */
+
+/**
+ * The lead's briefing under a custom graph.
+ *
+ * This replaces MANAGER_ADDENDUM rather than adding to it. The addendum
+ * describes an anonymous pool of interchangeable workers, which is exactly what
+ * a drawn graph is not — and two descriptions of the same team, one of them
+ * wrong, is worse than either alone.
+ *
+ * Everything here is derived from the graph, so the prompt and the code that
+ * runs the fan-out cannot drift apart: if a link is not one that `delegatesOf`,
+ * `reviewersOf` or `handoffChain` returns, the lead is never told about it.
+ */
+export function leadSystemFor(graph: WorkflowGraph): string {
+  const lead = leadOf(graph);
+  const roster = delegatesOf(graph);
+  const own = lead.prompt.trim();
+  const customs = customLinksFor(graph, lead.id);
+  const others = customs.length ? `\n\nOther links the room drew:\n- ${customs.join("\n- ")}` : "";
+
+  const head =
+    `\n\n# Your team\n\n` +
+    `This room runs a workflow its members drew. You are **${lead.name}**, and you are the ` +
+    `only agent in it the room can hear — everything your teammates produce reaches people ` +
+    `through you.` +
+    (own ? `\n\nYour brief, written by the room:\n\n${own}` : "");
+
+  if (roster.length === 0) {
+    return (
+      head +
+      `\n\nNo teammates are wired up to you, so you do this work yourself. Do not describe ` +
+      `work as delegated.` +
+      others
+    );
+  }
+
+  const cards = roster.map((n) => {
+    const link = graph.edges.find(
+      (e) => e.kind === "delegates" && e.from === graph.leadId && e.to === n.id,
+    );
+    const lines = [`## ${n.name} — ${modelInfo(n.model).label}`];
+    if (n.prompt.trim()) lines.push(n.prompt.trim());
+    if (link) lines.push(`How to brief it: ${promptOf(link)}`);
+
+    for (const r of reviewersOf(graph, n.id)) {
+      const e = graph.edges.find((x) => x.kind === "reviews" && x.from === n.id && x.to === r.id);
+      lines.push(
+        `Reviewed by ${r.name} (${modelInfo(r.model).label}), whose critique is attached to ` +
+          `the result you get${e ? ` — ${promptOf(e)}` : ""}`,
+      );
+    }
+
+    const chain = handoffChain(graph, n.id);
+    if (chain.length) {
+      const last = chain[chain.length - 1]!.name;
+      lines.push(
+        `Handed off to ${chain.map((h) => h.name).join(", then ")} — what reaches you is the ` +
+          `version by ${last}, not by ${n.name}.`,
+      );
+    }
+
+    for (const c of customLinksFor(graph, n.id)) lines.push(`Also: ${c}`);
+    return lines.join("\n");
+  });
+
+  return (
+    head +
+    "\n\nYou have a `delegate` tool. Name the teammate in each task's `agent` field, and send " +
+    "every task in one call so they run at the same time.\n\n" +
+    cards.join("\n\n") +
+    `\n\nPick the teammate whose brief fits the task; do not send everything to one of them ` +
+    `because it is first on the list. Teammates are read-only, cannot delegate further, and ` +
+    `share none of this conversation — write each task so it stands alone. Verify what comes ` +
+    `back before you use it, and say plainly when a result looks thin.` +
+    others
+  );
+}
+
+/** One teammate's own system prompt, from its node and the links into it. */
+export function workerSystemFor(graph: WorkflowGraph, node: AgentNode): string {
+  const parts = [WORKER_SYSTEM, `You are **${node.name}**.`];
+  if (node.prompt.trim()) parts.push(node.prompt.trim());
+
+  const reviewers = reviewersOf(graph, node.id);
+  if (reviewers.length) {
+    parts.push(
+      `Your output is read by ${reviewers
+        .map((r) => r.name)
+        .join(" and ")} before it reaches the lead. Make your sources checkable.`,
+    );
+  }
+
+  const chain = handoffChain(graph, node.id);
+  if (chain.length) {
+    parts.push(
+      `${chain[0]!.name} takes your output and produces the finished version, so get the ` +
+        `substance right and leave the polish to them.`,
+    );
+  }
+
+  const customs = customLinksFor(graph, node.id);
+  if (customs.length) parts.push(`Links the room drew:\n- ${customs.join("\n- ")}`);
+
+  return parts.join("\n\n");
+}
+
+/**
+ * A review or handoff stage's system prompt.
+ *
+ * Stages get no tools and one shot: they are a pass over text that already
+ * exists, not another agent loop. Keeping them tool-free is what bounds the
+ * cost of a graph — a room can add reviewers without each one turning into an
+ * unbounded research run of its own.
+ */
+export function stageSystemFor(
+  kind: Extract<RelationKind, "reviews" | "handoff">,
+  stage: AgentNode,
+  source: AgentNode,
+  instruction: string,
+): string {
+  const role =
+    kind === "reviews"
+      ? `You are **${stage.name}**, reviewing work produced by ${source.name}. Your notes go to ` +
+        `the coordinating agent alongside that work — you are not rewriting it, and you are not ` +
+        `talking to a person.`
+      : `You are **${stage.name}**. ${source.name} produced the work below and handed it to you. ` +
+        `What you return replaces it entirely, so return the finished thing and nothing else — ` +
+        `no preamble, and no notes about what you changed.`;
+  return [role, stage.prompt.trim(), instruction.trim()].filter(Boolean).join("\n\n");
+}
+
+/** Which model and system prompt the room's own turn runs on. */
+export function leadPlanFor(
+  settings: RoomSettings,
+  graph: WorkflowGraph | null,
+): { model: string; system: string } {
+  if (settings.workflow === "custom" && graph) {
+    return { model: leadOf(graph).model, system: SYSTEM_PROMPT + leadSystemFor(graph) };
+  }
+  return {
+    model: settings.agentModel,
+    system: settings.workflow === "manager" ? SYSTEM_PROMPT + MANAGER_ADDENDUM : SYSTEM_PROMPT,
+  };
+}
 
 export type ModelConfig = { apiKey: string };
 
@@ -176,18 +333,22 @@ function readUsage(message: Message, model: string): Usage {
 export async function runModel(
   cfg: ModelConfig,
   settings: RoomSettings,
+  graph: WorkflowGraph | null,
   messages: MessageParam[],
   tools: unknown[],
   hooks: StreamHooks,
 ): Promise<ModelResult> {
   if (cfg.apiKey === "mock") return mockTurn(settings, messages, hooks);
 
-  const manager = settings.workflow === "manager";
+  // Under a custom graph the room runs on the lead node's model, not on
+  // `agentModel` — that field is what the built-in workflows use, and reading it
+  // here would prompt and bill a model nobody put on the canvas.
+  const plan = leadPlanFor(settings, graph);
   const params = buildParams(
-    settings.agentModel,
+    plan.model,
     settings.effort,
     settings.temperature,
-    manager ? SYSTEM_PROMPT + MANAGER_ADDENDUM : SYSTEM_PROMPT,
+    plan.system,
     tools,
     messages,
   );
@@ -206,7 +367,7 @@ export async function runModel(
   }
 
   const message = await stream.finalMessage();
-  return { message, usage: readUsage(message, settings.agentModel) };
+  return { message, usage: readUsage(message, plan.model) };
 }
 
 /* -------------------------------------------------------------- workers */
@@ -226,6 +387,11 @@ export async function runWorker(
   task: WorkerTask,
   ctx: ToolCtx,
   tools: unknown[],
+  /**
+   * Which teammate this is, under a custom graph. Null means the built-in
+   * manager workflow, where every worker is the same anonymous one.
+   */
+  agent: { model: string; system: string } | null = null,
   maxRounds = 6,
 ): Promise<WorkerResult> {
   if (cfg.apiKey === "mock") {
@@ -242,18 +408,13 @@ export async function runWorker(
   ];
   const usage: Usage[] = [];
   const api = client(cfg);
+  const model = agent?.model ?? settings.workerModel;
+  const system = agent?.system ?? WORKER_SYSTEM;
 
   for (let round = 0; round < maxRounds; round++) {
-    const params = buildParams(
-      settings.workerModel,
-      "medium",
-      settings.temperature,
-      WORKER_SYSTEM,
-      tools,
-      messages,
-    );
+    const params = buildParams(model, "medium", settings.temperature, system, tools, messages);
     const message = (await api.messages.create(params as never)) as Message;
-    usage.push(readUsage(message, settings.workerModel));
+    usage.push(readUsage(message, model));
     messages.push({ role: "assistant", content: message.content });
 
     if (message.stop_reason === "pause_turn") continue;
@@ -288,6 +449,40 @@ export async function runWorker(
     text: text || "(worker produced no findings)",
     usage,
   };
+}
+
+/* --------------------------------------------------------------- stages */
+
+/**
+ * One tool-free pass over text a teammate already produced — a review, or a
+ * handoff rewrite.
+ *
+ * Deliberately one call with no tools and no loop. A stage that could search
+ * and fetch would be a second research run wearing a reviewer's name, and a
+ * room adding a third reviewer to its canvas would be tripling a bill it has no
+ * way to see coming. The bound is the point.
+ */
+export async function runStage(
+  cfg: ModelConfig,
+  model: string,
+  system: string,
+  input: string,
+): Promise<{ text: string; usage: Usage | null }> {
+  if (cfg.apiKey === "mock") {
+    await new Promise((r) => setTimeout(r, 80));
+    return { text: "(mock stage output)", usage: null };
+  }
+
+  const params = buildParams(model, "medium", null, system, [], [
+    { role: "user", content: input },
+  ]);
+  const message = (await client(cfg).messages.create(params as never)) as Message;
+  const text = message.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { text: string }).text)
+    .join("\n")
+    .trim();
+  return { text, usage: readUsage(message, model) };
 }
 
 /* ----------------------------------------------------------- compaction */

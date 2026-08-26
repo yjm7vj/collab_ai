@@ -13,6 +13,7 @@ import {
   type Vote,
 } from "../shared/protocol";
 import { modelInfo, type RoomSettings } from "../shared/models";
+import { delegatesOf, leadOf, type WorkflowGraph } from "../shared/workflow";
 import { asRole, can, canSeeFileContents, describePolicy, type Role } from "../shared/access";
 import type { AccessPolicy } from "../shared/access";
 import {
@@ -31,6 +32,7 @@ import {
   type ThemeMode,
 } from "./components";
 import { SettingsPanel } from "./Settings";
+import { WorkflowPanel } from "./Workflow";
 import {
   ensureReadPermission,
   ensureWritePermission,
@@ -72,6 +74,7 @@ export function RoomView({
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showPermissions, setShowPermissions] = useState(false);
+  const [showWorkflow, setShowWorkflow] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [copied, setCopied] = useState(false);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
@@ -102,6 +105,7 @@ export function RoomView({
   const maySettings = can(myRole, "settings");
   const mayPolicy = can(myRole, "policy");
   const mayInvite = can(myRole, "invite");
+  const mayWorkflow = can(myRole, "workflow");
   const mayManage = can(myRole, "manage_members");
 
   const applyServerMessage = useCallback((msg: ServerMsg) => {
@@ -241,6 +245,10 @@ export function RoomView({
     [send],
   );
   const applyPolicy = useCallback((p: AccessPolicy) => send({ t: "policy", policy: p }), [send]);
+  const applyWorkflow = useCallback(
+    (graph: WorkflowGraph, useCustom: boolean) => send({ t: "workflow", graph, useCustom }),
+    [send],
+  );
   const compactNow = useCallback(() => send({ t: "compact" }), [send]);
   const createInvite = useCallback(
     (role: string, maxUses: number, expiresInHours: number, label: string) =>
@@ -368,7 +376,12 @@ export function RoomView({
   const toolDisplayLabel =
     toolDisplay === "compact" ? "Activity: Compact" : toolDisplay === "full" ? "Activity: Full" : "Activity: Hidden";
   const effortLabel = state.settings.effort === "xhigh" ? "Xhigh" : state.settings.effort[0]!.toUpperCase() + state.settings.effort.slice(1);
-  const modelLabel = `${modelInfo(state.settings.agentModel).label}, ${effortLabel}`;
+  // Under a custom workflow the room is answered by the graph's lead, so naming
+  // `agentModel` here would put a model in the header that is not the one running.
+  const custom = state.settings.workflow === "custom";
+  const leadModel = custom ? leadOf(state.graph).model : state.settings.agentModel;
+  const modelLabel = `${modelInfo(leadModel).label}, ${effortLabel}`;
+  const teamCount = custom ? delegatesOf(state.graph).length : 0;
 
   return (
     <div className="app">
@@ -424,6 +437,17 @@ export function RoomView({
               settings={state.settings}
               cost={state.cost}
             />
+            {custom && (
+              <button
+                className="wf-chip"
+                onClick={() => setShowWorkflow(true)}
+                title={`Custom workflow: ${leadOf(state.graph).name} and ${teamCount} teammate${
+                  teamCount === 1 ? "" : "s"
+                }`}
+              >
+                {leadOf(state.graph).name} +{teamCount}
+              </button>
+            )}
             <span
               className={`policy-chip policy-${state.policy.mode}`}
               title={describePolicy(state.policy)}
@@ -470,6 +494,21 @@ export function RoomView({
           onApply={applySettings}
           onCompactNow={compactNow}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showWorkflow && (
+        <WorkflowPanel
+          graph={state.graph}
+          active={state.settings.workflow === "custom"}
+          canEdit={mayWorkflow}
+          canSetModels={maySettings}
+          busy={state.status !== "idle"}
+          onApply={(graph, useCustom) => {
+            applyWorkflow(graph, useCustom);
+            setShowWorkflow(false);
+          }}
+          onClose={() => setShowWorkflow(false)}
         />
       )}
 
@@ -587,6 +626,13 @@ export function RoomView({
                   title={toolDisplayLabel}
                 >
                   {toolDisplayLabel}
+                </button>
+                <button
+                  type="button"
+                  className="chat-action"
+                  onClick={() => setShowWorkflow(true)}
+                >
+                  {mayWorkflow ? "Workflow" : "View Workflow"}
                 </button>
                 {mayPolicy && (
                   <button

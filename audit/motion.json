@@ -1,0 +1,86 @@
+{
+  "verdict": "NO_REDUCED_MOTION_SUPPORT",
+  "transitionCount": 4,
+  "animationCount": 2,
+  "infiniteAnimationCount": 2,
+  "keyframeCount": 1,
+  "reducedMotionBlockCount": 0,
+  "layoutAnimatedCount": 1,
+  "layoutAnimated": [
+    {
+      "line": 955,
+      "value": "width 300ms ease, background 300ms ease",
+      "props": [
+        "width",
+        "background"
+      ],
+      "layoutProps": [
+        "width"
+      ],
+      "animatesLayout": true
+    }
+  ],
+  "infiniteAnimations": [
+    {
+      "line": 687,
+      "value": "pulse 1.1s ease-in-out infinite"
+    },
+    {
+      "line": 1017,
+      "value": "pulse 1.1s ease-in-out infinite"
+    }
+  ],
+  "transitions": [
+    {
+      "line": 92,
+      "value": "background 120ms ease, border-color 120ms ease",
+      "props": [
+        "background",
+        "border-color"
+      ],
+      "layoutProps": [],
+      "animatesLayout": false
+    },
+    {
+      "line": 201,
+      "value": "transform 160ms ease, background 160ms ease",
+      "props": [
+        "transform",
+        "background"
+      ],
+      "layoutProps": [],
+      "animatesLayout": false
+    },
+    {
+      "line": 863,
+      "value": "background 400ms ease",
+      "props": [
+        "background"
+      ],
+      "layoutProps": [],
+      "animatesLayout": false
+    },
+    {
+      "line": 955,
+      "value": "width 300ms ease, background 300ms ease",
+      "props": [
+        "width",
+        "background"
+      ],
+      "layoutProps": [
+        "width"
+      ],
+      "animatesLayout": true
+    }
+  ],
+  "animations": [
+    {
+      "line": 687,
+      "value": "pulse 1.1s ease-in-out infinite"
+    },
+    {
+      "line": 1017,
+      "value": "pulse 1.1s ease-in-out infinite"
+    }
+  ]
+}

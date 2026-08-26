@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "name": "typecheck",
+      "cmd": "npm run typecheck",
+      "ok": true,
+      "ms": 1668,
+      "tail": "\n📖 Read about runtime types\nhttps://developers.cloudflare.com/workers/languages/typescript/#generate-types\n📣 Remember to rerun 'wrangler types' after you change your wrangler.jsonc file."
+    },
+    {
+      "name": "test",
+      "cmd": "npm run test",
+      "ok": true,
+      "ms": 4003,
+      "tail": "  ok   sign-in state for google is not repo-connect state\n  ok   a repo-connect state passed to verifyState returns null\n\nall checks passed"
+    }
+  ]
+}

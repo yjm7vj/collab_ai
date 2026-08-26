@@ -1,0 +1,38 @@
+{
+  "opacityDeclarations": 5,
+  "exemptCount": 5,
+  "nonExemptCount": 0,
+  "violations": [],
+  "found": [
+    {
+      "line": 128,
+      "selector": "button:disabled",
+      "value": 0.45,
+      "exempt": "WCAG 1.4.3 exempts disabled controls"
+    },
+    {
+      "line": 426,
+      "selector": ".side-pane button:disabled",
+      "value": 0.45,
+      "exempt": "WCAG 1.4.3 exempts disabled controls"
+    },
+    {
+      "line": 722,
+      "selector": "@keyframes pulse",
+      "value": 0.35,
+      "exempt": "animation keyframe, not a resting state"
+    },
+    {
+      "line": 1589,
+      "selector": ".tool-pip-denied",
+      "value": 0.75,
+      "exempt": "status dot; the border and label carry the meaning"
+    },
+    {
+      "line": 1865,
+      "selector": ".wf-wire",
+      "value": 0.85,
+      "exempt": "SVG stroke on a graph edge, not text"
+    }
+  ]
+}

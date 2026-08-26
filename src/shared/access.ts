@@ -23,6 +23,16 @@ export type Capability =
   | "compact"
   /** Change the model, workflow and spend configuration. */
   | "settings"
+  /**
+   * Draw the room's agent graph — who the teammates are and how they relate.
+   *
+   * Editors get this and not `settings`, which is the whole reason it is a
+   * separate capability: shaping the team is design work the people doing the
+   * work should be able to do, while choosing which models get billed stays
+   * with the owner and admins. The server enforces the split by preserving
+   * node models on frames from anyone without `settings` — see `Room#onWorkflow`.
+   */
+  | "workflow"
   /** Change permission modes and tool policy. Reserved for the next phase. */
   | "policy"
   /** Mint and revoke invite links. */
@@ -35,9 +45,12 @@ export type Capability =
 const RANK: Record<Role, number> = { viewer: 0, editor: 1, admin: 2, owner: 3 };
 
 export const ROLE_CAPS: Record<Role, readonly Capability[]> = {
-  owner: ["speak", "vote", "compact", "settings", "policy", "invite", "manage_members", "admin_room"],
-  admin: ["speak", "vote", "compact", "settings", "policy", "invite", "manage_members"],
-  editor: ["speak", "vote", "compact"],
+  owner: [
+    "speak", "vote", "compact", "settings", "workflow", "policy", "invite",
+    "manage_members", "admin_room",
+  ],
+  admin: ["speak", "vote", "compact", "settings", "workflow", "policy", "invite", "manage_members"],
+  editor: ["speak", "vote", "compact", "workflow"],
   // A viewer reads the room and nothing else. Deliberately an empty list rather
   // than a short one, so adding a capability is always a decision.
   viewer: [],
