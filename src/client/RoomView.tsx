@@ -95,7 +95,7 @@ export function RoomView({
   // yet"; an array means fetched, possibly empty.
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
   const [reposLoading, setReposLoading] = useState(false);
-  const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("compact");
+  const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("hidden");
   const [showDocument, setShowDocument] = useState(false);
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
@@ -625,7 +625,7 @@ export function RoomView({
                       d === "compact" ? "full" : d === "full" ? "hidden" : "compact",
                     )}
                   >
-                    Tool details: {toolDisplay === "compact" ? "Compact" : toolDisplay === "full" ? "Full" : "Hidden"}
+                    Tool details: {toolDisplay === "compact" ? "Compact" : toolDisplay === "full" ? "Full" : "Collapsed"}
                   </button>
                   <button
                     type="button"

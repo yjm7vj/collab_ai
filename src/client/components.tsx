@@ -836,32 +836,29 @@ const EntryView = memo(function EntryView({
     );
   }
 
-  // In "hidden" mode, tool blocks aren't rendered individually — each run of
-  // consecutive omitted tool blocks collapses into a single muted counter, so
-  // three tool calls in a row read as one line rather than three.
+  // In "hidden" mode, tool calls and reasoning aren't rendered individually —
+  // each run of consecutive steps collapses into a single one-line summary
+  // that expands on click, so the agent's actual prose is what dominates the
+  // transcript and the steps stay a click away rather than gone.
   const rendered: ReactElement[] = [];
-  let hiddenRun = 0;
-  const flushHiddenRun = (key: string) => {
-    if (hiddenRun > 0) {
-      rendered.push(
-        <div className="steps-hidden" key={key}>
-          {hiddenRun} {hiddenRun === 1 ? "Step" : "Steps"} Hidden
-        </div>,
-      );
-      hiddenRun = 0;
+  let run: AgentBlock[] = [];
+  const flushRun = (key: string) => {
+    if (run.length > 0) {
+      rendered.push(<CollapsedSteps key={key} blocks={run} />);
+      run = [];
     }
   };
 
   if (toolDisplay === "hidden") {
     entry.blocks.forEach((b, i) => {
-      if (b.type === "tool") {
-        hiddenRun++;
+      if (b.type === "tool" || b.type === "thinking") {
+        run.push(b);
         return;
       }
-      flushHiddenRun(`hide-${i}`);
+      flushRun(`run-${i}`);
       rendered.push(<BlockView key={i} block={b} toolDisplay={toolDisplay} />);
     });
-    flushHiddenRun("hide-end");
+    flushRun("run-end");
   } else {
     entry.blocks.forEach((b, i) => {
       rendered.push(<BlockView key={i} block={b} toolDisplay={toolDisplay} />);
@@ -944,6 +941,41 @@ function BlockView({
   }
 
   return <ToolBlock block={block} toolDisplay={toolDisplay} />;
+}
+
+/**
+ * One-line, click-to-expand face for a run of consecutive tool/reasoning
+ * blocks in "hidden" mode. Collapsed by default so the agent's prose reads
+ * as the main content; expanding reveals the same per-block views used in
+ * compact mode, so nothing is actually lost, just deferred.
+ */
+function CollapsedSteps({ blocks }: { blocks: AgentBlock[] }) {
+  const [open, setOpen] = useState(false);
+  const toolCount = blocks.filter((b) => b.type === "tool").length;
+  const thoughtCount = blocks.filter((b) => b.type === "thinking").length;
+  const parts: string[] = [];
+  if (toolCount) parts.push(`${toolCount} ${toolCount === 1 ? "Tool Call" : "Tool Calls"}`);
+  if (thoughtCount) parts.push(`${thoughtCount} ${thoughtCount === 1 ? "Thought" : "Thoughts"}`);
+
+  return (
+    <div className="steps-collapsed">
+      <button
+        type="button"
+        className="steps-collapsed-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="tool-disclosure">{open ? "▾" : "▸"}</span>
+        {parts.join(" · ") || "Steps"}
+      </button>
+      {open && (
+        <div className="steps-collapsed-body">
+          {blocks.map((b, i) => (
+            <BlockView key={i} block={b} toolDisplay="compact" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ThinkingBlock({ block }: { block: Extract<AgentBlock, { type: "thinking" }> }) {
