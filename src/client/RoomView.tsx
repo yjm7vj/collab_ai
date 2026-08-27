@@ -53,6 +53,8 @@ export function RoomView({
   roomId,
   token,
   displayName,
+  onDisplayNameChange,
+  onSignOut,
   onAccessLost,
   onWorkspaceChange,
   theme,
@@ -61,6 +63,8 @@ export function RoomView({
   roomId: string;
   token: string;
   displayName: string;
+  onDisplayNameChange?: (name: string) => void;
+  onSignOut?: () => void;
   onAccessLost: (reason: string) => void;
   onWorkspaceChange: (roomId: string, workspace: RoomState["workspace"]) => void;
   theme: ThemeMode;
@@ -77,6 +81,8 @@ export function RoomView({
   const [showSettings, setShowSettings] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const [showPermissions, setShowPermissions] = useState(false);
   const [showWorkflow, setShowWorkflow] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -103,15 +109,19 @@ export function RoomView({
   const [canWrite, setCanWrite] = useState(false);
 
   useEffect(() => {
-    if (!showSettingsMenu) return;
+    if (!showSettingsMenu && !showAccountMenu) return;
     const closeWhenOutside = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Node && !settingsMenuRef.current?.contains(target)) {
-        setShowSettingsMenu(false);
+      if (target instanceof Node) {
+        if (!settingsMenuRef.current?.contains(target)) setShowSettingsMenu(false);
+        if (!accountMenuRef.current?.contains(target)) setShowAccountMenu(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowSettingsMenu(false);
+      if (event.key === "Escape") {
+        setShowSettingsMenu(false);
+        setShowAccountMenu(false);
+      }
     };
     document.addEventListener("pointerdown", closeWhenOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -119,7 +129,7 @@ export function RoomView({
       document.removeEventListener("pointerdown", closeWhenOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [showSettingsMenu]);
+  }, [showSettingsMenu, showAccountMenu]);
 
   // These hide controls the server would refuse anyway; the server is the
   // boundary, this is only so nobody clicks into a refusal.
@@ -253,10 +263,11 @@ export function RoomView({
       const trimmed = n.trim().slice(0, 32);
       if (!trimmed) return;
       localStorage.setItem("collab_ai:name", trimmed);
+      onDisplayNameChange?.(trimmed);
       send({ t: "rename", name: trimmed });
       setRenaming(false);
     },
-    [send],
+    [onDisplayNameChange, send],
   );
 
   const say = useCallback((text: string) => send({ t: "say", text }), [send]);
@@ -458,14 +469,50 @@ export function RoomView({
                 defaultValue={displayName}
                 maxLength={32}
                 aria-label="Your name"
-                onBlur={() => setRenaming(false)}
               />
               <button type="submit">Save</button>
             </form>
           ) : (
-            <button className="namebtn" onClick={() => setRenaming(true)}>
-              Welcome, {displayName}
-            </button>
+            <div className="settings-menu-wrap account-menu-wrap" ref={accountMenuRef}>
+              <button
+                type="button"
+                className="namebtn"
+                aria-haspopup="menu"
+                aria-expanded={showAccountMenu}
+                onClick={() => setShowAccountMenu((open) => !open)}
+              >
+                Welcome, {displayName}
+              </button>
+              {showAccountMenu && (
+                <div className="settings-menu account-menu" role="menu" aria-label="Account">
+                  <div className="settings-menu-title">Account</div>
+                  <section className="settings-menu-section">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setShowAccountMenu(false);
+                        setRenaming(true);
+                      }}
+                    >
+                      Rename
+                    </button>
+                    {onSignOut && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setShowAccountMenu(false);
+                          onSignOut();
+                        }}
+                      >
+                        Sign out
+                      </button>
+                    )}
+                  </section>
+                </div>
+              )}
+            </div>
           )}
           <div className="settings-menu-wrap" ref={settingsMenuRef}>
             <button

@@ -19,20 +19,20 @@
   --accent: #136fc5;
   --accent-strong: #0d5495;
   --accent-ink: #ffffff;
-  /* The mark sits on the topbar, which keeps its dark surface in both themes,
-     so its tints are tuned against that surface once and never remapped. */
+  /* Light-theme topbar tokens are intentionally separate from the page ink so
+     the sidebar and header remain readable on their shared pale surface. */
   --logo-mid: #2f8ada;
   --logo-key: #4a9ce4;
   --logo-lift: #8cc6f3;
-  --topbar: #1f2937;
-  --topbar-ink: #ffffff;
-  --on-topbar-ink-dim: #c2cedd;
-  --on-topbar-well: rgba(255, 255, 255, 0.04);
-  --on-topbar-fill: rgba(255, 255, 255, 0.08);
-  --on-topbar-fill-hover: rgba(255, 255, 255, 0.15);
-  --on-topbar-line: rgba(255, 255, 255, 0.18);
-  --on-topbar-line-soft: rgba(255, 255, 255, 0.1);
-  --on-topbar-track: rgba(255, 255, 255, 0.22);
+  --topbar: #ffffff;
+  --topbar-ink: #1e2636;
+  --on-topbar-ink-dim: #475467;
+  --on-topbar-well: rgba(30, 38, 54, 0.04);
+  --on-topbar-fill: rgba(30, 38, 54, 0.06);
+  --on-topbar-fill-hover: rgba(30, 38, 54, 0.11);
+  --on-topbar-line: rgba(30, 38, 54, 0.18);
+  --on-topbar-line-soft: rgba(30, 38, 54, 0.1);
+  --on-topbar-track: rgba(30, 38, 54, 0.22);
   --ok: #297e50;
   --bad: #cf322d;
   --warn: #966710;
@@ -1523,6 +1523,11 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 .namebtn:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); }
 .bar .linkbtn:hover:not(:disabled),
 .bar .namebtn:hover:not(:disabled) {
+  color: var(--topbar-ink);
+  background: var(--on-topbar-fill-hover);
+  border-color: var(--on-topbar-line);
+}
+.bar .namebtn[aria-expanded="true"] {
   color: var(--topbar-ink);
   background: var(--on-topbar-fill-hover);
   border-color: var(--on-topbar-line);

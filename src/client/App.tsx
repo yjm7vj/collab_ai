@@ -405,6 +405,11 @@ export function App() {
     setIdentity(null);
   }, []);
 
+  const updateDisplayName = useCallback((displayName: string) => {
+    localStorage.setItem("collab_ai:name", displayName);
+    setName(displayName);
+  }, []);
+
   const onAccessLost = useCallback(
     (reason: string) => {
       if (route.kind === "room" || route.kind === "invite") clearToken(route.roomId);
@@ -600,6 +605,8 @@ export function App() {
         roomId={route.roomId}
         token={token}
         displayName={name}
+        onDisplayNameChange={updateDisplayName}
+        onSignOut={identity ? signOut : undefined}
         onAccessLost={onAccessLost}
         onWorkspaceChange={updateWorkspace}
         theme={theme}
