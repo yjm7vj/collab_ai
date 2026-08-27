@@ -18,8 +18,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MODELS, modelInfo } from "../shared/models";
 import {
+  CARD,
   GRAPH_LIMITS,
   GRAPH_PRESETS,
+  MAX_POS,
   RELATIONS,
   delegatesOf,
   graphWarnings,
@@ -32,8 +34,6 @@ import {
   type WorkflowGraph,
 } from "../shared/workflow";
 
-/** Card geometry, in the same graph units node positions use. */
-const CARD = { w: 216, h: 96 };
 const GRID = 20;
 
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 12);
@@ -112,8 +112,8 @@ export function WorkflowPanel({
       name: `Teammate ${taken}`,
       model: MODELS.find((m) => m.canWork)!.id,
       prompt: "",
-      x: Math.min(GRAPH_LIMITS.width - CARD.w, 660 + (taken % 2) * 300),
-      y: Math.min(GRAPH_LIMITS.height - CARD.h, 120 + Math.floor(taken / 2) * 180),
+      x: Math.min(MAX_POS.x, 660 + (taken % 2) * 300),
+      y: Math.min(MAX_POS.y, 120 + Math.floor(taken / 2) * 180),
     };
     setDraft((d) => ({ ...d, nodes: [...d.nodes, node] }));
     setSelected({ kind: "node", id });
@@ -167,10 +167,25 @@ export function WorkflowPanel({
       setLinking(null);
       if (from === to) return;
       if (draft.edges.length >= GRAPH_LIMITS.edges) return;
+      // One relationship per direction per kind is the server's rule, but a pair
+      // may hold several at once. So rather than refusing a second link between
+      // two agents that already have one, take the next kind that is still free
+      // — linking the lead to a teammate it already delegates to now proposes a
+      // review, which is the thing someone drawing that arrow twice meant.
       // Default to the link people mean nine times in ten; the inspector opens
       // on it so changing the kind is one click, not a hunt.
-      const kind: RelationKind = from === draft.leadId ? "delegates" : "reviews";
-      if (draft.edges.some((e) => e.from === from && e.to === to && e.kind === kind)) return;
+      const preferred: RelationKind[] =
+        from === draft.leadId
+          ? ["delegates", "reviews", "handoff", "custom"]
+          : ["reviews", "handoff", "custom", "delegates"];
+      const taken = draft.edges.filter((e) => e.from === from && e.to === to);
+      const kind = preferred.find((k) => !taken.some((e) => e.kind === k));
+      // Every kind spent: nothing left to add, so open the first one they have
+      // instead of swallowing the click.
+      if (!kind) {
+        if (taken[0]) setSelected({ kind: "edge", id: taken[0].id });
+        return;
+      }
       const id = newId();
       setDraft((d) => ({
         ...d,
@@ -197,8 +212,8 @@ export function WorkflowPanel({
           n.id === id
             ? {
                 ...n,
-                x: clamp(n.x + dx, 0, GRAPH_LIMITS.width - CARD.w),
-                y: clamp(n.y + dy, 0, GRAPH_LIMITS.height - CARD.h),
+                x: clamp(n.x + dx, 0, MAX_POS.x),
+                y: clamp(n.y + dy, 0, MAX_POS.y),
               }
             : n,
         ),
@@ -236,8 +251,8 @@ export function WorkflowPanel({
     if (!d || !surface) return;
     const box = surface.getBoundingClientRect();
     patchNode(d.id, {
-      x: snap(clamp(e.clientX - box.left - d.dx, 0, GRAPH_LIMITS.width - CARD.w)),
-      y: snap(clamp(e.clientY - box.top - d.dy, 0, GRAPH_LIMITS.height - CARD.h)),
+      x: snap(clamp(e.clientX - box.left - d.dx, 0, MAX_POS.x)),
+      y: snap(clamp(e.clientY - box.top - d.dy, 0, MAX_POS.y)),
     });
   };
 
@@ -429,7 +444,7 @@ export function WorkflowPanel({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  style={{ left: node.x, top: node.y, width: CARD.w }}
+                  style={{ left: node.x, top: node.y, width: CARD.w, height: CARD.h }}
                   tabIndex={0}
                   role="button"
                   aria-label={`${node.name}, ${isLead ? "lead" : "teammate"}, on ${info.label}`}
@@ -507,6 +522,7 @@ export function WorkflowPanel({
               canEdit={canEdit}
               onPatch={(patch) => patchEdge(selEdge.id, patch)}
               onDelete={() => removeEdge(selEdge.id)}
+              onSelect={(id) => setSelected({ kind: "edge", id })}
             />
           )}
           {!selNode && !selEdge && (
@@ -627,16 +643,32 @@ function EdgeInspector({
   canEdit,
   onPatch,
   onDelete,
+  onSelect,
 }: {
   edge: Relation;
   graph: WorkflowGraph;
   canEdit: boolean;
   onPatch: (patch: Partial<Relation>) => void;
   onDelete: () => void;
+  /** Jump to another link — the pair's other relationships are listed here. */
+  onSelect: (id: string) => void;
 }) {
   const from = graph.nodes.find((n) => n.id === edge.from);
   const to = graph.nodes.find((n) => n.id === edge.to);
   const info = relationInfo(edge.kind);
+
+  // The other links these same two agents already hold, in this direction and
+  // the other. Their kinds are the ones this link cannot be switched to: the
+  // server keeps one relationship per direction per kind and would drop the
+  // duplicate on Apply, which from here would look like the click did nothing.
+  const siblings = graph.edges.filter(
+    (e) =>
+      e.id !== edge.id &&
+      ((e.from === edge.from && e.to === edge.to) || (e.from === edge.to && e.to === edge.from)),
+  );
+  const clash = new Set(
+    siblings.filter((e) => e.from === edge.from && e.to === edge.to).map((e) => e.kind),
+  );
 
   return (
     <div className="wf-inspect">
@@ -653,6 +685,31 @@ function EdgeInspector({
         <b>{from?.name ?? "?"}</b> {info.label} <b>{to?.name ?? "?"}</b>
       </p>
 
+      {siblings.length > 0 && (
+        <p className="wf-relation-more">
+          {siblings.length === 1 ? "One other link" : `${siblings.length} other links`} between
+          these two agents:{" "}
+          {siblings.map((e) => {
+            // The sentence above already names this link's source, so a sibling
+            // running the same way needs no subject and one running back the
+            // other way has to name its own.
+            const src = graph.nodes.find((n) => n.id === e.from);
+            const back = e.from !== edge.from;
+            return (
+              <button
+                key={e.id}
+                className={`wf-relation-kind wf-relation-kind-${e.kind}`}
+                onClick={() => onSelect(e.id)}
+                title="Edit this link"
+              >
+                {back && `${src?.name ?? "?"} `}
+                {relationInfo(e.kind).label}
+              </button>
+            );
+          })}
+        </p>
+      )}
+
       <div className="field">
         <span className="field-label">Relationship</span>
         <div className="wf-kinds">
@@ -660,7 +717,12 @@ function EdgeInspector({
             <button
               key={r.kind}
               className={`wf-kind wf-kind-${r.kind} ${edge.kind === r.kind ? "on" : ""}`}
-              disabled={!canEdit}
+              disabled={!canEdit || clash.has(r.kind)}
+              title={
+                clash.has(r.kind)
+                  ? `${from?.name ?? "?"} already ${r.label} ${to?.name ?? "?"} on another link.`
+                  : r.mechanism
+              }
               onClick={() =>
                 // Swapping kinds carries the wording across only when it was
                 // left at the previous kind's default — an instruction someone
@@ -681,6 +743,8 @@ function EdgeInspector({
         <span className="field-note">
           {info.mechanism}
           {!info.mechanical && " Nothing extra runs for this link."}
+          {clash.size > 0 &&
+            ` The greyed-out kinds are already taken by another link between these two.`}
         </span>
       </div>
 
@@ -723,28 +787,7 @@ function Wires({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  const wires = graph.edges
-    .map((e) => {
-      const from = graph.nodes.find((n) => n.id === e.from);
-      const to = graph.nodes.find((n) => n.id === e.to);
-      if (!from || !to) return null;
-      // Leave from whichever side faces the target, so a link drawn back to the
-      // left does not loop out around the card it starts on.
-      const rightward = to.x >= from.x;
-      const x1 = from.x + (rightward ? CARD.w : 0);
-      const y1 = from.y + CARD.h / 2;
-      const x2 = to.x + (rightward ? 0 : CARD.w);
-      const y2 = to.y + CARD.h / 2;
-      const bow = Math.max(40, Math.abs(x2 - x1) / 2);
-      const c1 = rightward ? x1 + bow : x1 - bow;
-      const c2 = rightward ? x2 - bow : x2 + bow;
-      return {
-        edge: e,
-        d: `M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`,
-        mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
-      };
-    })
-    .filter(Boolean) as { edge: Relation; d: string; mid: { x: number; y: number } }[];
+  const wires = useMemo(() => layOutWires(graph), [graph]);
 
   return (
     <>
@@ -802,6 +845,127 @@ function Wires({
       })}
     </>
   );
+}
+
+/* ------------------------------------------------------------------ layout */
+
+/** How far apart parallel links between one pair of agents are fanned. */
+const SPREAD = 40;
+/**
+ * Least vertical distance between two labels on the same pair of agents. A gap
+ * taller than a pill means no two can overlap whatever their x, which is what
+ * makes the de-overlap pass below a guarantee rather than a heuristic.
+ */
+const LABEL_PITCH = 32;
+
+type Wire = { edge: Relation; d: string; mid: { x: number; y: number } };
+
+/**
+ * Place every link on the canvas, fanning the ones that share a pair of agents.
+ *
+ * Two agents can hold several relationships at once — a lead that delegates to a
+ * teammate and is reviewed by it is one graph, not two — and drawn naively those
+ * links land on the same curve with their labels stacked on the same point, so
+ * the second one is invisible and unclickable. Each link is therefore indexed
+ * within its pair and pushed off the centre line three ways: its endpoints slide
+ * along the card edge so the arrowheads do not collide, its control points bow
+ * sideways so the curves separate, and its label sits at a different point along
+ * its own curve so two pills cannot cover each other even when the fan is edge-on
+ * and the sideways offset is foreshortened to nothing.
+ *
+ * Pairs are keyed unordered: a link back the other way shares the same lane and
+ * has to be fanned out of it too.
+ */
+function layOutWires(graph: WorkflowGraph): Wire[] {
+  const lanes = new Map<string, Relation[]>();
+  for (const e of graph.edges) {
+    const key = e.from < e.to ? `${e.from}|${e.to}` : `${e.to}|${e.from}`;
+    const lane = lanes.get(key);
+    if (lane) lane.push(e);
+    else lanes.set(key, [e]);
+  }
+
+  const out: Wire[] = [];
+  for (const lane of lanes.values()) {
+    const fanned: Wire[] = [];
+    lane.forEach((e, i) => {
+      const from = graph.nodes.find((n) => n.id === e.from);
+      const to = graph.nodes.find((n) => n.id === e.to);
+      if (!from || !to) return;
+
+      // Centred on the lane: one link gets no offset at all, so a plain graph
+      // draws exactly as it did before.
+      const off = lane.length === 1 ? 0 : (i - (lane.length - 1) / 2) * SPREAD;
+
+      // Leave from whichever side faces the target, so a link drawn back to the
+      // left does not loop out around the card it starts on.
+      const rightward = to.x >= from.x;
+      const port = clamp(off, -(CARD.h / 2 - 14), CARD.h / 2 - 14);
+      const x1 = from.x + (rightward ? CARD.w : 0);
+      const y1 = from.y + CARD.h / 2 + port;
+      const x2 = to.x + (rightward ? 0 : CARD.w);
+      const y2 = to.y + CARD.h / 2 + port;
+
+      const bow = Math.max(40, Math.abs(x2 - x1) / 2);
+      const len = Math.hypot(x2 - x1, y2 - y1) || 1;
+      const nx = -(y2 - y1) / len;
+      const ny = (x2 - x1) / len;
+      const c1 = { x: (rightward ? x1 + bow : x1 - bow) + nx * off, y: y1 + ny * off };
+      const c2 = { x: (rightward ? x2 - bow : x2 + bow) + nx * off, y: y2 + ny * off };
+
+      const t =
+        lane.length === 1
+          ? 0.5
+          : clamp(0.5 + (i - (lane.length - 1) / 2) * 0.16, 0.22, 0.78);
+
+      fanned.push({
+        edge: e,
+        d: `M ${x1} ${y1} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${x2} ${y2}`,
+        mid: cubicAt(t, { x: x1, y: y1 }, c1, c2, { x: x2, y: y2 }),
+      });
+    });
+    spreadLabels(fanned);
+    out.push(...fanned);
+  }
+  return out;
+}
+
+/**
+ * Push one lane's labels apart until none can cover another.
+ *
+ * The curves are already fanned, but a label is a pill several times wider than
+ * the wire it names, so separating the wires does not separate the labels — on
+ * the fan this was written for, three of them landed fifteen pixels apart and
+ * the top one buried the two beneath it. Spacing is enforced on y alone because
+ * that is the axis a pill is short on, and the run is recentred afterwards so
+ * the group still sits over the links it describes instead of drifting down.
+ */
+function spreadLabels(lane: Wire[]) {
+  if (lane.length < 2) return;
+  const order = [...lane].sort((a, b) => a.mid.y - b.mid.y);
+  const mean = (ws: Wire[]) => ws.reduce((sum, w) => sum + w.mid.y, 0) / ws.length;
+  const before = mean(order);
+  for (let i = 1; i < order.length; i++) {
+    const floor = order[i - 1]!.mid.y + LABEL_PITCH;
+    if (order[i]!.mid.y < floor) order[i]!.mid.y = floor;
+  }
+  const shift = before - mean(order);
+  for (const w of order) w.mid.y += shift;
+}
+
+type Pt = { x: number; y: number };
+
+/** The point at `t` along a cubic bezier. */
+function cubicAt(t: number, p0: Pt, p1: Pt, p2: Pt, p3: Pt): Pt {
+  const u = 1 - t;
+  const a = u * u * u;
+  const b = 3 * u * u * t;
+  const c = 3 * u * t * t;
+  const d = t * t * t;
+  return {
+    x: a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+    y: a * p0.y + b * p1.y + c * p2.y + d * p3.y,
+  };
 }
 
 /* ------------------------------------------------------------------- utils */

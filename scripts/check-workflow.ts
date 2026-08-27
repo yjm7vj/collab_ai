@@ -11,9 +11,11 @@
  * Run: npm run check:workflow
  */
 import {
+  CARD,
   DEFAULT_GRAPH,
   GRAPH_LIMITS,
   GRAPH_PRESETS,
+  MAX_POS,
   RELATIONS,
   delegatesOf,
   describeGraph,
@@ -110,8 +112,49 @@ const oversize = sanitizeGraph({
 const only = oversize.nodes[0]!;
 check("name is truncated", only.name.length === GRAPH_LIMITS.nameChars, only.name.length);
 check("prompt is truncated", only.prompt.length === GRAPH_LIMITS.promptChars, only.prompt.length);
-check("x is clamped into the canvas", only.x <= GRAPH_LIMITS.width && only.x >= 0, only.x);
-check("y is clamped into the canvas", only.y >= 0 && only.y <= GRAPH_LIMITS.height, only.y);
+// The whole card, not just its corner: a position is the card's top-left, so
+// clamping to the bare canvas extent would still let a node be stored at the far
+// edge and drawn a full card past it.
+check("x is clamped so the whole card fits", only.x >= 0 && only.x <= MAX_POS.x, only.x);
+check("y is clamped so the whole card fits", only.y >= 0 && only.y <= MAX_POS.y, only.y);
+check(
+  "the clamped corner leaves the card on the canvas",
+  only.x + CARD.w <= GRAPH_LIMITS.width && only.y + CARD.h <= GRAPH_LIMITS.height,
+  { x: only.x, y: only.y },
+);
+
+// A graph saved before the card had a known size can hold a corner inside the
+// canvas but too near its edge. Those are pulled back rather than left hanging.
+const nearEdge = sanitizeGraph({
+  leadId: "a",
+  nodes: [
+    {
+      id: "a",
+      name: "A",
+      model: "claude-opus-5",
+      prompt: "",
+      x: GRAPH_LIMITS.width - 10,
+      y: GRAPH_LIMITS.height - 10,
+    },
+  ],
+  edges: [],
+});
+const pulled = nearEdge.nodes[0]!;
+check(
+  "a corner just inside the edge is pulled back",
+  pulled.x === MAX_POS.x && pulled.y === MAX_POS.y,
+  pulled,
+);
+
+// Every preset has to survive its own rule, or the editor would shift a node the
+// moment someone picked it.
+for (const p of GRAPH_PRESETS) {
+  check(
+    `preset ${p.id} places every card on the canvas`,
+    p.graph.nodes.every((n) => n.x >= 0 && n.x <= MAX_POS.x && n.y >= 0 && n.y <= MAX_POS.y),
+    p.graph.nodes.map((n) => [n.name, n.x, n.y]),
+  );
+}
 
 const junkIds = sanitizeGraph({
   leadId: "ok",

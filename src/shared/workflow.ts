@@ -67,6 +67,17 @@ export type WorkflowGraph = {
 
 /* ------------------------------------------------------------------ limits */
 
+/**
+ * The size of one agent's card, in the same graph units positions use.
+ *
+ * Shared rather than kept in the editor because a node's position is its card's
+ * top-left corner, so the card's size is what decides which positions are legal
+ * — and the server has to agree with the canvas about that or it will hand back
+ * a graph whose cards hang off the surface. The editor writes both numbers onto
+ * the card as an inline style, so nothing can quietly render at another size.
+ */
+export const CARD = { w: 216, h: 140 } as const;
+
 export const GRAPH_LIMITS = {
   nodes: 8,
   edges: 16,
@@ -79,6 +90,19 @@ export const GRAPH_LIMITS = {
   handoffDepth: 2,
   /** Reviewers consulted per worker result. Beyond this they are ignored. */
   reviewers: 2,
+} as const;
+
+/**
+ * The furthest a card's top-left may sit and still be wholly on the canvas.
+ *
+ * Both the drag handler and `sanitizeGraph` clamp to this, so a position that
+ * survives the server is one the editor would also have allowed. Clamping to
+ * the bare canvas extent instead let a node be saved at the far edge and then
+ * drawn a full card-width past it.
+ */
+export const MAX_POS = {
+  x: GRAPH_LIMITS.width - CARD.w,
+  y: GRAPH_LIMITS.height - CARD.h,
 } as const;
 
 const ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
@@ -373,8 +397,8 @@ export function sanitizeGraph(input: unknown): WorkflowGraph {
       name,
       model: typeof r.model === "string" ? r.model : "",
       prompt: text(r.prompt, GRAPH_LIMITS.promptChars),
-      x: clamp(r.x, 0, GRAPH_LIMITS.width, 100),
-      y: clamp(r.y, 0, GRAPH_LIMITS.height, 100),
+      x: clamp(r.x, 0, MAX_POS.x, 100),
+      y: clamp(r.y, 0, MAX_POS.y, 100),
     });
   }
 
