@@ -2122,13 +2122,17 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 }
 
 .wf-wires { position: absolute; inset: 0; pointer-events: none; }
-.wf-wire { fill: none; stroke-width: 2; opacity: 0.85; }
+/* Colour is carried on the kind class and read back through currentColor, so
+   one rule can fill the arrowhead and leave the curve itself unfilled. Setting
+   `fill` per kind instead would beat `.wf-wire`'s `fill: none` on source order
+   and paint every wire as a solid wedge. */
+.wf-wire { fill: none; stroke: currentColor; stroke-width: 2; opacity: 0.85; }
 .wf-wire-on { stroke-width: 3.5; opacity: 1; }
-.wf-arrow { stroke: none; }
-.wf-wire-delegates { stroke: var(--accent); fill: var(--accent); }
-.wf-wire-reviews { stroke: var(--warn); fill: var(--warn); }
-.wf-wire-handoff { stroke: var(--ok); fill: var(--ok); }
-.wf-wire-custom { stroke: var(--ink-faint); fill: var(--ink-faint); stroke-dasharray: 5 4; }
+.wf-arrow { stroke: none; fill: currentColor; stroke-dasharray: none; }
+.wf-wire-delegates { color: var(--accent); }
+.wf-wire-reviews { color: var(--warn); }
+.wf-wire-handoff { color: var(--ok); }
+.wf-wire-custom { color: var(--ink-faint); stroke-dasharray: 5 4; }
 
 /* The wire's real hit area. A 2px curve is not a control, so the label is what
    people aim at, and it is a button with a proper focus ring. */
@@ -2142,22 +2146,52 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   font-weight: 600;
   white-space: nowrap;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--wire, var(--line));
   background: var(--panel);
   color: var(--ink-dim);
   cursor: pointer;
 }
-.wf-wire-label.on { border-color: var(--accent); color: var(--accent-strong); }
-.wf-wire-label-delegates { border-color: var(--accent); }
-.wf-wire-label-reviews { border-color: var(--warn); }
-.wf-wire-label-handoff { border-color: var(--ok); }
+.wf-wire-label.on {
+  z-index: 3;
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--panel-3);
+}
+.wf-wire-label:hover { z-index: 3; }
+/* Two agents can be linked more than once, so a label has to say which wire it
+   belongs to on its own: the border matches the curve's colour, and a leading
+   dot repeats it for anyone who cannot use the border to tell them apart. */
+.wf-wire-label::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  border-radius: 999px;
+  background: var(--wire, var(--ink-faint));
+}
+.wf-wire-label-delegates { --wire: var(--accent); }
+.wf-wire-label-reviews { --wire: var(--warn); }
+.wf-wire-label-handoff { --wire: var(--ok); }
+.wf-wire-label-custom { --wire: var(--ink-faint); border-style: dashed; }
 
+/* Width and height both arrive as an inline style from `CARD` in Workflow.tsx,
+   which is what lets the wire layout know where a card's edge is. So nothing
+   inside may change the card's size: the brief is clamped, the name ellipsises,
+   and the rows below carve up a fixed box rather than growing one. */
 .wf-node {
   position: absolute;
   z-index: 1;
   display: grid;
+  /* minmax(0, 1fr), not the implicit `auto` column: an auto track is sized to
+     its content's max-content width and happily overflows the card, which let a
+     long agent name push the whole column past the card's right edge. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto 1fr;
   gap: 4px;
   padding: 10px 12px;
+  box-sizing: border-box;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2171,7 +2205,14 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 .wf-node-source { outline: 2px dashed var(--warn); outline-offset: 2px; }
 
 .wf-node-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.wf-node-name { font-size: 13px; font-weight: 700; }
+.wf-node-name {
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .wf-badge {
   padding: 1px 6px;
   font-size: 11px;
@@ -2181,8 +2222,11 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   color: var(--accent-ink);
 }
 .wf-node-model { font-size: 11px; color: var(--ink-faint); }
+/* Exactly two lines whether the brief is long, short, or absent, so the row
+   below it lands in the same place on every card. */
 .wf-node-prompt {
   margin: 0;
+  height: 2.8em;
   font-size: 12px;
   line-height: 1.4;
   color: var(--ink-dim);
@@ -2191,7 +2235,7 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.wf-node-acts { display: flex; gap: 6px; margin-top: 2px; }
+.wf-node-acts { display: flex; align-items: end; gap: 6px; }
 .wf-node-acts button { min-height: 26px; padding: 2px 8px; font-size: 11px; }
 
 /* --------------------------------------------------------------- inspector */
@@ -2216,9 +2260,42 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   border-radius: var(--radius);
 }
 
+/* Says what else these two agents already are to each other, so a second link
+   reads as part of one relationship rather than as a stray duplicate. */
+.wf-relation-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -8px 0 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+.wf-relation-kind {
+  min-height: 24px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid var(--wire, var(--line));
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.wf-relation-kind:hover { background: var(--panel-3); color: var(--ink); }
+.wf-relation-kind-delegates { --wire: var(--accent); }
+.wf-relation-kind-reviews { --wire: var(--warn); }
+.wf-relation-kind-handoff { --wire: var(--ok); }
+.wf-relation-kind-custom { --wire: var(--ink-faint); border-style: dashed; }
+
 .wf-kinds { display: grid; gap: 6px; }
 .wf-kind { min-height: 36px; text-align: left; font-size: 13px; }
 .wf-kind.on { border-color: var(--accent); background: var(--panel-3); color: var(--accent-strong); }
+/* Taken by the other link between the same two agents. Left visible and
+   explained rather than hidden, so the kind list stays the same list. */
+.wf-kind:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .wf-inspect textarea {
   width: 100%;
