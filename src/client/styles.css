@@ -735,6 +735,7 @@ input:focus, textarea:focus {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow-float);
+  animation: menu-pop 140ms ease-out;
 }
 .side-project-menu button {
   width: 100%;
@@ -1781,6 +1782,14 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+  transform-origin: left center;
+  transition:
+    transform 160ms ease,
+    opacity 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+  will-change: transform, opacity;
 }
 .ws-online { color: var(--ink-dim); }
 /* Degraded, not merely different — dashed border and a duller ink read as
@@ -1789,6 +1798,19 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   color: var(--ink-faint);
   border-style: dashed;
   background: var(--danger-bg);
+}
+.bar .ws-chip {
+  animation: ws-chip-in 180ms ease-out;
+}
+
+@keyframes ws-chip-in {
+  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .ws-warning { margin-top: 14px; }

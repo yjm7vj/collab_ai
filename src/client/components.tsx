@@ -392,6 +392,7 @@ export function SidePane({
   rooms,
   onCreateRoom,
   onCreateProject,
+  onRenameProject,
   onOpenRoom,
   onRenameRoom,
   onCopyRoomLink,
@@ -408,6 +409,7 @@ export function SidePane({
   rooms: SideRoom[];
   onCreateRoom: (projectId?: string) => void;
   onCreateProject: (name: string) => void;
+  onRenameProject: (projectId: string, name: string) => void;
   onOpenRoom: (roomId: string) => void;
   onRenameRoom: (roomId: string, label: string) => void;
   onCopyRoomLink: (roomId: string) => void;
@@ -421,10 +423,30 @@ export function SidePane({
   const [addingProject, setAddingProject] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [openProjectMenu, setOpenProjectMenu] = useState<string | null>(null);
+  const openProjectActionsRef = useRef<HTMLDivElement | null>(null);
   const archivedRooms = [
     ...rooms.filter((room) => room.archived),
     ...projects.flatMap((project) => project.rooms.filter((room) => room.archived)),
   ];
+
+  useEffect(() => {
+    if (!openProjectMenu) return;
+    const closeWhenOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !openProjectActionsRef.current?.contains(target)) {
+        setOpenProjectMenu(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenProjectMenu(null);
+    };
+    document.addEventListener("pointerdown", closeWhenOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openProjectMenu]);
 
   const submitProject = () => {
     const name = projectName.trim().slice(0, 42);
@@ -437,6 +459,11 @@ export function SidePane({
   const promptRename = (room: SideRoom) => {
     const label = window.prompt("Room name", room.label);
     if (label !== null) onRenameRoom(room.roomId, label);
+  };
+
+  const promptRenameProject = (project: SideProject) => {
+    const label = window.prompt("Project name", project.name);
+    if (label !== null) onRenameProject(project.id, label);
   };
 
   return (
@@ -566,7 +593,10 @@ export function SidePane({
                 <div className="side-project-head">
                   <span className="side-folder" aria-hidden="true" />
                   <span>{project.name}</span>
-                  <div className="side-project-actions">
+                  <div
+                    className="side-project-actions"
+                    ref={openProjectMenu === project.id ? openProjectActionsRef : undefined}
+                  >
                     <button
                       type="button"
                       className="side-project-add"
@@ -580,7 +610,7 @@ export function SidePane({
                     <button
                       type="button"
                       className="side-project-menu-trigger"
-                      onClick={() => setOpenProjectMenu((open) => open === project.id ? null : project.id)}
+                      onClick={() => setOpenProjectMenu((open) => (open === project.id ? null : project.id))}
                       aria-label={`Project actions for ${project.name}`}
                       aria-expanded={openProjectMenu === project.id}
                       title={`Project actions for ${project.name}`}
@@ -589,6 +619,10 @@ export function SidePane({
                     </button>
                     {openProjectMenu === project.id && (
                       <div className="side-project-menu" role="menu">
+                        <button type="button" role="menuitem" onClick={() => {
+                          setOpenProjectMenu(null);
+                          promptRenameProject(project);
+                        }}>Rename project</button>
                         <button type="button" role="menuitem" onClick={() => {
                           setOpenProjectMenu(null);
                           onArchiveProject(project.id);
