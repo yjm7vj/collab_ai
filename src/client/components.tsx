@@ -94,7 +94,7 @@ export function ThemeToggle({
 
 export function LogoMark() {
   return (
-    <img className="logo-mark" src="/collab-logo.svg" alt="collab_ai" title="collab_ai" />
+    <img className="logo-mark" src="/collab-logo.svg" alt="Huddle.AI" title="Huddle.AI" />
   );
 }
 
@@ -443,7 +443,7 @@ export function SidePane({
     <aside className="side-pane" aria-label="Workspace navigation">
       <div className="side-head">
         <LogoMark />
-        <div className="side-title">Collab.AI</div>
+        <div className="side-title">Huddle.AI</div>
       </div>
 
       <nav className="side-scroll" aria-label="Projects">
@@ -1133,6 +1133,8 @@ export function DocPanel({
   onClose?: () => void;
 }) {
   const [flash, setFlash] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const first = useRef(true);
 
   useEffect(() => {
@@ -1163,7 +1165,23 @@ export function DocPanel({
             ×
           </button>
         )}
+        <button
+          type="button"
+          className="doc-download"
+          disabled={downloading}
+          onClick={() => {
+            setDownloading(true);
+            setDownloadError(null);
+            void import("./docx")
+              .then(({ downloadDocx }) => downloadDocx(doc, `shared-document-rev-${revision}.docx`))
+              .catch(() => setDownloadError("Could not create the Word document."))
+              .finally(() => setDownloading(false));
+          }}
+        >
+          {downloading ? "Preparing..." : "Download .docx"}
+        </button>
       </div>
+      {downloadError && <div className="doc-download-error">{downloadError}</div>}
       {doc.trim() ? (
         <pre className="doc-body">{doc}</pre>
       ) : (
