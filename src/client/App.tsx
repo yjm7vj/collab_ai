@@ -10,7 +10,7 @@
  * sure that token exists before `RoomView` — which owns the live socket and
  * everything downstream of it — is ever allowed to mount.
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   ROOM_ID_RE,
@@ -141,6 +141,24 @@ function persistSidebar(projects: SidebarProject[], rooms: SidebarRoom[]) {
   localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms));
 }
 
+const UNTITLED_RE = /^Untitled (\d+)$/;
+
+/**
+ * The next name in the Untitled 1, Untitled 2, ... sequence.
+ *
+ * Counts from the highest number taken anywhere in the sidebar — loose rooms,
+ * project rooms, archived ones — rather than filling the gaps a deleted room
+ * leaves, so no two rooms wear the same default name in one sitting.
+ */
+function nextUntitledLabel(projects: SidebarProject[], rooms: SidebarRoom[]): string {
+  let highest = 0;
+  for (const room of [...rooms, ...projects.flatMap((project) => project.rooms)]) {
+    const match = UNTITLED_RE.exec(room.label);
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  return `Untitled ${highest + 1}`;
+}
+
 function base64UrlDecode(segment: string): string {
   const padded = segment.replace(/-/g, "+").replace(/_/g, "/");
   const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
@@ -268,8 +286,16 @@ export function App() {
   const [rooms, setRooms] = useState<SidebarRoom[]>(storedRooms);
   const [theme, setTheme] = useState<Theme>(storedTheme);
 
+  /**
+   * A mirror of the sidebar for createRoom to name against. It picks the name
+   * after an await, by which point the lists its closure captured may be a
+   * room behind; the ref is always the current pair.
+   */
+  const sidebar = useRef({ projects, rooms });
+
   useEffect(() => {
     persistSidebar(projects, rooms);
+    sidebar.current = { projects, rooms };
   }, [projects, rooms]);
 
   useEffect(() => {
@@ -351,7 +377,7 @@ export function App() {
         writeToken(roomId, tok);
         const room = {
           roomId,
-          label: `Room ${roomId.slice(0, 6)}`,
+          label: nextUntitledLabel(sidebar.current.projects, sidebar.current.rooms),
           projectId,
           archived: false,
           workspace: EMPTY_WORKSPACE,

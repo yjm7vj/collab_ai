@@ -611,7 +611,11 @@ export function SidePane({
                       >
                         <span className="side-item-title">{room.label}</span>
                         <span className="side-item-detail">
-                          {room.workspace.label ? `Workspace: ${room.workspace.label}` : room.roomId}
+                          {/* The project already names its own workspace below, so a room
+                              only spells one out when it differs from what it inherited. */}
+                          {room.workspace.label && room.workspace.label !== project.workspace.label
+                            ? `Workspace: ${room.workspace.label}`
+                            : room.roomId}
                         </span>
                       </button>
                       <button
