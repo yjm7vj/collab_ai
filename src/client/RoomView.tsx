@@ -57,6 +57,9 @@ export function RoomView({
   onSignOut,
   onAccessLost,
   onWorkspaceChange,
+  onWorkspaceDetach,
+  workspaceKey,
+  projectWorkspace,
   theme,
   onToggleTheme,
 }: {
@@ -67,6 +70,15 @@ export function RoomView({
   onSignOut?: () => void;
   onAccessLost: (reason: string) => void;
   onWorkspaceChange: (roomId: string, workspace: RoomState["workspace"]) => void;
+  onWorkspaceDetach: (roomId: string) => void;
+  /**
+   * Which saved folder this room uses: the project's id when the room belongs
+   * to one, so every room in the project opens the same folder, and the room's
+   * own id when it stands alone.
+   */
+  workspaceKey: string;
+  /** The workspace the room's project carries, or "none" for a lone room. */
+  projectWorkspace: RoomState["workspace"];
   theme: ThemeMode;
   onToggleTheme: () => void;
 }) {
@@ -103,6 +115,14 @@ export function RoomView({
   // Whether this tab can currently answer fs.req itself, i.e. whether rootRef
   // is populated and its permission is (still) granted.
   const [wsReady, setWsReady] = useState(false);
+  // The project workspace this room has already offered to connect for itself,
+  // so the offer is made once rather than once per render.
+  const inheritedRef = useRef<string | null>(null);
+  // Whether this room has already given up a workspace it could not host.
+  const strandedRef = useRef(false);
+  // Whether this room has no saved folder at all — as opposed to one whose
+  // permission has lapsed, which is recoverable and must not be torn down.
+  const [handleMissing, setHandleMissing] = useState(false);
   // Whether the attached folder currently holds read-write permission. Purely
   // descriptive — the server, not this flag, decides whether a write is ever
   // attempted; it only shapes what the workspace panel tells the user.
@@ -317,9 +337,29 @@ export function RoomView({
   // permission is re-confirmed, never assumed from the fact that it was saved.
   useEffect(() => {
     let cancelled = false;
+    // A different room asks the inherit question again from scratch, and must
+    // not keep hosting the folder the previous one had: the handle below is
+    // the only folder this room may serve, and until it loads there is none.
+    inheritedRef.current = null;
+    rootRef.current = null;
+    setWsReady(false);
+    setCanWrite(false);
+    setHandleMissing(false);
+    strandedRef.current = false;
     void (async () => {
-      const handle = await loadHandle(roomId);
-      if (!handle || cancelled) return;
+      // Rooms that have since joined a project keep the folder they saved
+      // under their own id; move it to the project's key on the way past, so
+      // the whole project inherits what one room already had.
+      let handle = await loadHandle(workspaceKey);
+      if (!handle && workspaceKey !== roomId) {
+        handle = await loadHandle(roomId);
+        if (handle) await saveHandle(workspaceKey, handle);
+      }
+      if (cancelled) return;
+      if (!handle) {
+        setHandleMissing(true);
+        return;
+      }
       const granted = await ensureReadPermission(handle);
       if (!granted || cancelled) return;
       rootRef.current = handle;
@@ -333,7 +373,7 @@ export function RoomView({
     return () => {
       cancelled = true;
     };
-  }, [roomId]);
+  }, [roomId, workspaceKey]);
 
   const attachWorkspace = useCallback(
     async (allowWrites: boolean) => {
@@ -343,21 +383,91 @@ export function RoomView({
         ? await ensureWritePermission(handle)
         : await ensureReadPermission(handle);
       if (!granted) return;
-      await saveHandle(roomId, handle);
+      await saveHandle(workspaceKey, handle);
       rootRef.current = handle;
       setWsReady(true);
       setCanWrite(allowWrites);
       send({ t: "workspace.attach", kind: "local", label: handle.name });
     },
-    [roomId, send],
+    [workspaceKey, send],
   );
 
   const detachWorkspace = useCallback(async () => {
-    await forgetHandle(roomId);
+    await forgetHandle(workspaceKey);
+    // A room that joined a project after saving its own folder can still have
+    // the older per-room copy behind it; disconnecting means disconnecting.
+    if (workspaceKey !== roomId) await forgetHandle(roomId);
     rootRef.current = null;
     setWsReady(false);
     send({ t: "workspace.detach" });
-  }, [roomId, send]);
+    onWorkspaceDetach(roomId);
+  }, [roomId, workspaceKey, send, onWorkspaceDetach]);
+
+  /**
+   * Give up a folder this browser is on record as hosting but no longer has.
+   *
+   * The room keeps its workspace configured while the host is away and brings
+   * it back online when that host reconnects, which is right for a closed tab
+   * and wrong for a folder that has been disconnected since — disconnecting in
+   * one room of a project removes the folder every room in it was sharing, and
+   * the rooms that were not open at the time would otherwise come back online
+   * hosting nothing. Only the recorded host can answer for it, and only an
+   * absent folder counts: a folder whose permission merely lapsed is
+   * reconnectable from the panel and must survive.
+   */
+  useEffect(() => {
+    if (!connected || !mayPolicy || strandedRef.current) return;
+    if (!handleMissing || state.workspace.kind !== "local") return;
+    if (!me || state.workspace.hostUid !== me) return;
+    strandedRef.current = true;
+    send({ t: "workspace.detach" });
+    onWorkspaceDetach(roomId);
+  }, [connected, mayPolicy, handleMissing, state.workspace.kind, state.workspace.hostUid, me, roomId, send, onWorkspaceDetach]);
+
+  /**
+   * Connect the project's workspace to this room.
+   *
+   * A workspace connected in one room belongs to the project, so opening any
+   * other room in it should find the same folder or repository already there
+   * rather than an empty panel. The room's own server state is the authority:
+   * this only ever fills a gap, and stays quiet once the room has a workspace
+   * of its own.
+   *
+   * A local folder can be reconnected outright — the handle is this browser's
+   * and its permission has already been re-confirmed above. A repository can
+   * only be reconnected where GitHub is already authorised in this room;
+   * without that, connecting would bounce the person through an install
+   * redirect they never asked for, so it waits for them to do it themselves.
+   */
+  useEffect(() => {
+    if (!connected || !mayPolicy) return;
+    if (state.workspace.kind !== "none" || projectWorkspace.kind === "none") return;
+    // Asked once per workspace, never on a loop: a server that refuses the
+    // attach leaves the room's workspace at "none", and this would otherwise
+    // ask again on every render that follows.
+    const attempt = `${projectWorkspace.kind}:${projectWorkspace.label}`;
+    if (inheritedRef.current === attempt) return;
+    if (projectWorkspace.kind === "local") {
+      const handle = rootRef.current;
+      if (!wsReady || !handle) return;
+      inheritedRef.current = attempt;
+      send({ t: "workspace.attach", kind: "local", label: handle.name });
+      return;
+    }
+    if (state.github.authorized && projectWorkspace.label) {
+      inheritedRef.current = attempt;
+      send({ t: "github.connect", repo: projectWorkspace.label });
+    }
+  }, [
+    connected,
+    mayPolicy,
+    wsReady,
+    state.workspace.kind,
+    state.github.authorized,
+    projectWorkspace.kind,
+    projectWorkspace.label,
+    send,
+  ]);
 
   const connectGithub = useCallback((repo: string) => send({ t: "github.connect", repo }), [send]);
   const authGithub = useCallback(() => send({ t: "github.auth" }), [send]);

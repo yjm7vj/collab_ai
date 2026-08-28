@@ -68,6 +68,20 @@ type SidebarRoom = {
 
 const EMPTY_WORKSPACE: WorkspaceInfo = { kind: "none", online: false, hostUid: null, label: "" };
 
+/**
+ * The part of a workspace that belongs to the project rather than to the one
+ * room it was connected in.
+ *
+ * `online` and `hostUid` describe a live host socket in a single room, so they
+ * never travel: a sibling room is not hosting anything until someone opens it.
+ * The kind and label do travel, because they are what the sibling reconnects
+ * for itself — see RoomView's inherit effect.
+ */
+function inheritedWorkspace(workspace: WorkspaceInfo): WorkspaceInfo {
+  if (workspace.kind === "none") return EMPTY_WORKSPACE;
+  return { kind: workspace.kind, label: workspace.label, online: false, hostUid: null };
+}
+
 function safeWorkspace(value: unknown): WorkspaceInfo {
   if (!value || typeof value !== "object") return EMPTY_WORKSPACE;
   const rec = value as Record<string, unknown>;
@@ -240,7 +254,9 @@ export function App() {
   const uid = useMemo(myUid, []);
   const [route, setRoute] = useState<Route>(parseRoute);
   const [name, setName] = useState(() => localStorage.getItem("collab_ai:name") ?? "");
-  const [token, setToken] = useState<string | null>(null);
+  // Bumped whenever a room token is written or cleared, so the read below
+  // re-runs. The tokens themselves live in localStorage, never in state.
+  const [tokenEpoch, setTokenEpoch] = useState(0);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [providers, setProviders] = useState<string[] | null>(null);
@@ -286,15 +302,25 @@ export function App() {
     return () => removeEventListener("hashchange", onHash);
   }, []);
 
-  // Whenever the route points at a room, pick up any token already stashed
-  // for it; otherwise there is nothing to connect with.
+  const routeRoomId = route.kind === "room" || route.kind === "invite" ? route.roomId : null;
+
+  /**
+   * The token for the room the route points at, read straight from storage
+   * rather than mirrored into state by an effect.
+   *
+   * A mirror is always one render stale after a route change: the route says
+   * the new room while the mirror still holds the previous room's token, and
+   * RoomView opens its socket in exactly that render. The Worker rejects a
+   * token minted for another room, so the room never finishes connecting.
+   * Reading here keeps the pair consistent in every render there is.
+   */
+  const token = useMemo(
+    () => (routeRoomId ? readToken(routeRoomId) : null),
+    [routeRoomId, tokenEpoch],
+  );
+
   useEffect(() => {
     setProblem(null);
-    if (route.kind === "room" || route.kind === "invite") {
-      setToken(readToken(route.roomId));
-    } else {
-      setToken(null);
-    }
   }, [route]);
 
   const createRoom = useCallback(
@@ -332,8 +358,16 @@ export function App() {
         };
         setRooms((prevRooms) => (projectId ? prevRooms : [...prevRooms, room]));
         if (projectId) {
+          // A room born into a project starts with the project's workspace
+          // already on it, so it never shows as folder-less for the beat
+          // before it opens and connects the shared folder itself.
           setProjects((prevProjects) => prevProjects.map((project) =>
-            project.id === projectId ? { ...project, rooms: [...project.rooms, room] } : project,
+            project.id === projectId
+              ? {
+                  ...project,
+                  rooms: [...project.rooms, { ...room, workspace: inheritedWorkspace(project.workspace) }],
+                }
+              : project,
           ));
         }
         localStorage.setItem("collab_ai:name", displayName);
@@ -381,7 +415,7 @@ export function App() {
         writeToken(roomId, tok);
         localStorage.setItem("collab_ai:name", displayName);
         setName(displayName);
-        setToken(tok);
+        setTokenEpoch((epoch) => epoch + 1);
       } catch {
         setProblem(refusalMessage("network"));
       } finally {
@@ -413,7 +447,7 @@ export function App() {
   const onAccessLost = useCallback(
     (reason: string) => {
       if (route.kind === "room" || route.kind === "invite") clearToken(route.roomId);
-      setToken(null);
+      setTokenEpoch((epoch) => epoch + 1);
       setProblem(reason);
     },
     [route],
@@ -530,17 +564,48 @@ export function App() {
     setProjects((prevProjects) => prevProjects.filter((candidate) => candidate.id !== projectId));
   }, [projects]);
 
+  /**
+   * Record what a room reports about its workspace, and spread it across the
+   * project the room belongs to.
+   *
+   * A "none" report never clears the project. Rooms in a project connect the
+   * shared folder when they open, so every one of them reports "none" for the
+   * moment between its socket opening and that attach landing; treating that
+   * as a disconnect would let simply visiting a room wipe the project's
+   * workspace. Disconnecting is an explicit act — see `detachWorkspace`.
+   */
   const updateWorkspace = useCallback((roomId: string, workspace: WorkspaceInfo) => {
     setRooms((prevRooms) => prevRooms.map((room) => (room.roomId === roomId ? { ...room, workspace } : room)));
     setProjects((prevProjects) => prevProjects.map((project) => {
-      const projectRoom = project.rooms.find((room) => room.roomId === roomId);
-      return projectRoom
-        ? {
-            ...project,
-            workspace,
-            rooms: project.rooms.map((room) => room.roomId === roomId ? { ...room, workspace } : room),
-          }
-        : project;
+      if (!project.rooms.some((room) => room.roomId === roomId)) return project;
+      const shared = workspace.kind === "none" ? project.workspace : inheritedWorkspace(workspace);
+      return {
+        ...project,
+        workspace: shared,
+        rooms: project.rooms.map((room) =>
+          room.roomId === roomId
+            ? { ...room, workspace: workspace.kind === "none" ? shared : workspace }
+            : { ...room, workspace: shared }),
+      };
+    }));
+  }, []);
+
+  /**
+   * Disconnect the workspace from the room, and from its project with it.
+   *
+   * The folder is the project's, so leaving it on the project would have the
+   * next room to open silently reconnect the folder the person just removed.
+   */
+  const detachWorkspace = useCallback((roomId: string) => {
+    setRooms((prevRooms) =>
+      prevRooms.map((room) => (room.roomId === roomId ? { ...room, workspace: EMPTY_WORKSPACE } : room)));
+    setProjects((prevProjects) => prevProjects.map((project) => {
+      if (!project.rooms.some((room) => room.roomId === roomId)) return project;
+      return {
+        ...project,
+        workspace: EMPTY_WORKSPACE,
+        rooms: project.rooms.map((room) => ({ ...room, workspace: EMPTY_WORKSPACE })),
+      };
     }));
   }, []);
 
@@ -600,8 +665,15 @@ export function App() {
   }
 
   if (token) {
+    const project = projects.find((candidate) =>
+      candidate.rooms.some((room) => room.roomId === route.roomId));
     const room = (
+      // Keyed by room: RoomView holds a socket, a transcript, a role and a
+      // workspace handle, all of which belong to one room. Reusing the
+      // instance across a switch would show the previous room's transcript
+      // while the new one connects.
       <RoomView
+        key={route.roomId}
         roomId={route.roomId}
         token={token}
         displayName={name}
@@ -609,6 +681,12 @@ export function App() {
         onSignOut={identity ? signOut : undefined}
         onAccessLost={onAccessLost}
         onWorkspaceChange={updateWorkspace}
+        onWorkspaceDetach={detachWorkspace}
+        // A room in a project shares that project's folder: one saved handle
+        // under the project's id, rather than a copy per room that would have
+        // to be kept in step and would leave rooms created later with none.
+        workspaceKey={project?.id ?? route.roomId}
+        projectWorkspace={project?.workspace ?? EMPTY_WORKSPACE}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
