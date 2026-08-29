@@ -16,19 +16,13 @@
     "run_worker_first": ["/agents/*", "/api/*"]
   },
 
-  // The app is meant to answer on app.huddleai.org. It cannot yet: huddleai.org
-  // resolves to Cloudflare nameservers but the zone is NOT on the account this
-  // Worker deploys from (9aab53df…, brahmjotchawla@gmail.com), so the API
-  // rejects the domain with "zone does not exist on your account" [10083].
-  //
-  // To turn it on, add huddleai.org as a zone to that account (or deploy from
-  // the account that already owns it), then uncomment the block below. Note the
-  // apex itself serves a different site that is not in this repo — this route is
-  // deliberately a subdomain so enabling it displaces nothing.
-  //
-  // "routes": [
-  //   { "pattern": "app.huddleai.org", "custom_domain": true, "zone_name": "huddleai.org" }
-  // ],
+  // The app answers on app.huddleai.org. Deliberately a subdomain: the apex
+  // serves a different site that is not in this repo, so this displaces
+  // nothing. `zone_name` is required — the zone cannot be inferred from a
+  // subdomain pattern.
+  "routes": [
+    { "pattern": "app.huddleai.org", "custom_domain": true, "zone_name": "huddleai.org" }
+  ],
 
   // Pinned on: adding any route silently disables the *.workers.dev URL, which
   // 404s the address the app is currently reachable at.
