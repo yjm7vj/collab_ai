@@ -926,6 +926,15 @@ export function RoomView({
             statusLabel={statusLabel}
             quickActions={
               <>
+                {maySettings && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowSettings(true)}
+                  >
+                    Agent setup
+                  </button>
+                )}
                 <button
                   type="button"
                   className="chat-action"
@@ -933,6 +942,24 @@ export function RoomView({
                 >
                   {mayWorkflow ? "Workflow" : "View Workflow"}
                 </button>
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowPermissions(true)}
+                  >
+                    Permissions
+                  </button>
+                )}
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowWorkspace(true)}
+                  >
+                    Workspace
+                  </button>
+                )}
               </>
             }
             onSend={say}
