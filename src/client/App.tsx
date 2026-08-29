@@ -505,6 +505,14 @@ export function App() {
     });
   }, []);
 
+  const renameProject = useCallback((projectId: string, name: string) => {
+    const nextName = name.trim().slice(0, 42);
+    if (!nextName) return;
+    setProjects((prev) =>
+      prev.map((project) => (project.id === projectId ? { ...project, name: nextName } : project)),
+    );
+  }, []);
+
   const openRoom = useCallback((roomId: string) => {
     location.hash = `#/r/${roomId}`;
   }, []);
@@ -645,6 +653,7 @@ export function App() {
         rooms={rooms}
         onCreateRoom={createRoomFromPane}
         onCreateProject={createProject}
+        onRenameProject={renameProject}
         onOpenRoom={openRoom}
         onRenameRoom={renameRoom}
         onCopyRoomLink={copyRoomLink}

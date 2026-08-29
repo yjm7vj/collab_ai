@@ -1004,10 +1004,8 @@ export function LandingPage({
       <nav className="lp-nav" data-lifted={lifted}>
         <div className="lp-nav-inner">
           <span className="lp-nav-mark">
-            <img src="/collab-logo.svg" alt="" width={26} height={26} />
-            {/* Wordmark slot — the product name is unconfirmed, so it stays at
-                label weight and the mark carries the identity. */}
-            <span className="lp-nav-name">collab_ai</span>
+            <img src="/collab-logo.svg" alt="" width={28} height={28} />
+            <span className="lp-nav-name">Huddle.AI</span>
           </span>
           <span className="lp-nav-actions">
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />

@@ -56,8 +56,8 @@ entrance effect.
 
 ## Constraints
 
-- Wordmark is a **placeholder**: the logo mark carries identity and the working
-  name "collab_ai" stays at label weight. No naming decision is baked in.
+- The product name is **Huddle.AI** (settled Aug 2026). The nav wordmark sets it
+  at control size and full weight beside the mark; it is no longer a placeholder.
 - Nothing may claim adoption, scale, or endorsement.
 - The demos are content, not decoration: every one reaches its finished state
   under `prefers-reduced-motion`, and the page is complete before any motion
@@ -65,7 +65,5 @@ entrance effect.
 
 ## Unresolved
 
-- The product name. Whenever it is settled, the hero can take a real wordmark
-  and the nav slot stops being a placeholder.
 - Whether the page should ever carry real evidence; it cannot until evidence
   exists.

@@ -1,5 +1,5 @@
 ---
-name: collab_ai
+name: Huddle.AI
 description: A shared desk where a room of people and one AI agent work from the same conversation and the same document.
 colors:
   bg: "#eef6fd"
@@ -173,13 +173,13 @@ components:
     padding: "1px 8px"
 ---
 
-# Design System: collab_ai
+# Design System: Huddle.AI
 
 ## Overview
 
 **Creative North Star: "The Shared Desk"**
 
-collab_ai is not a dashboard people report to — it's a desk several people sit around, with the AI agent as one more hand on the same document. The visual system already in place backs this up: everyone reads off the same calm, cool-toned surface, and every meaningful state — thinking, awaiting approval, denied, mine — gets a specific, quiet color rather than an alert-style callout. Nothing yells. Status is legible at a glance (a pip, a border color, a dashed outline) so the room can stay focused on the conversation and the document instead of the chrome around them.
+Huddle.AI is not a dashboard people report to — it's a desk several people sit around, with the AI agent as one more hand on the same document. The visual system already in place backs this up: everyone reads off the same calm, cool-toned surface, and every meaningful state — thinking, awaiting approval, denied, mine — gets a specific, quiet color rather than an alert-style callout. Nothing yells. Status is legible at a glance (a pip, a border color, a dashed outline) so the room can stay focused on the conversation and the document instead of the chrome around them.
 
 The palette and type scale are a considered, working system already — cool blue-white surfaces, a single sky-blue accent, tinted state colors (ok/bad/warn) reused consistently for votes, tool results, and diffs. It is not treated as final identity; color values here are documented as the current source of truth, not locked doctrine, and may be revisited.
 

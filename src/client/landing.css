@@ -367,14 +367,13 @@ html:has(.lp) {
   height: 26px;
   display: block;
 }
-/* Placeholder wordmark slot: the mark carries identity, the working name sits
-   at label weight so no naming decision is baked into the design. */
+/* The product name is settled, so the wordmark carries its own weight rather
+   than sitting at label size the way a placeholder had to. */
 .lp-nav-name {
-  font-size: var(--lp-fs-label);
+  font-size: var(--lp-fs-control);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--lp-stage-dim);
+  letter-spacing: -0.015em;
+  color: var(--lp-stage-ink);
 }
 .lp-nav-actions {
   display: flex;

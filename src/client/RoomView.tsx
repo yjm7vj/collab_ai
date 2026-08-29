@@ -31,6 +31,7 @@ import {
   ThemeToggle,
   type ThemeMode,
 } from "./components";
+import { IdePanel } from "./IdePanel";
 import { SettingsPanel } from "./Settings";
 import { WorkflowPanel } from "./Workflow";
 import {
@@ -44,6 +45,7 @@ import {
   pickDirectory,
   saveHandle,
 } from "./workspace";
+import type { FsRequest, FsResponse } from "../shared/workspace";
 
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
@@ -109,6 +111,8 @@ export function RoomView({
   const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("hidden");
   const [showDocument, setShowDocument] = useState(false);
+  const [showIde, setShowIde] = useState(false);
+  const pendingClientFs = useRef(new Map<string, { resolve: (res: FsResponse) => void; timer: number }>());
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
   const rootRef = useRef<FileSystemDirectoryHandle | null>(null);
@@ -231,6 +235,14 @@ export function RoomView({
           send({ t: "fs.res", id: msg.id, res });
         })();
         break;
+      case "fs.client.res": {
+        const pending = pendingClientFs.current.get(msg.id);
+        if (!pending) break;
+        window.clearTimeout(pending.timer);
+        pendingClientFs.current.delete(msg.id);
+        pending.resolve(msg.res);
+        break;
+      }
       case "github.install":
         // Opened in a new tab rather than navigating away: the room is a live
         // socket and a full navigation would drop it, losing the transcript
@@ -480,6 +492,21 @@ export function RoomView({
     send({ t: "github.signout" });
   }, [send]);
 
+  const requestWorkspace = useCallback((req: FsRequest): Promise<FsResponse> => {
+    if (state.workspace.kind === "local" && rootRef.current) {
+      return performFsRequest(rootRef.current, req);
+    }
+    const id = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => {
+        pendingClientFs.current.delete(id);
+        resolve({ ok: false, error: "The workspace request timed out." });
+      }, 6_000);
+      pendingClientFs.current.set(id, { resolve, timer });
+      send({ t: "fs.client.req", id, req });
+    });
+  }, [send, state.workspace.kind]);
+
   /**
    * After the GitHub round trip the browser lands back here with `?gh=connected`.
    * Reopen the workspace panel where the person left off and fetch their
@@ -711,10 +738,22 @@ export function RoomView({
                         setShowWorkspace(true);
                       }}
                     >
-                      Workspace
-                    </button>
-                  )}
-                </section>
+                    Workspace
+                  </button>
+                )}
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowSettingsMenu(false);
+                      setShowIde(true);
+                    }}
+                  >
+                    Code workspace
+                  </button>
+                )}
+              </section>
 
                 <section className="settings-menu-section">
                   <div className="settings-menu-label">Usage</div>
@@ -814,6 +853,15 @@ export function RoomView({
         />
       )}
 
+      {showIde && (
+        <IdePanel
+          workspace={state.workspace}
+          canEdit={canSeeFileContents(myRole) && (state.workspace.kind === "github" || canWrite)}
+          onRequest={requestWorkspace}
+          onClose={() => setShowIde(false)}
+        />
+      )}
+
       {showInvites && (
         <InvitePanel
           invites={invites}
@@ -878,6 +926,15 @@ export function RoomView({
             statusLabel={statusLabel}
             quickActions={
               <>
+                {maySettings && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowSettings(true)}
+                  >
+                    Agent setup
+                  </button>
+                )}
                 <button
                   type="button"
                   className="chat-action"
@@ -885,6 +942,24 @@ export function RoomView({
                 >
                   {mayWorkflow ? "Workflow" : "View Workflow"}
                 </button>
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowPermissions(true)}
+                  >
+                    Permissions
+                  </button>
+                )}
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowWorkspace(true)}
+                  >
+                    Workspace
+                  </button>
+                )}
               </>
             }
             onSend={say}

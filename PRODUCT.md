@@ -35,7 +35,7 @@ Most multiplayer/collab AI tools give each person their own agent or session. Th
 - Real-time multiplayer chat with a single shared AI agent (Anthropic API).
 - Shared document editing and file/workspace editing (local folder or GitHub), gated behind room votes unless auto-accept is set.
 - Streaming model responses; a mock mode (`ANTHROPIC_API_KEY=mock`) exercises streaming, approval pause, voting, and resumption without a real API key.
-- No fixed brand identity yet — "collab_ai" is currently a working/repo name, not a confirmed product name.
+- The product is **Huddle.AI**. The repo, the Worker and the localStorage keys still carry the older `collab_ai` name; only the user-facing name has moved.
 
 ## Evidence on Hand
 
