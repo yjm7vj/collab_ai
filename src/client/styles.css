@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
-
 /* Three ink tiers, three surface tiers, one accent. Every value here is set so
    the pair it actually composes clears WCAG: text ≥4.5:1, control boundaries
    and status graphics ≥3:1. The quiet tier (--ink-faint) sits at the 4.5 floor

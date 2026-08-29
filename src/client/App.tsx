@@ -21,6 +21,7 @@ import {
   type JoinRoomResponse,
 } from "../shared/protocol";
 import { Landing, JoinGate, SidePane, SignInGate } from "./components";
+import { LandingPage } from "./landing";
 import { RoomView } from "./RoomView";
 import type { WorkspaceInfo } from "../shared/workspace";
 
@@ -670,6 +671,25 @@ export function App() {
   // `providers` is only `null` for the beat before /api/auth/config answers —
   // render nothing rather than flash the wrong gate (name entry vs. sign-in).
   if (providers === null) return null;
+
+  // A signed-out visitor at the root gets the landing surface, whichever way
+  // this deployment admits people. Deep links (an invite, a room) keep going
+  // straight to the gate that guards them — a marketing page between someone
+  // and the room they were sent to would be a worse product, not a better one.
+  if (!identity && route.kind === "landing") {
+    return (
+      <LandingPage
+        providers={providers}
+        onSignIn={signIn}
+        onCreate={createRoom}
+        initialName={name}
+        busy={busy}
+        problem={problem}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
+  }
 
   if (providers.length > 0 && !identity) {
     return (

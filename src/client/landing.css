@@ -1,0 +1,1304 @@
+/* Landing surface.
+ *
+ * The direction contract lives in index.html, as the first child of <body>.
+ *
+ * Everything here is scoped under `.lp` so a marketing-scale type ramp and a
+ * dark stage can never leak into the app shell, which is a different mode with
+ * a different density. The tokens below are derived from the app's own system
+ * (styles.css): the same cool surfaces, the same one accent, the same flat
+ * border-plus-tint construction — pushed up to display scale, and given a deep
+ * slate "stage" for the acts that need to go quiet and large.
+ */
+
+/* The app shell is a fixed-height frame that never scrolls the document; the
+   landing route is the one place that does. */
+html:has(.lp),
+body:has(.lp),
+#root:has(.lp) {
+  height: auto;
+  min-height: 100%;
+}
+
+.lp {
+  --lp-stage: #0b1424;
+  --lp-stage-2: #111d31;
+  --lp-stage-ink: #eaf2ff;
+  --lp-stage-dim: #a3b8d4;
+  --lp-stage-faint: #8296b3;
+  --lp-stage-line: rgba(154, 192, 240, 0.2);
+  --lp-stage-line-soft: rgba(154, 192, 240, 0.11);
+  --lp-stage-fill: rgba(154, 192, 240, 0.07);
+  --lp-stage-fill-hover: rgba(154, 192, 240, 0.14);
+  --lp-stage-accent: #5aa7ff;
+  /* The scroll rail crosses pale acts and stage acts alike, so it draws from
+     the one token family the system already keeps ground-agnostic. */
+  --lp-spine: var(--logo-mid);
+  --lp-stage-accent-hover: #8ac2ff;
+  --lp-on-stage-accent: #06101f;
+  --lp-stage-ok: #6bc48c;
+  --lp-stage-bad: #ff8d85;
+  /* The proposed-change diff keeps its own red/green pair, distinct from
+     ok/bad, exactly as the app's system requires — but it always sits on the
+     stage, so it takes the dark values in both themes rather than inverting. */
+  --lp-diff-old: #ff766d;
+  --lp-diff-old-ink: #ffb6b0;
+  --lp-diff-new: #6bc48c;
+  --lp-diff-new-ink: #b8efc5;
+
+  --lp-gutter: clamp(20px, 5vw, 72px);
+  --lp-max: 1180px;
+  --lp-act-pad: clamp(84px, 11vw, 150px);
+
+  /* This surface's type ramp. The app's ramp tops out at a 15px working
+     body, which is right at a desk and far too quiet for a page someone is
+     deciding from — so the landing declares its own steps once, here, rather
+     than scattering literals through the file. */
+  --lp-display: clamp(2.55rem, 6.6vw, 5rem);
+  --lp-h2: clamp(1.85rem, 3.6vw, 2.85rem);
+  --lp-stat: clamp(1.9rem, 3vw, 2.6rem);
+  --lp-close: clamp(2.1rem, 5vw, 3.6rem);
+  --lp-lead: clamp(1.05rem, 1.35vw, 1.28rem);
+  --lp-fs-body: 17px;
+  --lp-fs-control: 16px;
+  --lp-fs-ui: 14px;
+  --lp-fs-small: 13px;
+  --lp-fs-meta: 12px;
+  --lp-fs-label: 11px;
+
+  /* Radii. The app's control step (7px) is kept verbatim; the landing adds a
+     larger step for its demo panels, which are page furniture rather than the
+     app's compact cards. */
+  --lp-r-xs: 6px;
+  --lp-r-sm: 7px;
+  --lp-r-md: 8px;
+  --lp-r-lg: 9px;
+  --lp-r-xl: 14px;
+  --lp-r-pill: 999px;
+
+  --lp-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  position: relative;
+  isolation: isolate;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--lp-fs-body);
+  line-height: 1.6;
+  overflow-x: clip;
+}
+
+:root[data-theme="dark"] .lp {
+  --lp-stage: #05090f;
+  --lp-stage-2: #0b131e;
+}
+
+/* Browser surfaces the design still owns. */
+.lp ::selection {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--ink);
+}
+.lp-act--stage ::selection {
+  background: color-mix(in srgb, var(--lp-stage-accent) 30%, transparent);
+  color: var(--lp-stage-ink);
+}
+.lp input {
+  caret-color: var(--accent);
+}
+.lp :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--lp-r-xs);
+}
+.lp-act--stage :focus-visible {
+  outline-color: var(--lp-stage-accent);
+}
+.lp a {
+  color: inherit;
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+.lp a:hover {
+  text-decoration-color: currentColor;
+}
+.lp [data-num] {
+  font-variant-numeric: tabular-nums;
+}
+html:has(.lp) {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--line-strong) 60%, transparent) transparent;
+}
+.lp-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- shell */
+
+.lp-inner {
+  width: 100%;
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding-inline: var(--lp-gutter);
+}
+
+.lp-act {
+  position: relative;
+  padding-block: var(--lp-act-pad);
+}
+.lp-act--stage {
+  background: var(--lp-stage);
+  color: var(--lp-stage-ink);
+}
+.lp-act--tint {
+  background: color-mix(in srgb, var(--panel-3) 55%, var(--bg));
+}
+
+/* --------------------------------------------------------------- typography */
+
+.lp h1,
+.lp h2,
+.lp h3 {
+  margin: 0;
+  font-weight: 800;
+  text-wrap: balance;
+}
+
+.lp-h1 {
+  font-size: var(--lp-display);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  max-width: 15ch;
+}
+.lp-h1 .lp-h1-quiet {
+  display: block;
+  color: var(--lp-stage-dim);
+}
+
+.lp-h2 {
+  font-size: var(--lp-h2);
+  line-height: 1.04;
+  letter-spacing: -0.032em;
+  max-width: 20ch;
+}
+
+.lp-lead {
+  margin: 0;
+  font-size: var(--lp-lead);
+  line-height: 1.5;
+  color: var(--lp-stage-dim);
+  max-width: 46ch;
+  text-wrap: pretty;
+}
+
+.lp-body {
+  margin: 0;
+  color: var(--ink-dim);
+  max-width: 58ch;
+  text-wrap: pretty;
+}
+.lp-act--stage .lp-body {
+  color: var(--lp-stage-dim);
+}
+
+.lp-note {
+  margin: 0;
+  font-size: var(--lp-fs-small);
+  color: var(--ink-faint);
+  max-width: 52ch;
+}
+.lp-act--stage .lp-note {
+  color: var(--lp-stage-faint);
+}
+
+/* --------------------------------------------------------------- controls */
+
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 22px;
+  border-radius: var(--lp-r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: var(--lp-fs-control);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background 160ms var(--lp-ease),
+    border-color 160ms var(--lp-ease),
+    transform 160ms var(--lp-ease);
+}
+.lp-btn:hover:not(:disabled) {
+  background: var(--panel-3);
+  transform: translateY(-1px);
+}
+.lp-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.lp-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.lp-btn--primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.lp-act--stage .lp-btn--primary,
+.lp-hero .lp-btn--primary {
+  background: var(--lp-stage-accent);
+  border-color: var(--lp-stage-accent);
+  color: var(--lp-on-stage-accent);
+}
+.lp-act--stage .lp-btn--primary:hover:not(:disabled),
+.lp-hero .lp-btn--primary:hover:not(:disabled) {
+  background: var(--lp-stage-accent-hover);
+  border-color: var(--lp-stage-accent-hover);
+}
+
+.lp-btn--ghost {
+  background: transparent;
+  border-color: var(--lp-stage-line);
+  color: var(--lp-stage-ink);
+}
+.lp-btn--ghost:hover:not(:disabled) {
+  background: var(--lp-stage-fill);
+  border-color: var(--lp-stage-accent);
+}
+
+.lp-btn--small {
+  height: 34px;
+  padding: 0 13px;
+  font-size: var(--lp-fs-small);
+  border-radius: var(--lp-r-sm);
+}
+
+.lp-linkbtn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-size: var(--lp-fs-small);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.24em;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+/* Touch gets a real target; the underline stays the same size. */
+@media (pointer: coarse) {
+  .lp-linkbtn { min-height: 44px; }
+  .lp-foot a { display: inline-flex; align-items: center; min-height: 44px; }
+  /* The app's compact control height is right at a desk and wrong under a
+     thumb; only the landing's controls grow. */
+  .lp-btn--small,
+  .lp-seg-btn,
+  .lp-vote,
+  .lp-nav .theme-toggle { height: 42px; }
+}
+.lp-linkbtn:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+  background: none;
+}
+.lp-act--stage .lp-linkbtn:hover {
+  color: var(--lp-stage-accent);
+}
+
+/* --------------------------------------------------------------- nav */
+
+.lp-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  background-color: transparent;
+  transition:
+    background-color 260ms var(--lp-ease),
+    border-color 260ms var(--lp-ease),
+    backdrop-filter 260ms var(--lp-ease);
+  border-bottom: 1px solid transparent;
+}
+.lp-nav[data-lifted="true"] {
+  /* Blur here is doing a specific job: keeping nav labels legible over the
+     hero canvas and over panel content that scrolls beneath it. */
+  /* Opaque enough that nav text keeps its contrast where the bar rides over
+     the pale acts, not only over the hero. */
+  background-color: color-mix(in srgb, var(--lp-stage) 90%, transparent);
+  backdrop-filter: saturate(1.4) blur(14px);
+  border-bottom-color: var(--lp-stage-line-soft);
+}
+.lp-nav-inner {
+  width: 100%;
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding-inline: var(--lp-gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.lp-nav-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--lp-stage-ink);
+}
+.lp-nav-mark img {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+/* The product name is settled, so the wordmark carries its own weight rather
+   than sitting at label size the way a placeholder had to. */
+.lp-nav-name {
+  font-size: var(--lp-fs-control);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--lp-stage-ink);
+}
+.lp-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lp-nav .lp-btn--small {
+  border-color: var(--lp-stage-line);
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-ink);
+}
+.lp-nav .lp-btn--small:hover:not(:disabled) {
+  background: var(--lp-stage-fill-hover);
+}
+/* The app's theme toggle is built for a pale panel; on the stage it takes the
+   same translucent treatment the app already uses for controls on dark. */
+.lp-nav .theme-toggle {
+  border-color: var(--lp-stage-line);
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-dim);
+}
+.lp-nav .theme-toggle:hover:not(:disabled) {
+  background: var(--lp-stage-fill-hover);
+  color: var(--lp-stage-ink);
+}
+
+/* --------------------------------------------------------------- hero */
+
+.lp-hero {
+  position: relative;
+  min-height: calc(100svh - 64px);
+  margin-top: -64px;
+  padding-top: 64px;
+  display: flex;
+  align-items: center;
+  background: var(--lp-stage);
+  color: var(--lp-stage-ink);
+  overflow: hidden;
+}
+.lp-hero-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+/* A vignette so display type stays at full contrast wherever a strand
+   happens to pass behind it. */
+.lp-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    var(--lp-stage) 0%,
+    color-mix(in srgb, var(--lp-stage) 82%, transparent) 34%,
+    transparent 62%
+  );
+}
+.lp-hero-inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding-inline: var(--lp-gutter);
+  padding-block: clamp(64px, 12vh, 120px);
+  display: grid;
+  gap: 26px;
+  justify-items: start;
+}
+.lp-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.lp-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: var(--lp-fs-small);
+  color: var(--lp-stage-faint);
+}
+.lp-hero-pip {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--lp-r-pill);
+  background: var(--lp-stage-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lp-stage-ok) 22%, transparent);
+}
+
+.lp-cue {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  z-index: 2;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lp-stage-faint);
+}
+.lp-cue-rail {
+  width: 1px;
+  height: 34px;
+  background: linear-gradient(var(--lp-stage-line), transparent);
+  position: relative;
+  overflow: hidden;
+}
+.lp-cue-rail::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  height: 12px;
+  background: var(--lp-stage-accent);
+  animation: lp-cue-fall 2.4s var(--lp-ease) infinite;
+}
+@keyframes lp-cue-fall {
+  0% { transform: translateY(-14px); opacity: 0; }
+  35% { opacity: 1; }
+  100% { transform: translateY(34px); opacity: 0; }
+}
+
+/* --------------------------------------------------------------- spine */
+
+/* The hero's convergence, continued: one thread down the page that draws as
+   you scroll and ties every chapter's demo back to the first viewport. */
+.lp-spine {
+  position: fixed;
+  left: max(10px, calc((100vw - var(--lp-max)) / 2 - 26px));
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  z-index: 5;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--lp-spine) 24%, transparent);
+}
+.lp-spine-fill {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  background: linear-gradient(
+    var(--lp-spine),
+    color-mix(in srgb, var(--lp-spine) 30%, transparent)
+  );
+  transform-origin: top;
+}
+.lp-spine-head {
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  margin-top: -4.5px;
+  border-radius: var(--lp-r-pill);
+  background: var(--lp-spine);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--lp-spine) 18%, transparent),
+    0 2px 10px color-mix(in srgb, var(--lp-spine) 35%, transparent);
+  transition: opacity 300ms var(--lp-ease);
+}
+@media (max-width: 760px) {
+  /* Narrow, the rail is a hairline in the gutter rather than a bar. */
+  .lp-spine { width: 1px; }
+  .lp-spine-head { width: 7px; height: 7px; margin-left: -3.5px; margin-top: -3.5px; }
+}
+
+/* --------------------------------------------------------------- chapters */
+
+.lp-chapter {
+  display: grid;
+  gap: clamp(36px, 5vw, 60px);
+}
+.lp-chapter-head {
+  display: grid;
+  gap: 18px;
+  max-width: 62ch;
+}
+.lp-chapter--split {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: center;
+}
+.lp-chapter--split-rev .lp-chapter-head {
+  order: 2;
+}
+@media (max-width: 900px) {
+  .lp-chapter--split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lp-chapter--split-rev .lp-chapter-head {
+    order: 0;
+  }
+}
+
+/* --------------------------------------------------------------- panels */
+
+/* Demo chrome. Same construction rule as the app: border plus tint, no
+   ambient shadow — these panels sit in the page, they don't float over it. */
+.lp-panel {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-xl);
+  background: var(--panel);
+  overflow: hidden;
+}
+.lp-act--stage .lp-panel {
+  border-color: var(--lp-stage-line);
+  background: var(--lp-stage-2);
+}
+.lp-panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.lp-act--stage .lp-panel-bar {
+  border-bottom-color: var(--lp-stage-line-soft);
+  background: color-mix(in srgb, var(--lp-stage) 60%, transparent);
+  color: var(--lp-stage-faint);
+}
+.lp-panel-foot {
+  border-bottom: none;
+  border-top: 1px solid var(--line);
+}
+.lp-act--stage .lp-panel-foot {
+  border-top-color: var(--lp-stage-line-soft);
+}
+.lp-panel-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+/* The app marks an unfilled slot with a dashed chip; a room that isn't real
+   is the same idea, so it borrows the same cue rather than inventing one. */
+.lp-synthetic {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--lp-r-pill);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.lp-act--stage .lp-synthetic {
+  border-color: var(--lp-stage-line);
+  color: var(--lp-stage-faint);
+}
+.lp-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+.lp-presence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--lp-r-pill);
+  background: var(--ok);
+}
+.lp-act--stage .lp-presence-dot {
+  background: var(--lp-stage-ok);
+}
+
+/* --------------------------------------------------- chapter 1: the merge */
+
+.lp-merge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px minmax(0, 1.1fr);
+  align-items: center;
+  gap: 0;
+}
+@media (max-width: 860px) {
+  .lp-merge {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+.lp-typers {
+  display: grid;
+  gap: 10px;
+  padding: clamp(14px, 2vw, 20px);
+}
+.lp-typer {
+  display: grid;
+  gap: 5px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-lg);
+  background: var(--panel-2);
+  transition:
+    opacity 420ms var(--lp-ease),
+    transform 520ms var(--lp-ease),
+    filter 420ms var(--lp-ease);
+}
+.lp-typer[data-folded="true"] {
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateX(26px) scale(0.96);
+}
+.lp-typer-name {
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.lp-typer-text {
+  font-size: var(--lp-fs-ui);
+  color: var(--ink);
+  min-height: 1.5em;
+  overflow-wrap: anywhere;
+}
+.lp-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: lp-blink 1s steps(1) infinite;
+}
+@keyframes lp-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+.lp-merge-join {
+  position: relative;
+  align-self: stretch;
+}
+.lp-merge-join svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+@media (max-width: 860px) {
+  /* Stacked, the three lines already sit directly above the turn they became;
+     a rotated connector would only overlap them. The divider carries it. */
+  .lp-merge-join { display: none; }
+  /* Side by side, the emptied column is the point — the lines left. Stacked,
+     it is 200px of nothing above the answer, so the row closes instead. */
+  .lp-typers {
+    /* Headroom, not a measurement: the three lines run ~250px, and the ceiling
+       only has to exceed them so the collapse to 0 has somewhere to start.
+       Raise it if the demo copy grows or text is scaled well past default. */
+    max-height: 400px;
+    overflow: hidden;
+    transition:
+      max-height 560ms var(--lp-ease),
+      padding-block 560ms var(--lp-ease);
+  }
+  .lp-typers[data-folded="true"] {
+    max-height: 0;
+    padding-block: 0;
+  }
+}
+
+.lp-turnwrap {
+  padding: clamp(14px, 2vw, 20px);
+  border-left: 1px solid var(--line);
+  align-self: stretch;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  min-height: 236px;
+}
+@media (max-width: 860px) {
+  .lp-turnwrap {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+}
+.lp-turn {
+  display: grid;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-lg);
+  background: var(--bg);
+}
+.lp-turn-line {
+  font-size: var(--lp-fs-ui);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.lp-turn-tag {
+  font-weight: 700;
+  color: var(--accent);
+}
+.lp-reply {
+  display: grid;
+  gap: 5px;
+}
+.lp-reply-who {
+  font-size: var(--lp-fs-label);
+  font-weight: 650;
+  color: var(--accent);
+}
+.lp-reply-text {
+  font-size: var(--lp-fs-ui);
+  line-height: 1.55;
+  color: var(--ink);
+  min-height: 1.5em;
+}
+.lp-dots {
+  display: inline-block;
+  width: 24px;
+  height: 8px;
+  background:
+    radial-gradient(circle 3px at 4px 4px, var(--ink-faint) 99%, transparent),
+    radial-gradient(circle 3px at 12px 4px, var(--ink-faint) 99%, transparent),
+    radial-gradient(circle 3px at 20px 4px, var(--ink-faint) 99%, transparent);
+  animation: lp-pulse 1.1s ease-in-out infinite;
+}
+@keyframes lp-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* --------------------------------------------------- chapter 2: the vote */
+
+.lp-approval {
+  display: grid;
+  gap: 12px;
+  padding: clamp(14px, 2vw, 20px);
+}
+.lp-approval-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+.lp-approval-tool {
+  font-size: var(--lp-fs-small);
+  font-weight: 700;
+  color: var(--lp-stage-accent);
+}
+.lp-approval-sub {
+  font-size: var(--lp-fs-meta);
+  color: var(--lp-stage-faint);
+}
+.lp-diff {
+  display: grid;
+  gap: 4px;
+  font-size: var(--lp-fs-small);
+  border-radius: var(--lp-r-lg);
+  overflow: hidden;
+}
+.lp-diff-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--lp-r-xs);
+  transition:
+    opacity 380ms var(--lp-ease),
+    transform 380ms var(--lp-ease);
+}
+.lp-diff-row pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.lp-diff-sign {
+  color: currentColor;
+  opacity: 0.75;
+}
+.lp-diff-old {
+  background: color-mix(in srgb, var(--lp-diff-old) 16%, transparent);
+  color: var(--lp-diff-old-ink);
+}
+.lp-diff-new {
+  background: color-mix(in srgb, var(--lp-diff-new) 16%, transparent);
+  color: var(--lp-diff-new-ink);
+}
+.lp-diff[data-state="denied"] .lp-diff-new {
+  opacity: 0.3;
+  text-decoration: line-through;
+}
+.lp-diff[data-state="applied"] .lp-diff-old {
+  opacity: 0.35;
+}
+
+.lp-votebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--lp-stage-line-soft);
+  margin-top: 4px;
+  padding-block: 12px 0;
+}
+.lp-vote {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: var(--lp-r-sm);
+  border: 1px solid var(--lp-stage-line);
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-ui);
+  font-weight: 600;
+  transition:
+    border-color 180ms var(--lp-ease),
+    background 180ms var(--lp-ease),
+    color 180ms var(--lp-ease);
+}
+.lp-vote:hover:not([aria-disabled="true"]) {
+  background: var(--lp-stage-fill-hover);
+}
+.lp-vote[aria-disabled="true"] {
+  cursor: default;
+}
+.lp-vote[data-muted="true"] {
+  color: var(--lp-stage-faint);
+  border-color: var(--lp-stage-line-soft);
+}
+.lp-vote[data-cast="true"][data-kind="approve"] {
+  border-color: var(--lp-stage-ok);
+  color: var(--lp-stage-ok);
+}
+.lp-vote[data-cast="true"][data-kind="deny"] {
+  border-color: var(--lp-stage-bad);
+  color: var(--lp-stage-bad);
+}
+.lp-vote-count {
+  font-size: var(--lp-fs-meta);
+  color: var(--lp-stage-faint);
+}
+.lp-vote-spacer {
+  flex: 1 1 auto;
+}
+.lp-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--lp-fs-small);
+  font-weight: 600;
+  color: var(--lp-stage-dim);
+}
+.lp-outcome-pip {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--lp-r-pill);
+  background: var(--lp-stage-faint);
+}
+.lp-outcome[data-state="applied"] .lp-outcome-pip { background: var(--lp-stage-ok); }
+.lp-outcome[data-state="denied"] .lp-outcome-pip { background: var(--lp-stage-bad); }
+.lp-outcome[data-state="open"] .lp-outcome-pip {
+  background: var(--lp-stage-accent);
+  animation: lp-pulse 1.4s ease-in-out infinite;
+}
+
+/* --------------------------------------------- chapter 3: the durable turn */
+
+.lp-timeline {
+  position: relative;
+  padding: clamp(22px, 3.5vw, 40px) clamp(14px, 2vw, 26px) clamp(18px, 2.5vw, 28px);
+}
+.lp-track {
+  position: relative;
+  height: 2px;
+  margin: 0 12px 34px;
+  background: var(--line);
+  border-radius: var(--lp-r-pill);
+}
+.lp-track-fill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: var(--accent);
+  border-radius: var(--lp-r-pill);
+  transform-origin: left;
+}
+.lp-nodes {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: -46px;
+}
+@media (max-width: 820px) {
+  .lp-track { display: none; }
+  .lp-nodes {
+    grid-template-columns: minmax(0, 1fr);
+    margin-top: 0;
+    gap: 4px;
+  }
+  .lp-node { padding-left: 22px; border-left: 1px solid var(--line); }
+}
+.lp-node {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  transition:
+    opacity 500ms var(--lp-ease),
+    transform 500ms var(--lp-ease);
+}
+.lp-node[data-lit="false"] {
+  opacity: 0.32;
+  transform: translateY(8px);
+}
+.lp-node-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: var(--lp-r-pill);
+  background: var(--panel);
+  border: 2px solid var(--line-strong);
+  transition: background 300ms var(--lp-ease), border-color 300ms var(--lp-ease);
+}
+.lp-node[data-lit="true"] .lp-node-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.lp-node[data-quiet="true"][data-lit="true"] .lp-node-dot {
+  background: var(--panel);
+  border-color: var(--accent);
+}
+.lp-node-time {
+  font-size: var(--lp-fs-meta);
+  font-weight: 700;
+  color: var(--ink-faint);
+}
+.lp-node-label {
+  font-size: var(--lp-fs-ui);
+  line-height: 1.4;
+  color: var(--ink);
+  max-width: 22ch;
+}
+.lp-node[data-quiet="true"] .lp-node-label {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
+/* ---------------------------------------------- chapter 4: the workspace */
+
+.lp-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--lp-r-lg);
+  background: var(--panel-2);
+}
+.lp-seg-btn {
+  height: 34px;
+  padding: 0 15px;
+  border: 1px solid transparent;
+  border-radius: var(--lp-r-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--lp-fs-ui);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lp-seg-btn:hover:not([aria-pressed="true"]) {
+  background: var(--panel-3);
+}
+.lp-seg-btn[aria-pressed="true"] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.lp-chapter-demo {
+  display: grid;
+  gap: 16px;
+  justify-items: start;
+}
+.lp-chapter-demo .lp-panel {
+  width: 100%;
+}
+.lp-ws {
+  display: grid;
+  gap: 2px;
+  padding: clamp(12px, 1.8vw, 18px);
+  min-height: 232px;
+  align-content: start;
+  view-transition-name: lp-workspace;
+}
+.lp-ws-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--lp-r-sm);
+  font-size: var(--lp-fs-ui);
+  color: var(--ink);
+}
+.lp-ws-row:nth-child(odd) {
+  background: var(--panel-2);
+}
+.lp-ws-path {
+  color: var(--ink-dim);
+}
+.lp-ws-tag {
+  margin-left: auto;
+  font-size: var(--lp-fs-meta);
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: var(--lp-r-pill);
+  border: 1px solid var(--line);
+  color: var(--ink-faint);
+}
+.lp-ws-tag[data-kind="new"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.lp-ws-tag[data-kind="edit"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.lp-ws-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 12px;
+  font-size: var(--lp-fs-small);
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.lp-ws-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  border-radius: var(--lp-r-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: var(--lp-fs-meta);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ------------------------------------------ chapter 5: the room instrument */
+
+.lp-instrument {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: clamp(20px, 3vw, 40px);
+  align-items: stretch;
+}
+@media (max-width: 900px) {
+  .lp-instrument { grid-template-columns: minmax(0, 1fr); }
+}
+.lp-announce {
+  display: grid;
+  gap: 10px;
+  padding: clamp(14px, 2vw, 20px);
+}
+.lp-announce-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: var(--lp-fs-ui);
+  color: var(--ink-dim);
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+  transition: opacity 420ms var(--lp-ease), transform 420ms var(--lp-ease);
+}
+.lp-announce-line:last-child { border-bottom: none; }
+.lp-announce-line[data-in="false"] { opacity: 0; transform: translateY(6px); }
+.lp-announce-time {
+  font-size: var(--lp-fs-meta);
+  font-weight: 700;
+  color: var(--ink-faint);
+  flex: none;
+}
+.lp-announce-line strong { color: var(--ink); font-weight: 650; }
+
+.lp-gaugewrap {
+  display: grid;
+  gap: 14px;
+  align-content: center;
+  padding: clamp(16px, 2.4vw, 26px);
+}
+.lp-gauge-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lp-gauge-value {
+  font-size: var(--lp-stat);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.lp-gauge-cap {
+  font-size: var(--lp-fs-small);
+  color: var(--ink-faint);
+}
+.lp-gauge-track {
+  height: 8px;
+  border-radius: var(--lp-r-pill);
+  background: var(--panel-3);
+  overflow: hidden;
+}
+.lp-gauge-fill {
+  height: 100%;
+  border-radius: var(--lp-r-pill);
+  background: var(--accent);
+  transform-origin: left;
+  transition: transform 1100ms var(--lp-ease);
+}
+
+/* --------------------------------------------------------------- close */
+
+.lp-close {
+  display: grid;
+  gap: 28px;
+  justify-items: start;
+}
+.lp-close-h {
+  font-size: var(--lp-close);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  max-width: 17ch;
+}
+.lp-close-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  width: min(560px, 100%);
+}
+.lp-close-form input {
+  flex: 1 1 210px;
+  height: 48px;
+  background: var(--lp-stage-fill);
+  border-color: var(--lp-stage-line);
+  color: var(--lp-stage-ink);
+  border-radius: var(--lp-r-md);
+  font-size: var(--lp-fs-control);
+}
+.lp-close-form input::placeholder {
+  color: var(--lp-stage-faint);
+}
+.lp-close-form input:focus {
+  border-color: var(--lp-stage-accent);
+}
+.lp-close-error {
+  margin: 0;
+  font-size: var(--lp-fs-small);
+  color: var(--lp-stage-bad);
+}
+.lp-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* --------------------------------------------------------------- footer */
+
+.lp-foot {
+  border-top: 1px solid var(--lp-stage-line-soft);
+  background: var(--lp-stage);
+  color: var(--lp-stage-faint);
+  padding-block: 30px 40px;
+  font-size: var(--lp-fs-small);
+}
+.lp-foot-inner {
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding-inline: var(--lp-gutter);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+}
+.lp-foot img {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.lp-foot-spacer { flex: 1 1 auto; }
+
+/* --------------------------------------------------------------- reveal */
+
+/* One reveal grammar, used once per region — the chapters differ by what
+   their demo does, not by a second entrance effect. */
+.lp-reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms var(--lp-ease),
+    transform 700ms var(--lp-ease);
+}
+.lp-reveal[data-in="true"] {
+  opacity: 1;
+  transform: none;
+}
+.lp-reveal[data-delay="1"] { transition-delay: 90ms; }
+.lp-reveal[data-delay="2"] { transition-delay: 180ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp *,
+  .lp *::before,
+  .lp *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .lp-reveal { opacity: 1; transform: none; }
+  .lp-cue-rail::after { display: none; }
+}
