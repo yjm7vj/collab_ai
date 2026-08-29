@@ -1,6 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "collab-ai",
+  // Deploys to the account that owns the huddleai.org zone, not to whichever
+  // account the local wrangler login happens to default to. The worker of this
+  // name there is the one already serving app.huddleai.org, so a deploy updates
+  // it in place and keeps its Durable Object storage — the live rooms.
+  "account_id": "43c1ccdc0ceb55bce8cb6f05beaed231",
   "main": "src/server/index.ts",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
