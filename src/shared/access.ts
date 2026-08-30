@@ -40,7 +40,9 @@ export type Capability =
   /** Change other people's roles, and remove them. */
   | "manage_members"
   /** Rename the room, change its visibility, transfer or delete it. */
-  | "admin_room";
+  | "admin_room"
+  /** View prior shared-document snapshots. */
+  | "view_revisions";
 
 const RANK: Record<Role, number> = { viewer: 0, editor: 1, admin: 2, owner: 3 };
 
@@ -48,8 +50,9 @@ export const ROLE_CAPS: Record<Role, readonly Capability[]> = {
   owner: [
     "speak", "vote", "compact", "settings", "workflow", "policy", "invite",
     "manage_members", "admin_room",
+    "view_revisions",
   ],
-  admin: ["speak", "vote", "compact", "settings", "workflow", "policy", "invite", "manage_members"],
+  admin: ["speak", "vote", "compact", "settings", "workflow", "policy", "invite", "manage_members", "view_revisions"],
   editor: ["speak", "vote", "compact", "workflow"],
   // A viewer reads the room and nothing else. Deliberately an empty list rather
   // than a short one, so adding a capability is always a decision.

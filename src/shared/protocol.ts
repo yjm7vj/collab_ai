@@ -38,6 +38,8 @@ export type Presence = {
   /** Durable per-person id. Stable across reconnects, reloads and tabs. */
   uid: string;
   name: string;
+  /** Provider avatar URL, or empty for local/legacy members. */
+  avatar: string;
   color: string;
   /** What this person may do. Enforced on the server; carried here for the UI. */
   role: Role;
@@ -234,6 +236,8 @@ export type ServerMsg =
   | { t: "invites"; invites: InviteSummary[] }
   /** Sent only to the connection that asked. */
   | { t: "members"; members: MemberSummary[] }
+  /** Document snapshots, sent only to owners and admins. */
+  | { t: "revisions"; uid: string; revisions: DocumentRevision[] }
   /** Sent only to the workspace host's socket. Never broadcast. */
   | { t: "fs.req"; id: string; req: FsRequest }
   /** A file request made by the room's code workspace UI. Sent only to its requester. */
@@ -276,6 +280,7 @@ export type ClientMsg =
   | { t: "invite.revoke"; code: string }
   | { t: "invite.list" }
   | { t: "member.list" }
+  | { t: "revision.list"; uid: string }
   /** Change someone's role. The server re-checks that the actor outranks them. */
   | { t: "member.role"; uid: string; role: Role }
   /** Remove someone from the room and close their sockets. */
@@ -418,11 +423,20 @@ export type InviteSummary = {
 export type MemberSummary = {
   uid: string;
   name: string;
+  avatar: string;
   role: Role;
   joinedAt: number;
   lastSeen: number;
   /** Whether they have at least one socket open right now. */
   online: boolean;
+};
+
+export type DocumentRevision = {
+  revision: number;
+  doc: string;
+  ts: number;
+  author: string;
+  authorUid: string;
 };
 
 /** Roles an invite may grant. Owner is deliberately not one of them. */

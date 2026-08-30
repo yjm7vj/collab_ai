@@ -18,6 +18,7 @@ import {
   isRepoConnectState,
   signState,
   verifyState,
+  safeAvatarUrl,
   type OAuthProvider,
 } from "./oauth";
 import {
@@ -116,7 +117,7 @@ function signInRequired(env: Env): boolean {
  * including a well-formed room token, which is rejected by the rid check
  * below.
  */
-async function identityFrom(env: Env, token: unknown): Promise<{ uid: string; name: string } | null> {
+async function identityFrom(env: Env, token: unknown): Promise<{ uid: string; name: string; avatar: string } | null> {
   if (typeof token !== "string") return null;
   const claims = await verifyToken(env.ROOM_SECRET, token);
   if (!claims) return null;
@@ -125,7 +126,7 @@ async function identityFrom(env: Env, token: unknown): Promise<{ uid: string; na
   // same mintToken/verifyToken machinery.
   if (claims.rid !== IDENTITY_MARKER) return null;
   if (!UID_RE.test(claims.uid)) return null;
-  return { uid: claims.uid, name: claims.role };
+  return { uid: claims.uid, name: claims.role, avatar: typeof claims.avatar === "string" ? claims.avatar : "" };
 }
 
 export default {
@@ -161,6 +162,7 @@ export default {
 
       let uid: string;
       let name: string;
+      let avatar = "";
       if (body.identity !== undefined) {
         const identity = await identityFrom(env, body.identity);
         if (!identity) return json({ error: "sign_in_required" }, 401);
@@ -168,6 +170,7 @@ export default {
         // trusting them anyway would make the whole thing decorative.
         uid = identity.uid;
         name = identity.name;
+        avatar = identity.avatar;
       } else if (signInRequired(env)) {
         // Closes unauthenticated room creation on a deployment that has
         // sign-in switched on: no identity and no fallback allowed.
@@ -184,7 +187,7 @@ export default {
       const stub = await roomStub(env, roomId);
       const initRes = await stub.fetch("https://room/init", {
         method: "POST",
-        body: JSON.stringify({ uid, name, title: body.title }),
+        body: JSON.stringify({ uid, name, avatar, title: body.title }),
         headers: {
           "content-type": "application/json",
           // Proves to the room that this call came from the Worker. Without it
@@ -225,6 +228,7 @@ export default {
 
       let uid: string;
       let name: string;
+      let avatar = "";
       if (body.identity !== undefined) {
         const identity = await identityFrom(env, body.identity);
         if (!identity) return json({ error: "sign_in_required" }, 401);
@@ -232,6 +236,7 @@ export default {
         // trusting them anyway would make the whole thing decorative.
         uid = identity.uid;
         name = identity.name;
+        avatar = identity.avatar;
       } else if (signInRequired(env)) {
         // Closes unauthenticated room joining on a deployment that has
         // sign-in switched on: no identity and no fallback allowed.
@@ -249,7 +254,7 @@ export default {
       const stub = await roomStub(env, roomId);
       const admitRes = await stub.fetch("https://room/admit", {
         method: "POST",
-        body: JSON.stringify({ uid, name, code: body.code }),
+        body: JSON.stringify({ uid, name, avatar, code: body.code }),
         headers: {
           "content-type": "application/json",
           "x-internal-auth": env.ROOM_SECRET,
@@ -386,6 +391,7 @@ export default {
         rid: IDENTITY_MARKER,
         uid,
         role: fetched.profile.name.slice(0, 32) || provider,
+        avatar: safeAvatarUrl(provider, fetched.profile.avatar),
         exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
       });
 

@@ -46,6 +46,21 @@ export type OAuthProfile = {
   avatar: string;
 };
 
+/** Keep only provider-hosted HTTPS avatars before they enter a signed token. */
+export function safeAvatarUrl(provider: OAuthProvider, raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return "";
+    const host = url.hostname.toLowerCase();
+    const allowed = provider === "github"
+      ? host === "github.com" || host.endsWith(".githubusercontent.com")
+      : host === "googleusercontent.com" || host.endsWith(".googleusercontent.com");
+    return allowed ? url.href.slice(0, 512) : "";
+  } catch {
+    return "";
+  }
+}
+
 function bytesToHex(bytes: Uint8Array): string {
   let hex = "";
   for (let i = 0; i < bytes.length; i++) {

@@ -33,6 +33,7 @@ import {
   type MemberSummary,
   type PendingTool,
   type Presence,
+  type DocumentRevision,
   type RoomState,
   type ServerMsg,
   type WorkerStatus,
@@ -122,9 +123,12 @@ type Turn = {
   entryId: string;
   /** Results from auto-approved tools, held until the gated ones are decided. */
   carried: ToolResultBlockParam[];
+  /** The member whose request caused this agent turn. */
+  authorUid?: string;
+  authorName?: string;
 };
 
-type QueuedLine = { name: string; text: string };
+type QueuedLine = { uid?: string; name: string; text: string };
 
 /** Hard stop on tool round-trips so a confused turn can't loop forever. */
 /**
@@ -175,9 +179,27 @@ export class Room extends Agent<Env, RoomState> {
     this.sql`CREATE TABLE IF NOT EXISTS members (
       uid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      avatar TEXT NOT NULL DEFAULT '',
       joined_at INTEGER NOT NULL,
       last_seen INTEGER NOT NULL
     )`;
+    try {
+      this.sql`ALTER TABLE members ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`;
+    } catch {
+      /* column already present */
+    }
+    this.sql`CREATE TABLE IF NOT EXISTS revisions (
+      revision INTEGER PRIMARY KEY,
+      doc TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      author TEXT NOT NULL,
+      author_uid TEXT NOT NULL DEFAULT 'agent'
+    )`;
+    try {
+      this.sql`ALTER TABLE revisions ADD COLUMN author_uid TEXT NOT NULL DEFAULT 'agent'`;
+    } catch {
+      /* column already present */
+    }
     // Added after the members table shipped, so it has to be tolerated as a
     // no-op on a room that already has the column.
     try {
@@ -474,15 +496,29 @@ export class Room extends Agent<Env, RoomState> {
   #members(): MemberSummary[] {
     const online = new Set(this.#presence().map((u) => u.uid));
     const rows = this.sql<{
-      uid: string; name: string; role: string; joined_at: number; last_seen: number;
-    }>`SELECT uid, name, role, joined_at, last_seen FROM members ORDER BY joined_at ASC`;
+      uid: string; name: string; avatar: string; role: string; joined_at: number; last_seen: number;
+    }>`SELECT uid, name, avatar, role, joined_at, last_seen FROM members ORDER BY joined_at ASC`;
     return rows.map((r) => ({
       uid: r.uid,
       name: r.name,
+      avatar: r.avatar,
       role: asRole(r.role),
       joinedAt: r.joined_at,
       lastSeen: r.last_seen,
       online: online.has(r.uid),
+    }));
+  }
+
+  #revisions(uid: string): DocumentRevision[] {
+    return this.sql<{ revision: number; doc: string; ts: number; author: string; author_uid: string }>`
+      SELECT revision, doc, ts, author, author_uid FROM revisions
+      WHERE author_uid = ${uid} ORDER BY revision DESC
+    `.map((row) => ({
+      revision: row.revision,
+      doc: row.doc,
+      ts: row.ts,
+      author: row.author,
+      authorUid: row.author_uid,
     }));
   }
 
@@ -507,7 +543,8 @@ export class Room extends Agent<Env, RoomState> {
     for (const [uid, connections] of counts) {
       const name = this.#memberName(uid);
       if (!name) continue;
-      out.push({ uid, name, color: colorFor(uid), connections, role: asRole(this.#memberRole(uid)) });
+      const rows = this.sql<{ avatar: string }>`SELECT avatar FROM members WHERE uid = ${uid}`;
+      out.push({ uid, name, avatar: rows[0]?.avatar ?? "", color: colorFor(uid), connections, role: asRole(this.#memberRole(uid)) });
     }
     // Stable order, so the presence strip doesn't reshuffle on every update.
     out.sort((a, b) => (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
@@ -579,6 +616,7 @@ export class Room extends Agent<Env, RoomState> {
     let body: {
       uid?: string;
       name?: string;
+      avatar?: string;
       title?: string;
       code?: string;
       installationId?: string;
@@ -593,6 +631,7 @@ export class Room extends Agent<Env, RoomState> {
 
     const uid = String(body.uid ?? "");
     const name = String(body.name ?? "").trim().slice(0, 32) || "anon";
+    const avatar = typeof body.avatar === "string" ? body.avatar.slice(0, 512) : "";
     if (!UID_RE.test(uid)) return json({ error: "bad_request" }, 400);
 
     const now = Date.now();
@@ -606,8 +645,8 @@ export class Room extends Agent<Env, RoomState> {
         visibility: "invite",
         createdAt: now,
       });
-      this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
-               VALUES (${uid}, ${name}, ${now}, ${now}, 'owner')`;
+      this.sql`INSERT INTO members (uid, name, avatar, joined_at, last_seen, role)
+               VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, 'owner')`;
       return json({ role: "owner" });
     }
 
@@ -619,7 +658,7 @@ export class Room extends Agent<Env, RoomState> {
       // a way to be re-graded.
       const existing = this.#memberRole(uid);
       if (existing !== null) {
-        this.sql`UPDATE members SET name = ${name}, last_seen = ${now} WHERE uid = ${uid}`;
+        this.sql`UPDATE members SET name = ${name}, avatar = ${avatar}, last_seen = ${now} WHERE uid = ${uid}`;
         return json({ role: existing });
       }
 
@@ -632,8 +671,8 @@ export class Room extends Agent<Env, RoomState> {
         const verdict = this.#checkInvite(code);
         if (!verdict.ok) return json({ error: verdict.reason }, 403);
 
-        this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
-                 VALUES (${uid}, ${name}, ${now}, ${now}, ${verdict.role})`;
+        this.sql`INSERT INTO members (uid, name, avatar, joined_at, last_seen, role)
+                 VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, ${verdict.role})`;
         // Counted only after the member row lands, so a failed insert cannot
         // burn a use of a single-use invite.
         this.sql`UPDATE invites SET uses = uses + 1 WHERE code = ${code}`;
@@ -643,8 +682,8 @@ export class Room extends Agent<Env, RoomState> {
 
       if (room.visibility !== "open") return json({ error: "invite_required" }, 403);
 
-      this.sql`INSERT INTO members (uid, name, joined_at, last_seen, role)
-               VALUES (${uid}, ${name}, ${now}, ${now}, 'editor')`;
+      this.sql`INSERT INTO members (uid, name, avatar, joined_at, last_seen, role)
+               VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, 'editor')`;
       this.#system(`${name} joined`);
       return json({ role: "editor" });
     }
@@ -846,6 +885,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onInviteList(connection);
       case "member.list":
         return this.#onMemberList(connection);
+      case "revision.list":
+        return this.#onRevisionList(connection, msg.uid);
       case "member.role":
         return this.#onMemberRole(connection, msg.uid, msg.role);
       case "member.remove":
@@ -1087,8 +1128,19 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   async #onMemberList(connection: Connection) {
-    if (!this.#allow(connection, "manage_members", "Only the room's owner and admins can manage members.")) return;
+    const uid = this.#uidOf(connection);
+    if (!uid || !this.#memberRole(uid)) return;
     this.#sendMembers(connection);
+  }
+
+  async #onRevisionList(connection: Connection, targetUid: string) {
+    const actorUid = this.#uidOf(connection);
+    if (!actorUid || !this.#memberRole(actorUid) || !this.#memberRole(targetUid)) return;
+    if (targetUid !== actorUid && !can(this.#roleOf(connection), "view_revisions")) {
+      this.#refuse(connection, "Only the room's owner or admins can view another user's revision history.");
+      return;
+    }
+    connection.send(JSON.stringify({ t: "revisions", uid: targetUid, revisions: this.#revisions(targetUid) } satisfies ServerMsg));
   }
 
   /**
@@ -1721,7 +1773,7 @@ export class Room extends Agent<Env, RoomState> {
 
     // Queue rather than interrupt. If the agent is mid-turn this line waits and
     // is folded into the next one, so concurrent speakers never split a turn.
-    this.#setInbox([...this.#inbox(), { name, text }]);
+    this.#setInbox([...this.#inbox(), { uid, name, text }]);
 
     if (this.state.status === "idle") await this.#startTurn();
   }
@@ -1813,7 +1865,7 @@ export class Room extends Agent<Env, RoomState> {
    * must see the previous one's result, and one flush at the end means one state
    * broadcast instead of one per edit.
    */
-  #docBuffer(): ToolCtx & { flush(): void } {
+  #docBuffer(authorUid = "agent", authorName = "Huddle.AI"): ToolCtx & { flush(): void } {
     let doc = this.state.doc;
     let dirty = false;
     return {
@@ -1824,10 +1876,15 @@ export class Room extends Agent<Env, RoomState> {
       },
       flush: () => {
         if (!dirty) return;
+        const revision = this.state.docRevision + 1;
+        this.sql`INSERT INTO revisions (revision, doc, ts, author, author_uid)
+                 VALUES (${revision}, ${doc}, ${Date.now()}, ${authorName}, ${authorUid})
+                 ON CONFLICT(revision) DO UPDATE SET doc = excluded.doc, ts = excluded.ts,
+                 author = excluded.author, author_uid = excluded.author_uid`;
         this.setState({
           ...this.state,
           doc,
-          docRevision: this.state.docRevision + 1,
+          docRevision: revision,
         });
       },
     };
@@ -2145,7 +2202,13 @@ export class Room extends Agent<Env, RoomState> {
       blocks: [],
     };
     this.#append(entry);
-    this.#setTurn({ entryId: entry.id, carried: [] });
+    const firstAuthor = inbox.find((line) => typeof line.uid === "string");
+    this.#setTurn({
+      entryId: entry.id,
+      carried: [],
+      authorUid: firstAuthor?.uid,
+      authorName: firstAuthor?.name,
+    });
     this.setState({ ...this.state, status: "thinking" });
 
     await this.#advance();
@@ -2237,7 +2300,7 @@ export class Room extends Agent<Env, RoomState> {
         const results: ToolResultBlockParam[] = [...turn.carried];
         const gated: PendingTool[] = [];
         const gatedNames = gatedFor(this.#policy());
-        const docs = this.#docBuffer();
+        const docs = this.#docBuffer(turn.authorUid, turn.authorName);
 
         for (const call of calls) {
           entry.blocks.push({
@@ -2358,7 +2421,7 @@ export class Room extends Agent<Env, RoomState> {
     if (!entry || entry.kind !== "agent") return;
 
     const results: ToolResultBlockParam[] = [...turn.carried];
-    const docs = this.#docBuffer();
+    const docs = this.#docBuffer(turn.authorUid, turn.authorName);
     for (const { p, approved } of verdicts) {
       let outcome: ToolOutcome;
       if (!approved) {

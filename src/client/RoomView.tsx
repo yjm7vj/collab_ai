@@ -8,6 +8,7 @@ import {
   type GithubRepo,
   type InviteSummary,
   type MemberSummary,
+  type DocumentRevision,
   type RoomState,
   type ServerMsg,
   type Vote,
@@ -24,7 +25,7 @@ import {
   InvitePanel,
   MembersPanel,
   PermissionsPanel,
-  Presence,
+  RevisionHistoryPanel,
   Transcript,
   WorkerStrip,
   WorkspacePanel,
@@ -103,6 +104,9 @@ export function RoomView({
   const [invites, setInvites] = useState<InviteSummary[]>([]);
   const [showInvites, setShowInvites] = useState(false);
   const [members, setMembers] = useState<MemberSummary[]>([]);
+  const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
+  const [revisionUid, setRevisionUid] = useState<string | null>(null);
+  const [showRevisionHistory, setShowRevisionHistory] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
   // The repository list for the GitHub picker. `null` means "not fetched
@@ -163,6 +167,7 @@ export function RoomView({
   const mayInvite = can(myRole, "invite");
   const mayWorkflow = can(myRole, "workflow");
   const mayManage = can(myRole, "manage_members");
+  const mayViewRevisions = can(myRole, "view_revisions");
 
   const applyServerMessage = useCallback((msg: ServerMsg) => {
     switch (msg.t) {
@@ -175,6 +180,11 @@ export function RoomView({
         break;
       case "members":
         setMembers(msg.members);
+        break;
+      case "revisions":
+        setRevisions(msg.revisions);
+        setRevisionUid(msg.uid);
+        setShowRevisionHistory(true);
         break;
       case "history":
         setEntries(msg.entries);
@@ -318,6 +328,7 @@ export function RoomView({
     [send],
   );
   const compactNow = useCallback(() => send({ t: "compact" }), [send]);
+  const openRevisionHistory = useCallback((uid: string) => send({ t: "revision.list", uid }), [send]);
   const createInvite = useCallback(
     (role: string, maxUses: number, expiresInHours: number, label: string) =>
       send({ t: "invite.create", role, maxUses, expiresInHours, label }),
@@ -586,9 +597,6 @@ export function RoomView({
               </span>
             )}
           </div>
-          <div className="bar-presence" aria-label="People in room">
-            <Presence users={state.users} me={me} />
-          </div>
           {renaming ? (
             <form
               className="rename-form"
@@ -613,17 +621,69 @@ export function RoomView({
             <div className="settings-menu-wrap account-menu-wrap" ref={accountMenuRef}>
               <button
                 type="button"
-                className="namebtn"
+                className="person-trigger"
                 aria-haspopup="menu"
                 aria-expanded={showAccountMenu}
-                onClick={() => setShowAccountMenu((open) => !open)}
+                onClick={() => {
+                  setShowAccountMenu((open) => !open);
+                  send({ t: "member.list" });
+                }}
+                aria-label="Open people and account menu"
               >
-                Welcome, {displayName}
+                <svg className="person-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z" />
+                </svg>
               </button>
               {showAccountMenu && (
-                <div className="settings-menu account-menu" role="menu" aria-label="Account">
-                  <div className="settings-menu-title">Account</div>
-                  <section className="settings-menu-section">
+                <div className="settings-menu people-menu" role="menu" aria-label="People and account">
+                  <div className="settings-menu-title">People in this room</div>
+                  <section className="people-section">
+                    <div className="settings-menu-label">Active</div>
+                    {members.filter((member) => member.online).length === 0 ? (
+                      <div className="people-empty">No active users</div>
+                    ) : members.filter((member) => member.online).map((member) => (
+                      <button
+                        key={member.uid}
+                        type="button"
+                        role="menuitem"
+                        className="people-user"
+                        disabled={member.uid !== me && !mayViewRevisions}
+                        onClick={() => openRevisionHistory(member.uid)}
+                        title={member.uid === me || mayViewRevisions ? "View revision history" : "Only your own history is available"}
+                      >
+                        <span className="people-avatar">
+                          {member.avatar ? <img src={member.avatar} alt="" referrerPolicy="no-referrer" /> : member.name.slice(0, 1).toUpperCase()}
+                          <span className="people-online" />
+                        </span>
+                        <span className="people-user-name">{member.name}{member.uid === me ? " (You)" : ""}</span>
+                        <span className="people-user-role">{member.role}</span>
+                      </button>
+                    ))}
+                  </section>
+                  <section className="people-section">
+                    <div className="settings-menu-label">Inactive</div>
+                    {members.filter((member) => !member.online).length === 0 ? (
+                      <div className="people-empty">No inactive users</div>
+                    ) : members.filter((member) => !member.online).map((member) => (
+                      <button
+                        key={member.uid}
+                        type="button"
+                        role="menuitem"
+                        className="people-user people-user-inactive"
+                        disabled={member.uid !== me && !mayViewRevisions}
+                        onClick={() => openRevisionHistory(member.uid)}
+                        title={member.uid === me || mayViewRevisions ? "View revision history" : "Only your own history is available"}
+                      >
+                        <span className="people-avatar">
+                          {member.avatar ? <img src={member.avatar} alt="" referrerPolicy="no-referrer" /> : member.name.slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="people-user-name">{member.name}{member.uid === me ? " (You)" : ""}</span>
+                        <span className="people-user-role">Offline</span>
+                      </button>
+                    ))}
+                  </section>
+                  <section className="settings-menu-section account-actions">
+                    <div className="settings-menu-label">Account</div>
                     <button
                       type="button"
                       role="menuitem"
@@ -883,6 +943,15 @@ export function RoomView({
         />
       )}
 
+      {showRevisionHistory && (
+        <RevisionHistoryPanel
+          revisions={revisions}
+          userName={members.find((member) => member.uid === revisionUid)?.name ?? "User"}
+          isOwn={revisionUid === me}
+          onClose={() => setShowRevisionHistory(false)}
+        />
+      )}
+
       <div className={`columns ${showDocument ? "" : "columns-doc-closed"}`}>
         <section className="chat">
           <Transcript entries={entries} me={me} toolDisplay={toolDisplay} />
@@ -971,6 +1040,10 @@ export function RoomView({
           <DocPanel
             doc={state.doc}
             revision={state.docRevision}
+            canViewHistory={mayViewRevisions}
+            onHistory={() => {
+              if (me) openRevisionHistory(me);
+            }}
             onClose={() => setShowDocument(false)}
           />
         )}

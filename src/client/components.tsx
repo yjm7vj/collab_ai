@@ -17,6 +17,7 @@ import {
   type GithubStatus,
   type InviteSummary,
   type MemberSummary,
+  type DocumentRevision,
   type PendingTool,
   type Presence as PresenceUser,
   type Vote,
@@ -787,17 +788,19 @@ export function SidePane({
 /* -------------------------------------------------------------- presence */
 
 export function Presence({ users, me }: { users: PresenceUser[]; me: string | null }) {
-  const visibleUsers = users.filter((u) => u.uid !== me);
   return (
-    <div className="presence" title={`${users.length} in the room`}>
-      {visibleUsers.map((u) => (
+    <div className="presence" title={`${users.length} online in the room`}>
+      {users.map((u) => (
         <span
           key={u.uid}
-          className={`chip chip-${u.role} ${u.uid === me ? "chip-me" : ""}`}
-          style={{ borderColor: u.color, color: u.color }}
+          className={`presence-user ${u.uid === me ? "presence-user-me" : ""}`}
           title={`${u.name} · ${u.role}`}
         >
-          {u.name}
+          <span className="presence-avatar" style={{ borderColor: u.color }}>
+            {u.avatar ? <img src={u.avatar} alt="" referrerPolicy="no-referrer" /> : u.name.slice(0, 1).toUpperCase()}
+            <span className="presence-online" aria-label="Online" />
+          </span>
+          <span className="presence-name">{u.name}</span>
         </span>
       ))}
       {users.length === 0 && <span className="chip chip-empty">Nobody Yet</span>}
@@ -1160,10 +1163,14 @@ export function ApprovalCard({
 export function DocPanel({
   doc,
   revision,
+  canViewHistory,
+  onHistory,
   onClose,
 }: {
   doc: string;
   revision: number;
+  canViewHistory?: boolean;
+  onHistory?: () => void;
   onClose?: () => void;
 }) {
   const [flash, setFlash] = useState(false);
@@ -1199,6 +1206,11 @@ export function DocPanel({
             ×
           </button>
         )}
+        {canViewHistory && onHistory && (
+          <button type="button" className="doc-history" onClick={onHistory}>
+            History
+          </button>
+        )}
         <button
           type="button"
           className="doc-download"
@@ -1225,6 +1237,47 @@ export function DocPanel({
         </div>
       )}
     </aside>
+  );
+}
+
+export function RevisionHistoryPanel({
+  revisions,
+  userName,
+  isOwn,
+  onClose,
+}: {
+  revisions: DocumentRevision[];
+  userName: string;
+  isOwn: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <section className="modal revision-panel" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h2>Revision history</h2>
+            <p className="hint">{isOwn ? "Your shared-document snapshots." : `Snapshots attributed to ${userName}.`}</p>
+          </div>
+          <button type="button" className="icon" onClick={onClose} aria-label="Close revision history">×</button>
+        </div>
+        {revisions.length === 0 ? (
+          <div className="empty"><p>No revisions yet.</p></div>
+        ) : (
+          <div className="revision-list">
+            {revisions.map((item) => (
+              <details key={item.revision} className="revision-item">
+                <summary>
+                  <span>Rev {item.revision}</span>
+                  <span className="hint">{item.author} · {new Date(item.ts).toLocaleString()}</span>
+                </summary>
+                <pre className="revision-body">{item.doc || "(empty document)"}</pre>
+              </details>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 

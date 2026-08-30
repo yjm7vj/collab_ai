@@ -18,6 +18,8 @@ export type TokenClaims = {
   uid: string;
   /** Role at the moment of issue. Always re-check against the member record. */
   role: string;
+  /** Optional signed-in profile avatar; never a secret. */
+  avatar?: string;
   /** Expiry, in Unix SECONDS (not milliseconds). */
   exp: number;
 };
@@ -141,6 +143,7 @@ export async function verifyToken(
     rid: candidate.rid,
     uid: candidate.uid,
     role: candidate.role,
+    ...(typeof candidate.avatar === "string" ? { avatar: candidate.avatar } : {}),
     exp: candidate.exp,
   };
 }
