@@ -1237,6 +1237,30 @@ html:has(.lp) {
 .lp-close-form input:focus {
   border-color: var(--lp-stage-accent);
 }
+/* The waitlist's answer, in place of the form it replaces. Same width and
+   same construction as the field it stood in, so the section does not jump. */
+.lp-close-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  width: min(560px, 100%);
+  border: 1px solid var(--lp-stage-line);
+  border-radius: var(--lp-r-md);
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-control);
+  overflow-wrap: anywhere;
+}
+.lp-close-done-pip {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lp-stage-ok);
+}
+
 .lp-close-error {
   margin: 0;
   font-size: var(--lp-fs-small);

@@ -49,6 +49,14 @@ async function roomStub(env: Env, roomId: string) {
   return await getAgentByName(env.Room, roomId);
 }
 
+// Deliberately loose. The only thing a stricter pattern would buy is rejecting
+// addresses that are unusual rather than wrong, and a waitlist that silently
+// drops a real address is worse than one holding a few undeliverable ones.
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+// RFC 5321's ceiling on a whole address.
+const EMAIL_MAX = 254;
+const WAITLIST_NAME_MAX = 64;
+
 /**
  * Whether this Worker has both GitHub App secrets configured. GitHub
  * workspaces are an optional feature: absent these, everything else in the
@@ -131,6 +139,49 @@ async function identityFrom(env: Env, token: unknown): Promise<{ uid: string; na
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Waitlist signups from the apex landing page. This is the one route that
+    // belongs to huddleai.org rather than to the app, and it stays open to
+    // anyone: there is no identity yet for someone who has never been let in.
+    // It sits above the secret guards below on purpose — collecting an address
+    // needs neither the model key nor the room secret, and the page that posts
+    // here is the one page that should still work on a Worker missing them.
+    if (url.pathname === "/api/waitlist") {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+      if (!env.WAITLIST_DB) return json({ error: "waitlist_unavailable" }, 503);
+
+      let body: { email?: unknown; name?: unknown };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      const email = String(body.email ?? "").trim().toLowerCase();
+      if (email.length > EMAIL_MAX || !EMAIL_RE.test(email)) {
+        return json({ error: "bad_email" }, 400);
+      }
+      const name = String(body.name ?? "").trim().slice(0, WAITLIST_NAME_MAX);
+
+      try {
+        // An address already on the list is a success, not a conflict: the
+        // person asked to be on the waitlist and they are. Answering anything
+        // else would also turn the form into a way to test whether a given
+        // address has signed up.
+        await env.WAITLIST_DB.prepare(
+          "INSERT INTO waitlist (email, name, source, created_at) VALUES (?, ?, ?, ?) " +
+            "ON CONFLICT (email) DO NOTHING",
+        )
+          .bind(email, name, url.hostname, Date.now())
+          .run();
+      } catch {
+        return json({ error: "waitlist_failed" }, 500);
+      }
+
+      return json({ ok: true });
+    }
+
     if (!env.ANTHROPIC_API_KEY) {
       return new Response(
         "ANTHROPIC_API_KEY is not set. Put it in .dev.vars for local dev, or run " +
@@ -147,8 +198,6 @@ export default {
         { status: 500 },
       );
     }
-
-    const url = new URL(request.url);
 
     if (url.pathname === "/api/rooms") {
       if (request.method !== "POST") return json({ error: "bad_request" }, 405);

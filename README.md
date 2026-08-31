@@ -126,6 +126,57 @@ accruing duration, so the practical ceiling is active room-time, not uptime.
 Cloudflare is unlikely to be your main cost either way — Anthropic tokens are.
 The header gauge tracks those.
 
+### Two hostnames: the app and the waitlist
+
+One Worker and one build answer both routes in `wrangler.jsonc`:
+
+| Host | What it serves |
+| --- | --- |
+| `huddleai.org` | The landing page, ending in a waitlist form. |
+| `app.huddleai.org` | The product — rooms and invite links. Its root is closed while the waitlist runs. |
+
+While the app is closed, a signed-out visitor to `app.huddleai.org/` is sent to
+the waitlist. Deep links are deliberately exempt: `#/r/…` and `#/j/…` still go
+to their own gate, so an invite works for whoever was sent one, and anyone
+already signed in is unaffected. `?app=1` opts out of the redirect — that is how
+you reach the sign-in before you have an identity stored. Reopening the app is
+deleting `GATED_APP_HOSTS` in `src/client/host.ts`.
+
+The redirect is client-side on purpose. Rooms and invites are hash routes, and a
+fragment never reaches the server, so a Worker-side 302 on `/` would swallow
+every deep link it cannot see.
+
+The split is decided in the browser by hostname (`src/client/host.ts`), not by a
+build flag, so either page can be opened from any deployment or from the dev
+server — append `?waitlist=1` to see the apex page on `localhost:5173`.
+
+Taking the apex means this Worker serves whatever `huddleai.org` resolves to.
+If that record currently points at another site, deploying is what displaces
+it. `www.huddleai.org` is deliberately not claimed here.
+
+Signups land in a D1 table, `huddleai-waitlist`, already created and bound in
+`wrangler.jsonc`. A fork starts by creating its own with `npx wrangler d1 create
+huddleai-waitlist` and pasting the printed id into `database_id`. Schema changes
+are migrations in `migrations/`:
+
+```bash
+npx wrangler d1 migrations apply huddleai-waitlist --remote
+```
+
+Read the list back, newest first:
+
+```bash
+npx wrangler d1 execute huddleai-waitlist --remote --command "SELECT email, created_at FROM waitlist ORDER BY created_at DESC"
+```
+
+`POST /api/waitlist` takes `{ "email": "..." }`, lower-cases and de-duplicates
+on the address, and answers `{ "ok": true }` either way — a repeat signup is a
+success, and saying otherwise would turn the form into a way to test whether a
+given address is on the list. It sits above the Worker's secret guards, so
+collecting an address does not depend on the model key. Without the D1 binding
+it answers 503 and the rest of the Worker still runs. There is no rate limit on
+it beyond Cloudflare's own; if the apex draws abuse, that is the gap to close.
+
 ---
 
 ## Room setup

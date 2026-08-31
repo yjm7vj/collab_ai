@@ -22,6 +22,8 @@ import {
 } from "../shared/protocol";
 import { Landing, JoinGate, SidePane, SignInGate } from "./components";
 import { LandingPage } from "./landing";
+import { isAppGated, WAITLIST_URL } from "./host";
+import { useTheme } from "./theme";
 import { RoomView } from "./RoomView";
 import type { WorkspaceInfo } from "../shared/workspace";
 
@@ -41,14 +43,8 @@ function myUid(): string {
 const IDENTITY_KEY = "collab_ai:identity";
 const PROJECTS_KEY = "collab_ai:projects";
 const ROOMS_KEY = "collab_ai:rooms";
-const THEME_KEY = "collab_ai:theme";
 function storedIdentity(): string | null {
   return localStorage.getItem(IDENTITY_KEY);
-}
-
-type Theme = "light" | "dark";
-function storedTheme(): Theme {
-  return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
 }
 
 type SidebarProject = {
@@ -285,7 +281,7 @@ export function App() {
   });
   const [projects, setProjects] = useState<SidebarProject[]>(storedProjects);
   const [rooms, setRooms] = useState<SidebarRoom[]>(storedRooms);
-  const [theme, setTheme] = useState<Theme>(storedTheme);
+  const { theme, toggleTheme } = useTheme();
 
   /**
    * A mirror of the sidebar for createRoom to name against. It picks the name
@@ -299,14 +295,20 @@ export function App() {
     sidebar.current = { projects, rooms };
   }, [projects, rooms]);
 
+  /**
+   * The app is not open yet: a signed-out visitor to the app host's root goes
+   * to the waitlist rather than to a sign-in they have no way through. Deep
+   * links are the exception — an invite or a room link still reaches its own
+   * gate, which is the whole point of having been sent one.
+   *
+   * This has to happen here and not as a redirect in the Worker: rooms and
+   * invites are hash routes, and a fragment never reaches the server, so a 302
+   * on `/` would swallow every deep link it cannot see.
+   */
+  const gated = !identity && route.kind === "landing" && isAppGated();
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem(THEME_KEY, theme);
-  }, [theme]);
-
-  const toggleTheme = useCallback(() => {
-    setTheme((current) => (current === "light" ? "dark" : "light"));
-  }, []);
+    if (gated) location.replace(WAITLIST_URL);
+  }, [gated]);
 
   useEffect(() => {
     let cancelled = false;
@@ -676,15 +678,22 @@ export function App() {
   // this deployment admits people. Deep links (an invite, a room) keep going
   // straight to the gate that guards them — a marketing page between someone
   // and the room they were sent to would be a worse product, not a better one.
+  // Mid-redirect. Rendering the landing here would flash a create-a-room page
+  // at someone on their way to the waitlist.
+  if (gated) return null;
+
   if (!identity && route.kind === "landing") {
     return (
       <LandingPage
-        providers={providers}
-        onSignIn={signIn}
-        onCreate={createRoom}
-        initialName={name}
-        busy={busy}
-        problem={problem}
+        cta={{
+          kind: "app",
+          providers,
+          onSignIn: signIn,
+          onCreate: createRoom,
+          initialName: name,
+          busy,
+          problem,
+        }}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
