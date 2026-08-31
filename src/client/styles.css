@@ -249,8 +249,15 @@ input:focus, textarea:focus {
 
 /* ------------------------------------------------------------------ shell */
 
+/* The room is a fixed-height shell, not a page that grows: the transcript
+   scrolls inside it and the composer stays pinned under it. That needs a
+   *definite* height here — with only `min-height`, `.transcript`'s `flex: 1`
+   has nothing to resolve against, so a long run of output stretched this
+   element instead of scrolling, and pushed the composer past the bottom of
+   the pane (which clips) or of the window. */
 .app {
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -533,7 +540,12 @@ input:focus, textarea:focus {
 .side-main {
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  /* The room fills this pane exactly and scrolls internally, so it never asks
+     for a scrollbar here. The taller surfaces that share the pane (the landing
+     page, the join and sign-in gates) do, and clipping them would leave their
+     bottoms unreachable. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .side-pane {
