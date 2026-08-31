@@ -519,13 +519,15 @@ export function RoomView({
   }, [send, state.workspace.kind]);
 
   /**
-   * After the GitHub round trip the browser lands back here with `?gh=connected`.
+   * After the GitHub round trip the browser lands back here with `?gh=connected`
+   * or `?gh=installed`.
    * Reopen the workspace panel where the person left off and fetch their
    * repositories, then strip the marker from the address bar so a reload or a
    * copied link does not repeat it.
    */
   useEffect(() => {
-    if (new URLSearchParams(location.search).get("gh") !== "connected") return;
+    const githubMarker = new URLSearchParams(location.search).get("gh");
+    if (githubMarker !== "connected" && githubMarker !== "installed") return;
     setShowWorkspace(true);
     // Wait for the socket. This effect runs on mount, which is before the
     // WebSocket has opened, and a frame sent then is simply dropped — the

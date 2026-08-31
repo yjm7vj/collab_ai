@@ -73,22 +73,24 @@ export type RoomStatus = "idle" | "thinking" | "awaiting_approval";
  * BOOLEANS AND A PUBLIC LOGIN ONLY. RoomState is synced to every connected
  * client, so this type may never grow a token, a client secret, or anything
  * else that is not already safe for every member of the room to read. The
- * OAuth access token that backs `authorized` lives in the Durable Object's
- * own storage and is never put on the wire — see the `github_oauth` table.
+ * OAuth access tokens and GitHub App installation IDs live in the Durable
+ * Object's own storage and are never put on the wire.
  */
 export type GithubStatus = {
   /** A GitHub OAuth App is configured, so "Connect GitHub" can work at all. */
   oauth: boolean;
   /** A GitHub App is configured, so the per-repo installation flow can work. */
   app: boolean;
-  /** Someone here has authorised GitHub, so a repository can be picked. */
+  /** A GitHub App installation is stored for this room. */
+  installed: boolean;
+  /** A member has authorised GitHub or installed the GitHub App. */
   authorized: boolean;
   /** The GitHub login that authorised, for display. Empty when nobody has. */
   login: string;
 };
 
 export const NO_GITHUB: GithubStatus = {
-  oauth: false, app: false, authorized: false, login: "",
+  oauth: false, app: false, installed: false, authorized: false, login: "",
 };
 
 /** One repository the authorising member can reach. Never broadcast. */

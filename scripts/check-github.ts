@@ -16,6 +16,7 @@ import {
   GithubProvider,
   installationToken,
   openPullRequest,
+  listInstallationRepos,
   listUserRepos,
   parseRepoRef,
   pemToPkcs8,
@@ -617,6 +618,20 @@ async function main() {
     await listUserRepos("super-secret-token", recording);
     check("the token never appears in the request URL", !seenUrl.includes("super-secret-token"), seenUrl);
     check("the token is sent as a bearer credential", seenAuth.includes("super-secret-token"), seenAuth);
+
+    let installationUrls: string[] = [];
+    const installationPages = (async (input: unknown, init?: RequestInit) => {
+      installationUrls.push(String(input));
+      const page = new URL(String(input)).searchParams.get("page");
+      const body = page === "1"
+        ? { total_count: 101, repositories: Array.from({ length: 100 }, (_, i) => ({ full_name: `private/repo-${i}`, private: true, default_branch: "main" })) }
+        : { total_count: 101, repositories: [{ full_name: "private/repo-100", private: true, default_branch: "main" }] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const installed = await listInstallationRepos("installation-token", installationPages);
+    check("listInstallationRepos reads the installation repository response", installed.ok === true && installed.repos.length === 101, installed);
+    check("listInstallationRepos paginates beyond 100 repositories", installationUrls.length === 2 && installationUrls[1]!.includes("page=2"), installationUrls);
+    check("listInstallationRepos preserves private repository markers", installed.ok === true && installed.repos.every((repo) => repo.private), installed);
   }
 
   console.log("\nreceiver safety (the workerd Illegal-invocation class of bug)");

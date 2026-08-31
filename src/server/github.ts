@@ -1099,6 +1099,49 @@ export class GithubProvider implements WorkspaceProvider {
 
 export type UserRepo = { fullName: string; private: boolean; defaultBranch: string };
 
+function mapUserRepos(body: unknown): UserRepo[] {
+  const items = Array.isArray(body)
+    ? body
+    : typeof body === "object" && body !== null && Array.isArray((body as { repositories?: unknown }).repositories)
+      ? (body as { repositories: unknown[] }).repositories
+      : [];
+  const repos: UserRepo[] = [];
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as { full_name?: unknown; private?: unknown; default_branch?: unknown };
+    if (typeof entry.full_name !== "string" || entry.full_name.length === 0) continue;
+    repos.push({
+      fullName: entry.full_name,
+      private: entry.private === true,
+      defaultBranch: typeof entry.default_branch === "string" && entry.default_branch.length > 0
+        ? entry.default_branch
+        : "",
+    });
+  }
+  return repos;
+}
+
+async function listRepoPages(
+  token: string,
+  endpoint: (page: number) => string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  const repos: UserRepo[] = [];
+  try {
+    for (let page = 1; page <= 100; page++) {
+      const res = await doFetch(endpoint(page), { headers: ghHeaders(token) });
+      if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+      const pageRepos = mapUserRepos(await res.json());
+      repos.push(...pageRepos);
+      if (pageRepos.length < 100) break;
+    }
+    return { ok: true, repos };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to list repositories." };
+  }
+}
+
 /**
  * List repositories the OAuth-connecting person can see, to populate a
  * picker on the client.
@@ -1114,32 +1157,21 @@ export async function listUserRepos(
   token: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? runtimeFetch;
-  try {
-    const res = await doFetch(
-      "https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member",
-      { headers: ghHeaders(token) },
-    );
-    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+  return listRepoPages(
+    token,
+    (page) => `https://api.github.com/user/repos?sort=updated&per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`,
+    fetchImpl,
+  );
+}
 
-    const body = await res.json();
-    const items = Array.isArray(body) ? body : [];
-
-    const repos: UserRepo[] = [];
-    for (const item of items) {
-      if (typeof item !== "object" || item === null) continue;
-      const entry = item as { full_name?: unknown; private?: unknown; default_branch?: unknown };
-      if (typeof entry.full_name !== "string" || entry.full_name.length === 0) continue;
-      repos.push({
-        fullName: entry.full_name,
-        private: entry.private === true,
-        defaultBranch: typeof entry.default_branch === "string" && entry.default_branch.length > 0
-          ? entry.default_branch
-          : "",
-      });
-    }
-    return { ok: true, repos };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Failed to list repositories." };
-  }
+/** List repositories granted to a GitHub App installation, including private repositories. */
+export async function listInstallationRepos(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  return listRepoPages(
+    token,
+    (page) => `https://api.github.com/installation/repositories?per_page=100&page=${page}`,
+    fetchImpl,
+  );
 }

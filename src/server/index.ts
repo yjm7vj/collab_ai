@@ -583,11 +583,7 @@ export default {
         });
       }
 
-      return new Response(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Repository connected</title></head>" +
-          "<body><p>The repository is connected. You can close this tab.</p></body></html>",
-        { status: 200, headers: { "content-type": "text/html" } },
-      );
+      return Response.redirect(`${url.origin}/?app=1&gh=installed#/r/${claims.rid}`, 302);
     }
 
     /**
