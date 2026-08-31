@@ -103,6 +103,7 @@ import {
   listUserRepos,
   parseRepoRef,
   pemToPkcs8,
+  refHead,
   type RepoRef,
 } from "./github";
 import { PendingRequests } from "./workspace";
@@ -1353,7 +1354,10 @@ export class Room extends Agent<Env, RoomState> {
    * After that: if someone here has already authorised GitHub via OAuth
    * (github_oauth has a row), the repository is connected directly — that
    * member already proved, in a separate round trip through #onGithubAuth,
-   * that they may reach it, so there is nothing left to redirect for.
+   * that they may reach it, so there is nothing left to redirect for. The
+   * repository itself is still checked against GitHub before the connection
+   * is recorded, because authorising an account says nothing about whether
+   * the name typed into the box exists.
    * Otherwise, if the GitHub App is configured, this falls back to the
    * original install-redirect flow. If neither is configured, there is
    * simply nothing this server can do yet.
@@ -1361,7 +1365,8 @@ export class Room extends Agent<Env, RoomState> {
   async #onGithubConnect(connection: Connection, repo: string) {
     if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
 
-    if (parseRepoRef(repo) === null) {
+    const ref = parseRepoRef(repo);
+    if (ref === null) {
       this.#refuse(
         connection,
         "That doesn't look like a repository. Use owner/repo, optionally owner/repo@branch.",
@@ -1372,8 +1377,20 @@ export class Room extends Agent<Env, RoomState> {
     const uid = this.#uidOf(connection);
     if (!uid) return;
 
-    const oauthRow = this.sql<{ uid: string }>`SELECT uid FROM github_oauth WHERE k = 'current'`[0];
+    const oauthRow = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
     if (oauthRow) {
+      // Parsing proves the shape of the name, never that GitHub has anything
+      // behind it: a typo, a repository someone else's account can see, or a
+      // branch that was never pushed all parse perfectly. Resolving the ref
+      // here is what turns those into a refusal at the moment of connecting,
+      // instead of a workspace that publishes `online: true` and only fails
+      // when the agent first tries to read it.
+      const head = await refHead(oauthRow.token, ref);
+      if (!head.ok) {
+        this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
+        return;
+      }
+
       const now = Date.now();
       this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at, auth)
                VALUES ('current', '', ${repo}, ${uid}, ${now}, 'oauth')

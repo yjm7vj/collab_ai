@@ -899,7 +899,7 @@ export function RoomView({
           workspace={state.workspace}
           supported={isFileAccessSupported()}
           hosting={wsReady}
-          canWrite={canWrite}
+          canWrite={state.workspace.kind === "github" || canWrite}
           github={state.github}
           repos={repos}
           reposLoading={reposLoading}

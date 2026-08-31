@@ -2236,7 +2236,7 @@ export function WorkspacePanel({
               <p className="field-note">
                 {canWrite ? "The agent can propose changes" : "Read-only"}
               </p>
-              {!canWrite && (
+              {!canWrite && workspace.kind === "local" && (
                 <p className="field-warn">
                   Shared read-only. Disconnect and reconnect with edits
                   allowed to change that.
