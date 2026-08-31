@@ -21,17 +21,34 @@
     "run_worker_first": ["/agents/*", "/api/*"]
   },
 
-  // The app answers on app.huddleai.org. Deliberately a subdomain: the apex
-  // serves a different site that is not in this repo, so this displaces
-  // nothing. `zone_name` is required — the zone cannot be inferred from a
-  // subdomain pattern.
+  // Two hostnames, one Worker, one bundle. app.huddleai.org is the product;
+  // huddleai.org is the same landing page ending in a waitlist form instead of
+  // a sign-in, chosen client-side by hostname (src/client/host.ts). Taking the
+  // apex means this Worker now displaces whatever the huddleai.org DNS record
+  // pointed at before — deploying is what moves it, so check that first.
+  // `zone_name` is required: the zone cannot be inferred from a pattern.
   "routes": [
-    { "pattern": "app.huddleai.org", "custom_domain": true, "zone_name": "huddleai.org" }
+    { "pattern": "app.huddleai.org", "custom_domain": true, "zone_name": "huddleai.org" },
+    { "pattern": "huddleai.org", "custom_domain": true, "zone_name": "huddleai.org" }
   ],
 
   // Pinned on: adding any route silently disables the *.workers.dev URL, which
   // 404s the address the app is currently reachable at.
   "workers_dev": true,
+
+  // Waitlist signups from the apex. Nothing else in the app uses D1, and the
+  // binding is deliberately optional at runtime: /api/waitlist answers 503 when
+  // it is missing rather than taking the rest of the Worker down with it.
+  // Schema changes go in migrations/, applied with
+  // `npx wrangler d1 migrations apply huddleai-waitlist --remote`.
+  "d1_databases": [
+    {
+      "binding": "WAITLIST_DB",
+      "database_name": "huddleai-waitlist",
+      "database_id": "e26f0d5f-ab0c-4bcb-b356-1a5edf76a281",
+      "migrations_dir": "migrations"
+    }
+  ],
 
   "durable_objects": {
     "bindings": [{ "name": "Room", "class_name": "Room" }]

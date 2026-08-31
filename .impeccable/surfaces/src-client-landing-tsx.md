@@ -12,6 +12,17 @@ create-room card inside the app shell, and invite/room deep links still go
 straight to their gate — a marketing page between someone and the room they
 were sent to would be a worse product.
 
+The same surface serves two hostnames and differs only in its last section: on
+`app.huddleai.org` it ends in sign-in or a create-room field, and on
+`huddleai.org` it ends in a waitlist field posting to `/api/waitlist`
+(`LandingCta` in `src/client/landing.tsx`). The argument above the fold is
+identical, because it is the same product either way; only the ask changes.
+
+While the app is closed, the app-host version of this page is reached only with
+`?app=1` or by someone already signed in — a signed-out visitor to that root is
+redirected to the waitlist. The page is kept rather than deleted because
+reopening is meant to be one edit, not a rebuild.
+
 Visitor mode: **Persuade**.
 
 ## Audience and job

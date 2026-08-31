@@ -19,6 +19,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type ReactNode,
 } from "react";
 
@@ -955,33 +956,135 @@ const PROVIDER_TEXT: Record<string, string> = {
   google: "Continue with Google",
 };
 
+/**
+ * The apex page's ending: one field, posted to /api/waitlist.
+ *
+ * A repeat address is a success, not an error — the Worker treats a second
+ * signup as a no-op — so there is no state here for "already on the list". The
+ * confirmation does not repeat the address back: printing it leaves someone's
+ * email sitting on a screen that may not be theirs alone, and it tells them
+ * nothing they did not just type.
+ */
+function WaitlistForm() {
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [joined, setJoined] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const submit = useCallback(
+    async (event: FormEvent) => {
+      event.preventDefault();
+      const address = email.trim();
+      if (!address || sending) return;
+      setSending(true);
+      setProblem(null);
+      try {
+        const res = await fetch("/api/waitlist", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: address }),
+        });
+        if (!res.ok) {
+          setProblem(
+            res.status === 400
+              ? "That doesn't look like an email address."
+              : "Couldn't save that just now. Try again in a moment.",
+          );
+          return;
+        }
+        setJoined(true);
+      } catch {
+        setProblem("Couldn't reach the server. Try again in a moment.");
+      } finally {
+        setSending(false);
+      }
+    },
+    [email, sending],
+  );
+
+  if (joined) {
+    return (
+      <p className="lp-close-done" role="status">
+        <span className="lp-close-done-pip" aria-hidden="true" />
+        <span>You're on the list. We'll email you when Huddle.AI opens.</span>
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <form className="lp-close-form" onSubmit={submit}>
+        <input
+          type="email"
+          value={email}
+          maxLength={254}
+          required
+          autoComplete="email"
+          inputMode="email"
+          placeholder="you@work.com"
+          aria-label="Email address"
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <button
+          type="submit"
+          className="lp-btn lp-btn--primary"
+          disabled={!email.trim() || sending}
+        >
+          {sending ? "Joining…" : "Join the waitlist"}
+        </button>
+      </form>
+      {problem && (
+        <p className="lp-close-error" role="alert">
+          {problem}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * How the page ends. The argument above the fold is the same on both
+ * hostnames — it is the same product either way — so the two differ only in
+ * what they ask for at the bottom: app.huddleai.org asks for a room, and
+ * huddleai.org, which nobody can sign into yet, asks for an email.
+ */
+export type LandingCta =
+  | {
+      kind: "app";
+      providers: string[];
+      onSignIn: (provider: string) => void;
+      onCreate: (name: string) => void;
+      initialName: string;
+      busy: boolean;
+      problem: string | null;
+    }
+  | { kind: "waitlist" };
+
 export function LandingPage({
-  providers,
-  onSignIn,
-  onCreate,
-  initialName,
-  busy,
-  problem,
+  cta,
   theme,
   onToggleTheme,
 }: {
-  providers: string[];
-  onSignIn: (provider: string) => void;
-  onCreate: (name: string) => void;
-  initialName: string;
-  busy: boolean;
-  problem: string | null;
+  cta: LandingCta;
   theme: ThemeMode;
   onToggleTheme: () => void;
 }) {
   const reduced = useReducedMotion();
-  const [name, setName] = useState(initialName);
+  const [name, setName] = useState(cta.kind === "app" ? cta.initialName : "");
   const [lifted, setLifted] = useState(false);
   const usable = useMemo(
-    () => providers.filter((p) => p in PROVIDER_TEXT),
-    [providers],
+    () => (cta.kind === "app" ? cta.providers.filter((p) => p in PROVIDER_TEXT) : []),
+    [cta],
   );
   const needsSignIn = usable.length > 0;
+  // The one label that has to agree in three places: the nav, the hero button
+  // and the promise the close section then keeps.
+  const actionText =
+    cta.kind === "waitlist"
+      ? "Join the waitlist"
+      : needsSignIn
+        ? "Sign in and open a room"
+        : "Create a room";
 
   useEffect(() => {
     const onScroll = () => setLifted(window.scrollY > 24);
@@ -1010,7 +1113,11 @@ export function LandingPage({
           <span className="lp-nav-actions">
             <ThemeToggle theme={theme} onToggle={onToggleTheme} />
             <button type="button" className="lp-btn lp-btn--small" onClick={toStart}>
-              {needsSignIn ? "Sign in" : "Create a room"}
+              {cta.kind === "waitlist"
+                ? "Join the waitlist"
+                : needsSignIn
+                  ? "Sign in"
+                  : "Create a room"}
             </button>
           </span>
         </div>
@@ -1033,7 +1140,7 @@ export function LandingPage({
               className="lp-btn lp-btn--primary"
               onClick={toStart}
             >
-              {needsSignIn ? "Sign in and open a room" : "Create a room"}
+              {actionText}
             </button>
             <a className="lp-btn lp-btn--ghost" href="#merge">
               See how a turn works
@@ -1139,6 +1246,20 @@ export function LandingPage({
         </section>
 
         <section className="lp-act lp-act--stage" id="start">
+          {cta.kind === "waitlist" ? (
+            <div className="lp-inner lp-close">
+              <h2 className="lp-h2 lp-close-h">Not open yet. Get the link when it is.</h2>
+              <p className="lp-lead">
+                Leave an email and you'll get a link as soon as Huddle.AI opens.
+                Nothing else arrives at that address.
+              </p>
+              <WaitlistForm />
+              <p className="lp-note">
+                Rooms are private — only the people you send the link to can get
+                in. A room nobody is using hibernates until someone comes back.
+              </p>
+            </div>
+          ) : (
           <div className="lp-inner lp-close">
             <h2 className="lp-h2 lp-close-h">Open a room. Send one link.</h2>
             <p className="lp-lead">
@@ -1153,7 +1274,7 @@ export function LandingPage({
                     key={provider}
                     type="button"
                     className="lp-btn lp-btn--primary"
-                    onClick={() => onSignIn(provider)}
+                    onClick={() => cta.onSignIn(provider)}
                   >
                     {PROVIDER_TEXT[provider]}
                   </button>
@@ -1164,7 +1285,7 @@ export function LandingPage({
                 className="lp-close-form"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  onCreate(name);
+                  cta.onCreate(name);
                 }}
               >
                 <input
@@ -1177,19 +1298,20 @@ export function LandingPage({
                 <button
                   type="submit"
                   className="lp-btn lp-btn--primary"
-                  disabled={!name.trim() || busy}
+                  disabled={!name.trim() || cta.busy}
                 >
-                  {busy ? "Creating…" : "Create a room"}
+                  {cta.busy ? "Creating…" : "Create a room"}
                 </button>
               </form>
             )}
-            {problem && <p className="lp-close-error">{problem}</p>}
+            {cta.problem && <p className="lp-close-error">{cta.problem}</p>}
             <p className="lp-note">
               {needsSignIn
                 ? "We only read your name and avatar. Nothing is posted on your behalf."
                 : "Your name is how the room tags what you say — every message is attributed, so everyone can see who asked for what."}
             </p>
           </div>
+          )}
         </section>
       </main>
 
