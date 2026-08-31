@@ -38,7 +38,12 @@ import {
   type SavedWorkflow,
   type WorkflowGraph,
 } from "../src/shared/workflow";
-import { mergeLibrary, sanitizeLibraryPush } from "../src/shared/library";
+import {
+  mergeLibrary,
+  rememberDeletes,
+  sanitizeLibraryPush,
+  settleDeletes,
+} from "../src/shared/library";
 import { MODELS, modelInfo, sanitizeSettings, DEFAULT_SETTINGS } from "../src/shared/models";
 import { ROLE_CAPS, can, DEFAULT_POLICY, type Role } from "../src/shared/access";
 import { INITIAL_ROOM_STATE } from "../src/shared/protocol";
@@ -641,6 +646,49 @@ check(
     { workflows: [{ id: "a", label: "Hostile", savedAt: now, graph: { nodes: "no", edges: 3 } }] },
     now,
   ).workflows[0]!.graph.nodes.length > 0,
+);
+
+/**
+ * A delete has to outlive the request that failed to carry it — that is the
+ * whole reason this list is kept — without outliving the workflow it names.
+ */
+check(
+  "a removal is owed until it is sent",
+  stable(rememberDeletes([], ["a"], [])) === stable(["a"]),
+);
+check(
+  "a removal already owed is not owed twice",
+  stable(rememberDeletes(["a"], ["a"], [])) === stable(["a"]),
+);
+check(
+  "a workflow that is back in the library is not deleted",
+  stable(rememberDeletes(["a"], [], [w("a", "Back from another machine", 10)])) === stable([]),
+);
+check(
+  "saving over an id cancels its pending delete",
+  stable(rememberDeletes(["a", "b"], [], [w("a", "Saved again", 10)])) === stable(["b"]),
+);
+check("a junk id is never owed", stable(rememberDeletes([], ["no spaces", ""], [])) === stable([]));
+check(
+  "the owed list cannot grow without bound",
+  rememberDeletes(
+    Array.from({ length: SAVED_LIMITS.count + 20 }, (_, i) => `id${i}`),
+    [],
+    [],
+  ).length === SAVED_LIMITS.count,
+);
+check(
+  "the newest removals are the ones kept when it overflows",
+  rememberDeletes(
+    Array.from({ length: SAVED_LIMITS.count }, (_, i) => `id${i}`),
+    ["latest"],
+    [],
+  ).includes("latest"),
+);
+check("a sent delete is settled", stable(settleDeletes(["a", "b"], ["a"])) === stable(["b"]));
+check(
+  "a delete made while the request was in flight is still owed",
+  stable(settleDeletes(["a", "late"], ["a"])) === stable(["late"]),
 );
 
 console.log("\ntool surface");

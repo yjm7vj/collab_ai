@@ -18,9 +18,11 @@
  *
  * Nothing blocks on the network. A save is written locally and published to
  * the UI first, then synced; a failed sync loses the round trip, never the
- * save. That is also why deletes are held in `pendingDeletes` until a sync
- * actually succeeds — a delete that fails to send would otherwise be undone by
- * the next reply, and the workflow someone removed would come back.
+ * save. Deletes are held until a sync actually succeeds and are stored beside
+ * the library while they wait — a delete that fails to send would otherwise be
+ * undone by the next reply, and closing the tab before it landed would bring
+ * the workflow back. See `rememberDeletes` for what stops a stale one from
+ * eating a workflow that has since come back to life.
  *
  * Everything read back — from storage or from the account — is re-sanitized.
  * Neither is a trust boundary: local storage survives across versions and is
@@ -31,6 +33,8 @@
 import { identityUid, storedIdentity } from "./identity";
 import {
   mergeLibrary,
+  rememberDeletes,
+  settleDeletes,
   type LibraryPush,
   type LibrarySyncRequest,
   type LibrarySyncResponse,
@@ -48,6 +52,8 @@ const LIBRARY_KEY = "collab_ai:workflows";
  * wrong account is dropped rather than merged.
  */
 const OWNER_KEY = "collab_ai:workflows:owner";
+/** Deletes made here that the account has not accepted yet. */
+const DELETES_KEY = "collab_ai:workflows:deleted";
 
 /** How long the library settles before a change is pushed to the account. */
 const SYNC_DEBOUNCE_MS = 600;
@@ -62,12 +68,13 @@ const listeners = new Set<Listener>();
  * sent-and-forgotten: absence never deletes anything, so a delete only takes
  * effect when it is said out loud and heard.
  *
- * In memory, so a delete that never reached the account before the tab closed
- * is owed by nobody, and the row comes back on the next pull. Deleting it
- * again is one click, and the alternative — a durable queue of removals — can
- * delete a workflow someone has since decided to keep.
+ * Outlives the tab, because the window between removing a workflow and the
+ * push landing is exactly where a delete gets lost — offline, a closed laptop,
+ * a failed request — and a delete that is lost does not stay lost quietly, it
+ * puts the workflow back.
  */
-const pendingDeletes = new Set<string>();
+let pendingDeletes: string[] = [];
+let deletesLoaded = false;
 
 /** The last body sent, so a change that is not a change costs nothing. */
 let pushed: string | null = null;
@@ -99,6 +106,34 @@ function writeStore(library: SavedWorkflow[]): void {
   } catch {
     // A full or blocked store loses the local copy, not the session — and not
     // the account's copy, which the sync below is on its way to update.
+  }
+}
+
+function readDeletes(): string[] {
+  if (!deletesLoaded) {
+    deletesLoaded = true;
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(DELETES_KEY) ?? "[]");
+      pendingDeletes = rememberDeletes(
+        Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [],
+        [],
+        [],
+      );
+    } catch {
+      pendingDeletes = [];
+    }
+  }
+  return pendingDeletes;
+}
+
+function writeDeletes(next: string[]): void {
+  pendingDeletes = next;
+  deletesLoaded = true;
+  try {
+    localStorage.setItem(DELETES_KEY, JSON.stringify(next));
+  } catch {
+    // Same reasoning as writeStore: the in-memory list still carries this
+    // session's deletes, and losing the durable copy costs one reload.
   }
 }
 
@@ -148,8 +183,12 @@ export function subscribeLibrary(fn: Listener): () => void {
  * deletion, which is the whole point of the tombstone rule.
  */
 export function setLibrary(next: SavedWorkflow[], deleted: string[] = []): void {
-  for (const id of deleted) pendingDeletes.add(id);
-  publish(sanitizeSavedWorkflows(next));
+  const library = sanitizeSavedWorkflows(next);
+  // `library` rather than `next`, so an id that survived sanitizing is what
+  // counts as still alive — and a row that is back in the library is not
+  // deleted, however recently this browser said otherwise.
+  writeDeletes(rememberDeletes(readDeletes(), deleted, library));
+  publish(library);
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
@@ -181,7 +220,7 @@ function claimCache(uid: string | null): void {
     // sync. The merge below is safe either way.
   }
   if (owner && owner !== uid) {
-    pendingDeletes.clear();
+    writeDeletes([]);
     pushed = null;
     publish([]);
   }
@@ -209,7 +248,7 @@ export function syncLibrary(options?: { force?: boolean }): Promise<void> {
     claimCache(identityUid());
 
     const workflows = getLibrary();
-    const deleted = [...pendingDeletes];
+    const deleted = [...readDeletes()];
     const push: LibraryPush = { workflows, deleted };
     const body = JSON.stringify(push);
     if (!options?.force && deleted.length === 0 && body === pushed) return;
@@ -238,7 +277,7 @@ export function syncLibrary(options?: { force?: boolean }): Promise<void> {
       );
       // Only the deletes this request carried are settled. One made while it
       // was in flight is still owed, and stays pending for the next push.
-      for (const id of deleted) pendingDeletes.delete(id);
+      writeDeletes(settleDeletes(readDeletes(), deleted));
       publish(merged);
       // Recorded against what was adopted, not against what was sent, so the
       // merge itself does not read as a fresh edit and bounce straight back.
