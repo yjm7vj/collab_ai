@@ -20,6 +20,12 @@ import {
   type JoinRoomRequest,
   type JoinRoomResponse,
 } from "../shared/protocol";
+import type {
+  SidebarSyncRequest,
+  SidebarSyncResponse,
+  SyncProject,
+  SyncRoom,
+} from "../shared/sidebar";
 import { Landing, JoinGate, SidePane, SignInGate } from "./components";
 import { LandingPage } from "./landing";
 import { isAppGated, WAITLIST_URL } from "./host";
@@ -47,12 +53,21 @@ function storedIdentity(): string | null {
   return localStorage.getItem(IDENTITY_KEY);
 }
 
+/**
+ * `updatedAt` is what makes two browsers able to disagree and settle.
+ *
+ * Every edit to a synced field stamps it, and the server keeps whichever side
+ * stamped later (see ../shared/sidebar). Fields the server never sees —
+ * `workspace` above all — do not stamp it: a folder handle belongs to the
+ * machine holding it, so touching one must not win an argument about a name.
+ */
 type SidebarProject = {
   id: string;
   name: string;
   archived: boolean;
   rooms: SidebarRoom[];
   workspace: WorkspaceInfo;
+  updatedAt: number;
 };
 
 type SidebarRoom = {
@@ -61,6 +76,7 @@ type SidebarRoom = {
   projectId?: string;
   archived: boolean;
   workspace: WorkspaceInfo;
+  updatedAt: number;
 };
 
 const EMPTY_WORKSPACE: WorkspaceInfo = { kind: "none", online: false, hostUid: null, label: "" };
@@ -91,6 +107,17 @@ function safeWorkspace(value: unknown): WorkspaceInfo {
   };
 }
 
+/**
+ * Sidebars written before rooms synced have no `updatedAt` at all. They are
+ * stamped as of now rather than with 0, because this browser's copy is the
+ * only copy there is: reading it as ancient would let a server row created a
+ * moment ago by the same person's other tab overwrite the names they have been
+ * using here for weeks. The stamp is frozen on the first persist after load.
+ */
+function safeStamp(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : Date.now();
+}
+
 function safeRoom(value: unknown): SidebarRoom | null {
   if (!value || typeof value !== "object") return null;
   const rec = value as Record<string, unknown>;
@@ -101,6 +128,7 @@ function safeRoom(value: unknown): SidebarRoom | null {
     projectId: typeof rec.projectId === "string" ? rec.projectId : undefined,
     archived: rec.archived === true,
     workspace: safeWorkspace(rec.workspace),
+    updatedAt: safeStamp(rec.updatedAt),
   };
 }
 
@@ -126,7 +154,14 @@ function storedProjects(): SidebarProject[] {
       const rooms = Array.isArray(rec.rooms)
         ? rec.rooms.map(safeRoom).filter((room): room is SidebarRoom => Boolean(room))
         : [];
-      return [{ id, name: rec.name, archived: rec.archived === true, rooms, workspace: safeWorkspace(rec.workspace) }];
+      return [{
+        id,
+        name: rec.name,
+        archived: rec.archived === true,
+        rooms,
+        workspace: safeWorkspace(rec.workspace),
+        updatedAt: safeStamp(rec.updatedAt),
+      }];
     });
   } catch {
     return [];
@@ -136,6 +171,152 @@ function storedProjects(): SidebarProject[] {
 function persistSidebar(projects: SidebarProject[], rooms: SidebarRoom[]) {
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
   localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms));
+}
+
+/** How long the sidebar settles before a change is pushed to the account. */
+const SYNC_DEBOUNCE_MS = 600;
+
+/**
+ * The sidebar flattened into the shape the account stores.
+ *
+ * A room's project comes from the list it is sitting in rather than from its
+ * own `projectId`: the nesting is what the UI actually renders, so it is the
+ * only version of the answer that can be wrong in a way anyone would notice.
+ */
+function syncSnapshot(projects: SidebarProject[], rooms: SidebarRoom[]): SidebarSyncResponse {
+  const flatten = (room: SidebarRoom, projectId: string | null): SyncRoom => ({
+    roomId: room.roomId,
+    label: room.label,
+    projectId,
+    archived: room.archived,
+    updatedAt: room.updatedAt,
+  });
+  return {
+    rooms: [
+      ...rooms.map((room) => flatten(room, null)),
+      ...projects.flatMap((project) => project.rooms.map((room) => flatten(room, project.id))),
+    ],
+    projects: projects.map((project): SyncProject => ({
+      id: project.id,
+      name: project.name,
+      archived: project.archived,
+      updatedAt: project.updatedAt,
+    })),
+  };
+}
+
+/** The ids this browser has already told the account about. */
+type SentIds = { rooms: Set<string>; projects: Set<string> };
+
+/**
+ * Rebuild the sidebar from what the account holds, keeping what only this
+ * browser can know.
+ *
+ * The account is authoritative about which rooms exist, what they are called
+ * and how they are grouped — but only about what it has actually been told,
+ * and only where this browser does not hold a later edit. The two exceptions
+ * are spelled out inline below; between them they are what keeps a rename made
+ * mid-sync, or a room created a second ago, from being swallowed by the reply
+ * to a request that predates it.
+ */
+function applySnapshot(
+  snapshot: SidebarSyncResponse,
+  prevProjects: SidebarProject[],
+  prevRooms: SidebarRoom[],
+  sent: SentIds,
+): { projects: SidebarProject[]; rooms: SidebarRoom[] } {
+  // Rooms as this browser has them, each with the list it is actually sitting
+  // in — the nesting, not the room's own `projectId`, is what the UI renders.
+  const localRooms = new Map<string, { room: SidebarRoom; projectId: string | null }>();
+  for (const room of prevRooms) localRooms.set(room.roomId, { room, projectId: null });
+  for (const project of prevProjects) {
+    for (const room of project.rooms) localRooms.set(room.roomId, { room, projectId: project.id });
+  }
+  const localProjects = new Map(prevProjects.map((project) => [project.id, project] as const));
+
+  /**
+   * The account's rows, except where this browser holds a newer edit.
+   *
+   * Someone renaming a room while a sync is in flight would otherwise watch
+   * the response put the old name back — the request had already left, so it
+   * could not have carried the rename. Preferring the newer stamp here is the
+   * same rule the server merges by, and the watcher pushes the survivor on the
+   * next tick, so the two ends agree either way.
+   */
+  const rooms: SyncRoom[] = snapshot.rooms.map((room) => {
+    const local = localRooms.get(room.roomId);
+    if (!local || local.room.updatedAt <= room.updatedAt) return room;
+    return {
+      roomId: room.roomId,
+      label: local.room.label,
+      projectId: local.projectId,
+      archived: local.room.archived,
+      updatedAt: local.room.updatedAt,
+    };
+  });
+  const projects: SyncProject[] = snapshot.projects.map((project) => {
+    const local = localProjects.get(project.id);
+    if (!local || local.updatedAt <= project.updatedAt) return project;
+    return { id: project.id, name: local.name, archived: local.archived, updatedAt: local.updatedAt };
+  });
+
+  /**
+   * Plus whatever this browser has that the account has not been told about.
+   *
+   * A row that was sent and did not come back was deleted somewhere else and
+   * has to go. A row that was never sent has simply not made the trip yet —
+   * a room created seconds ago, a project made while the response was in the
+   * air — and dropping it would delete something nobody asked to delete.
+   */
+  const returnedRooms = new Set(snapshot.rooms.map((room) => room.roomId));
+  for (const [roomId, local] of localRooms) {
+    if (returnedRooms.has(roomId) || sent.rooms.has(roomId)) continue;
+    rooms.push({
+      roomId,
+      label: local.room.label,
+      projectId: local.projectId,
+      archived: local.room.archived,
+      updatedAt: local.room.updatedAt,
+    });
+  }
+  const returnedProjects = new Set(snapshot.projects.map((project) => project.id));
+  for (const [id, local] of localProjects) {
+    if (returnedProjects.has(id) || sent.projects.has(id)) continue;
+    projects.push({ id, name: local.name, archived: local.archived, updatedAt: local.updatedAt });
+  }
+
+  // Back into the shape the sidebar renders. Workspaces are never carried over
+  // the wire — a folder handle belongs to the machine holding it — so they
+  // come from the copy already on screen, and a room arriving from another
+  // device starts with none.
+  const restore = (room: SyncRoom, projectId?: string): SidebarRoom => ({
+    roomId: room.roomId,
+    label: room.label,
+    projectId,
+    archived: room.archived,
+    workspace: localRooms.get(room.roomId)?.room.workspace ?? EMPTY_WORKSPACE,
+    updatedAt: room.updatedAt,
+  });
+
+  const nextProjects = projects.map((project): SidebarProject => ({
+    id: project.id,
+    name: project.name,
+    archived: project.archived,
+    workspace: localProjects.get(project.id)?.workspace ?? EMPTY_WORKSPACE,
+    updatedAt: project.updatedAt,
+    rooms: rooms.filter((room) => room.projectId === project.id).map((room) => restore(room, project.id)),
+  }));
+
+  const known = new Set(nextProjects.map((project) => project.id));
+  // A room whose project is gone becomes a loose room rather than disappearing
+  // with it — deleting a project deletes its rooms explicitly, so a dangling
+  // reference here means the two rows are out of step, not that the room was
+  // meant to go.
+  const nextRooms = rooms
+    .filter((room) => !room.projectId || !known.has(room.projectId))
+    .map((room) => restore(room));
+
+  return { projects: nextProjects, rooms: nextRooms };
 }
 
 const UNTITLED_RE = /^Untitled (\d+)$/;
@@ -296,6 +477,116 @@ export function App() {
   }, [projects, rooms]);
 
   /**
+   * The last snapshot this browser sent, so a change that is not a change
+   * costs nothing. Cleared on a failed send, which is what makes the next
+   * edit — or the next sign-in — a retry.
+   */
+  const pushed = useRef<string | null>(null);
+  /**
+   * Syncs run one at a time. Two in flight could return in either order and
+   * the loser would paint a sidebar that is one edit stale, so they queue
+   * instead. Each reads `sidebar.current` when it actually runs, never when it
+   * was scheduled.
+   */
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * What the last request carried, which is how a reply that omits a row is
+   * read: sent and not returned means deleted elsewhere, never sent means the
+   * account has simply not heard of it yet.
+   */
+  const sent = useRef<SentIds>({ rooms: new Set(), projects: new Set() });
+
+  /**
+   * Push this browser's sidebar to the account and adopt what comes back.
+   *
+   * Rooms and projects used to live only in localStorage, which is why signing
+   * in somewhere else showed an empty sidebar: the rooms were still there and
+   * the account was still a member of them, but only this browser had ever
+   * known their names. The exchange is one request — see /api/sidebar.
+   *
+   * Deletions have to be said out loud. A snapshot that simply lacks a room is
+   * a browser that never heard of it, not a removal, so `deletedRooms` and
+   * `deletedProjects` carry the intent that absence cannot.
+   */
+  const syncSidebar = useCallback(
+    (options?: { deletedRooms?: string[]; deletedProjects?: string[]; force?: boolean }) => {
+      const deletedRooms = options?.deletedRooms ?? [];
+      const deletedProjects = options?.deletedProjects ?? [];
+      const removing = deletedRooms.length > 0 || deletedProjects.length > 0;
+      const run = async () => {
+        const identityToken = storedIdentity();
+        // No identity, no account to sync with: a deployment with sign-in off
+        // keeps exactly the browser-local sidebar it has always had.
+        if (!identityToken) return;
+        const snapshot = syncSnapshot(sidebar.current.projects, sidebar.current.rooms);
+        const body = JSON.stringify(snapshot);
+        if (!options?.force && !removing && body === pushed.current) return;
+        pushed.current = body;
+        sent.current = {
+          rooms: new Set(snapshot.rooms.map((room) => room.roomId)),
+          projects: new Set(snapshot.projects.map((project) => project.id)),
+        };
+        try {
+          const res = await fetch("/api/sidebar", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              identity: identityToken,
+              ...snapshot,
+              deletedRooms,
+              deletedProjects,
+            } satisfies SidebarSyncRequest),
+          });
+          // Nothing is surfaced on failure and nothing local is thrown away.
+          // The sidebar someone is looking at still works offline, and a
+          // banner about a background sync would be noise about a problem
+          // they cannot act on.
+          if (!res.ok) {
+            pushed.current = null;
+            return;
+          }
+          const merged = (await res.json()) as SidebarSyncResponse;
+          const next = applySnapshot(merged, sidebar.current.projects, sidebar.current.rooms, sent.current);
+          setProjects(next.projects);
+          setRooms(next.rooms);
+          // Recorded against what we just adopted, not against what we sent,
+          // so the watcher below does not read the merge itself as a fresh
+          // edit and bounce it straight back.
+          pushed.current = JSON.stringify(syncSnapshot(next.projects, next.rooms));
+        } catch {
+          pushed.current = null;
+        }
+      };
+      queue.current = queue.current.then(run, run);
+      return queue.current;
+    },
+    [],
+  );
+
+  const identityUid = identity?.uid ?? null;
+
+  // Signing in is the moment to go and get the account's rooms — including on
+  // a browser that has never seen them, which is the whole point.
+  useEffect(() => {
+    if (identityUid) void syncSidebar({ force: true });
+  }, [identityUid, syncSidebar]);
+
+  /**
+   * Every change to a synced field, sent once the sidebar stops moving.
+   *
+   * Watching the state rather than calling from each rename and archive means
+   * a sidebar action added later cannot forget to sync. Changes the account
+   * does not store — a workspace connecting, a folder going offline — leave
+   * the snapshot identical and are dropped here without a request.
+   */
+  useEffect(() => {
+    if (!identityUid) return;
+    if (JSON.stringify(syncSnapshot(projects, rooms)) === pushed.current) return;
+    const timer = setTimeout(() => void syncSidebar(), SYNC_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [identityUid, projects, rooms, syncSidebar]);
+
+  /**
    * The app is not open yet: a signed-out visitor to the app host's root goes
    * to the waitlist rather than to a sign-in they have no way through. Deep
    * links are the exception — an invite or a room link still reaches its own
@@ -304,8 +595,21 @@ export function App() {
    * This has to happen here and not as a redirect in the Worker: rooms and
    * invites are hash routes, and a fragment never reaches the server, so a 302
    * on `/` would swallow every deep link it cannot see.
+   *
+   * `everIdentified` narrows this to arrival, which is the only moment the
+   * gate is about. Losing an identity mid-session is a different situation:
+   * createRoom and joinRoom clear it on `sign_in_required` and set a message
+   * asking the person to sign in again, and without the latch that clearing
+   * would flip `gated` true and navigate the browser to the waitlist before
+   * the message ever rendered — throwing somebody who is already inside the
+   * app out of it with no explanation, on an expiry they can simply fix. A
+   * ref rather than state on purpose: it must be readable in the same render
+   * that clears the identity, so a re-render would already be too late.
    */
-  const gated = !identity && route.kind === "landing" && isAppGated();
+  const everIdentified = useRef(false);
+  if (identity) everIdentified.current = true;
+
+  const gated = !identity && !everIdentified.current && route.kind === "landing" && isAppGated();
   useEffect(() => {
     if (gated) location.replace(WAITLIST_URL);
   }, [gated]);
@@ -384,6 +688,7 @@ export function App() {
           projectId,
           archived: false,
           workspace: EMPTY_WORKSPACE,
+          updatedAt: Date.now(),
         };
         setRooms((prevRooms) => (projectId ? prevRooms : [...prevRooms, room]));
         if (projectId) {
@@ -445,13 +750,17 @@ export function App() {
         localStorage.setItem("collab_ai:name", displayName);
         setName(displayName);
         setTokenEpoch((epoch) => epoch + 1);
+        // The Worker has just recorded this room in the account's sidebar;
+        // this is what fetches it back, so following an invite link finally
+        // leaves the room somewhere other than the link itself.
+        void syncSidebar({ force: true });
       } catch {
         setProblem(refusalMessage("network"));
       } finally {
         setBusy(false);
       }
     },
-    [route, uid],
+    [route, uid, syncSidebar],
   );
 
   // A full-page navigation, not a fetch — the provider's consent screen has
@@ -501,6 +810,7 @@ export function App() {
           archived: false,
           rooms: [],
           workspace: EMPTY_WORKSPACE,
+          updatedAt: Date.now(),
         },
       ];
       return next;
@@ -511,7 +821,8 @@ export function App() {
     const nextName = name.trim().slice(0, 42);
     if (!nextName) return;
     setProjects((prev) =>
-      prev.map((project) => (project.id === projectId ? { ...project, name: nextName } : project)),
+      prev.map((project) =>
+        project.id === projectId ? { ...project, name: nextName, updatedAt: Date.now() } : project),
     );
   }, []);
 
@@ -522,10 +833,11 @@ export function App() {
   const renameRoom = useCallback((roomId: string, label: string) => {
     const nextLabel = label.trim().slice(0, 42);
     if (!nextLabel) return;
-    setRooms((prevRooms) => prevRooms.map((room) => room.roomId === roomId ? { ...room, label: nextLabel } : room));
+    const stamped = { label: nextLabel, updatedAt: Date.now() };
+    setRooms((prevRooms) => prevRooms.map((room) => room.roomId === roomId ? { ...room, ...stamped } : room));
     setProjects((prevProjects) => prevProjects.map((project) => ({
       ...project,
-      rooms: project.rooms.map((room) => room.roomId === roomId ? { ...room, label: nextLabel } : room),
+      rooms: project.rooms.map((room) => room.roomId === roomId ? { ...room, ...stamped } : room),
     })));
   }, []);
 
@@ -537,25 +849,27 @@ export function App() {
     const room = [...rooms, ...projects.flatMap((project) => project.rooms)]
       .find((candidate) => candidate.roomId === roomId);
     if (!room || room.archived || !window.confirm(`Archive ${room.label}?`)) return;
+    const stamped = { archived: true, updatedAt: Date.now() };
     setRooms((prevRooms) => prevRooms.map((candidate) =>
-      candidate.roomId === roomId ? { ...candidate, archived: true } : candidate,
+      candidate.roomId === roomId ? { ...candidate, ...stamped } : candidate,
     ));
     setProjects((prevProjects) => prevProjects.map((project) => ({
       ...project,
       rooms: project.rooms.map((candidate) =>
-        candidate.roomId === roomId ? { ...candidate, archived: true } : candidate,
+        candidate.roomId === roomId ? { ...candidate, ...stamped } : candidate,
       ),
     })));
   }, [projects, rooms]);
 
   const restoreRoom = useCallback((roomId: string) => {
+    const stamped = { archived: false, updatedAt: Date.now() };
     setRooms((prevRooms) => prevRooms.map((candidate) =>
-      candidate.roomId === roomId ? { ...candidate, archived: false } : candidate,
+      candidate.roomId === roomId ? { ...candidate, ...stamped } : candidate,
     ));
     setProjects((prevProjects) => prevProjects.map((project) => ({
       ...project,
       rooms: project.rooms.map((candidate) =>
-        candidate.roomId === roomId ? { ...candidate, archived: false } : candidate,
+        candidate.roomId === roomId ? { ...candidate, ...stamped } : candidate,
       ),
     })));
   }, []);
@@ -573,23 +887,40 @@ export function App() {
     setRooms(nextRooms);
     setProjects(nextProjects);
     persistSidebar(nextProjects, nextRooms);
+    // Said explicitly, because a snapshot missing this room would read as a
+    // browser that had never heard of it and the room would come straight
+    // back on the next sync — here and on every other device.
+    sidebar.current = { projects: nextProjects, rooms: nextRooms };
+    void syncSidebar({ deletedRooms: [roomId] });
     if ((route.kind === "room" || route.kind === "invite") && route.roomId === roomId) {
       location.hash = "";
     }
-  }, [projects, rooms, route]);
+  }, [projects, rooms, route, syncSidebar]);
 
   const archiveProject = useCallback((projectId: string) => {
     const project = projects.find((candidate) => candidate.id === projectId);
     if (!project || project.archived || !window.confirm(`Archive ${project.name} and its rooms?`)) return;
+    const now = Date.now();
     setProjects((prevProjects) => prevProjects.map((candidate) => candidate.id === projectId
-      ? { ...candidate, archived: true, rooms: candidate.rooms.map((room) => ({ ...room, archived: true })) }
+      ? {
+          ...candidate,
+          archived: true,
+          updatedAt: now,
+          rooms: candidate.rooms.map((room) => ({ ...room, archived: true, updatedAt: now })),
+        }
       : candidate,
     ));
   }, [projects]);
 
   const restoreProject = useCallback((projectId: string) => {
+    const now = Date.now();
     setProjects((prevProjects) => prevProjects.map((candidate) => candidate.id === projectId
-      ? { ...candidate, archived: false, rooms: candidate.rooms.map((room) => ({ ...room, archived: false })) }
+      ? {
+          ...candidate,
+          archived: false,
+          updatedAt: now,
+          rooms: candidate.rooms.map((room) => ({ ...room, archived: false, updatedAt: now })),
+        }
       : candidate,
     ));
   }, []);
@@ -598,8 +929,17 @@ export function App() {
     const project = projects.find((candidate) => candidate.id === projectId);
     if (!project || !window.confirm(`Delete ${project.name} and its room records?`)) return;
     project.rooms.forEach((room) => clearToken(room.roomId));
-    setProjects((prevProjects) => prevProjects.filter((candidate) => candidate.id !== projectId));
-  }, [projects]);
+    const nextProjects = projects.filter((candidate) => candidate.id !== projectId);
+    setProjects(nextProjects);
+    // The rooms go with it: they only existed in the sidebar as part of this
+    // project, and leaving them behind on the account would have them
+    // reappear as loose rooms on every device.
+    sidebar.current = { projects: nextProjects, rooms: sidebar.current.rooms };
+    void syncSidebar({
+      deletedRooms: project.rooms.map((room) => room.roomId),
+      deletedProjects: [projectId],
+    });
+  }, [projects, syncSidebar]);
 
   /**
    * Record what a room reports about its workspace, and spread it across the

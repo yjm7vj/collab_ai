@@ -21,6 +21,7 @@ import {
   safeAvatarUrl,
   type OAuthProvider,
 } from "./oauth";
+import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
 import {
   ROOM_ID_RE,
   UID_RE,
@@ -33,6 +34,7 @@ import {
 } from "../shared/protocol";
 
 export { Room } from "./room";
+export { UserIndex } from "./userIndex";
 
 // A token is a session, not a membership — membership outlives it and is
 // re-checked against the room's own member table on every connect.
@@ -47,6 +49,31 @@ function json(body: unknown, status = 200): Response {
 
 async function roomStub(env: Env, roomId: string) {
   return await getAgentByName(env.Room, roomId);
+}
+
+/**
+ * The Durable Object holding one account's sidebar, addressed by the uid that
+ * `deriveUid` produces — the same on every device the person signs in on,
+ * which is the whole point of it.
+ */
+function userIndex(env: Env, uid: string) {
+  return env.UserIndex.get(env.UserIndex.idFromName(uid));
+}
+
+/**
+ * Note a room in its member's sidebar, and never fail the request over it.
+ *
+ * A room the person is already inside is worth more than a bookmark to it: if
+ * this write fails they still have the room, the token and the link, and their
+ * next sidebar sync will carry the room up anyway. So a failure here is
+ * swallowed rather than turned into a create or join that did not happen.
+ */
+async function rememberRoom(env: Env, uid: string, roomId: string, title: string): Promise<void> {
+  try {
+    await userIndex(env, uid).remember(roomId, title);
+  } catch {
+    // Deliberately ignored — see above.
+  }
 }
 
 // Deliberately loose. The only thing a stricter pattern would buy is rejecting
@@ -252,13 +279,14 @@ export default {
         });
       }
 
-      const { role } = (await initRes.json()) as { role: string };
+      const { role, title } = (await initRes.json()) as { role: string; title: string };
       const token = await mintToken(env.ROOM_SECRET, {
         rid: roomId,
         uid,
         role,
         exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS,
       });
+      await rememberRoom(env, uid, roomId, title);
 
       return json({ roomId, token, role } satisfies CreateRoomResponse);
     }
@@ -317,15 +345,53 @@ export default {
         });
       }
 
-      const { role } = (await admitRes.json()) as { role: string };
+      const { role, title } = (await admitRes.json()) as { role: string; title: string };
       const token = await mintToken(env.ROOM_SECRET, {
         rid: roomId,
         uid,
         role,
         exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS,
       });
+      // An invite link is how most people meet a room, and until now following
+      // one left no trace in the sidebar at all — the room was reachable only
+      // from the link itself. Recording it here puts it in the sidebar on
+      // every device the account is signed in on.
+      await rememberRoom(env, uid, roomId, title);
 
       return json({ token, role } satisfies JoinRoomResponse);
+    }
+
+    /**
+     * The account's sidebar: rooms and projects that follow the person rather
+     * than the browser.
+     *
+     * One route does both directions. The body is what this browser knows and
+     * the response is what the account knows, because a browser that has been
+     * away has nothing useful to say about ordering and a request each way
+     * would only widen the window in which the two disagree.
+     *
+     * Identity is required and there is no unauthenticated fallback: without a
+     * signed identity there is no stable uid to key a sidebar by, and a uid
+     * taken from the body would let anyone read anyone's room list. A
+     * deployment with sign-in switched off simply never calls this — the
+     * client keeps the browser-local sidebar it has always had.
+     */
+    if (url.pathname === "/api/sidebar") {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      const identity = await identityFrom(env, (body as { identity?: unknown }).identity);
+      if (!identity) return json({ error: "sign_in_required" }, 401);
+
+      const push = sanitizePush(body, Date.now(), (id) => ROOM_ID_RE.test(id));
+      const snapshot = await userIndex(env, identity.uid).sync(push);
+      return json(snapshot satisfies SidebarSyncResponse);
     }
 
     if (url.pathname === "/api/auth/config") {

@@ -672,14 +672,13 @@ export class Room extends Agent<Env, RoomState> {
       // Creating a room that already exists would silently hand ownership to
       // whoever asked second, so it is refused outright.
       if (this.#room() !== null) return json({ error: "bad_request" }, 409);
-      this.#kvSet("room", {
-        title: String(body.title ?? "").trim().slice(0, 64) || "Untitled room",
-        visibility: "invite",
-        createdAt: now,
-      });
+      const title = String(body.title ?? "").trim().slice(0, 64) || "Untitled room";
+      this.#kvSet("room", { title, visibility: "invite", createdAt: now });
       this.sql`INSERT INTO members (uid, name, avatar, joined_at, last_seen, role)
                VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, 'owner')`;
-      return json({ role: "owner" });
+      // The title travels back so the Worker can label this room in the
+      // creator's account-level sidebar without asking the room again.
+      return json({ role: "owner", title });
     }
 
     if (url.pathname === "/admit") {
@@ -691,7 +690,7 @@ export class Room extends Agent<Env, RoomState> {
       const existing = this.#memberRole(uid);
       if (existing !== null) {
         this.sql`UPDATE members SET name = ${name}, avatar = ${avatar}, last_seen = ${now} WHERE uid = ${uid}`;
-        return json({ role: existing });
+        return json({ role: existing, title: room.title });
       }
 
       if (room.visibility === "locked") return json({ error: "locked" }, 403);
@@ -709,7 +708,7 @@ export class Room extends Agent<Env, RoomState> {
         // burn a use of a single-use invite.
         this.sql`UPDATE invites SET uses = uses + 1 WHERE code = ${code}`;
         this.#system(`${name} joined as ${verdict.role}`);
-        return json({ role: verdict.role });
+        return json({ role: verdict.role, title: room.title });
       }
 
       if (room.visibility !== "open") return json({ error: "invite_required" }, 403);
@@ -717,7 +716,7 @@ export class Room extends Agent<Env, RoomState> {
       this.sql`INSERT INTO members (uid, name, avatar, joined_at, last_seen, role)
                VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, 'editor')`;
       this.#system(`${name} joined`);
-      return json({ role: "editor" });
+      return json({ role: "editor", title: room.title });
     }
 
     if (url.pathname === "/github-installed") {
