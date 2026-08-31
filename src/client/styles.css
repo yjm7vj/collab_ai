@@ -1013,6 +1013,15 @@ input:focus, textarea:focus {
   overflow-wrap: anywhere;
   line-height: 1.5;
 }
+.text strong, .thinking-body strong { font-weight: 600; color: var(--ink); }
+.text em, .thinking-body em { font-style: italic; }
+.text code, .thinking-body code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
 
 .dots {
   display: inline-block;
@@ -2259,6 +2268,30 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 
 .wf-add { width: 100%; min-height: 44px; font-weight: 600; }
 .wf-note { margin: 8px 0 0; font-size: 12px; color: var(--ink-faint); }
+
+/* One saved workflow: the card that loads it, and what can be done to it. */
+.wf-saved {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.wf-saved.on { border-color: var(--accent); }
+.wf-saved-load { width: 100%; border: none; background: none; padding: 4px 6px; }
+.wf-saved-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-saved-acts button {
+  flex: 1 1 auto;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.wf-save-open { margin-top: 8px; }
+.wf-save-form { display: grid; gap: 6px; margin-top: 8px; }
+.wf-save-form input { width: 100%; }
+.wf-save-acts { display: flex; gap: 6px; }
+.wf-save-acts button { flex: 1 1 0; min-height: 36px; }
 
 .wf-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .wf-legend li { display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; }

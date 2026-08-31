@@ -17,18 +17,28 @@ import {
   GRAPH_PRESETS,
   MAX_POS,
   RELATIONS,
+  SAVED_LIMITS,
   delegatesOf,
   describeGraph,
+  graphKey,
   graphWarnings,
   handoffChain,
   leadOf,
   matchGraphPreset,
+  matchSavedWorkflow,
   promptOf,
   relationInfo,
+  removeSavedWorkflow,
+  renameSavedWorkflow,
   reviewersOf,
   sanitizeGraph,
+  sanitizeSavedWorkflows,
+  saveWorkflow,
+  summarizeGraph,
+  type SavedWorkflow,
   type WorkflowGraph,
 } from "../src/shared/workflow";
+import { mergeLibrary, sanitizeLibraryPush } from "../src/shared/library";
 import { MODELS, modelInfo, sanitizeSettings, DEFAULT_SETTINGS } from "../src/shared/models";
 import { ROLE_CAPS, can, DEFAULT_POLICY, type Role } from "../src/shared/access";
 import { INITIAL_ROOM_STATE } from "../src/shared/protocol";
@@ -368,6 +378,270 @@ check(
 );
 check("the default graph is a preset", matchGraphPreset(DEFAULT_GRAPH) !== null);
 check("the room starts with a valid graph", INITIAL_ROOM_STATE.graph.nodes.length > 0);
+
+console.log("\nsaved workflows");
+
+/**
+ * The library is read back out of a browser's storage, so it is checked the
+ * same way a wire frame is: every graph it hands to a room has been through
+ * `sanitizeGraph`, and no amount of hand-edited storage can make it bigger,
+ * ambiguous, or unrunnable.
+ */
+const someGraph = GRAPH_PRESETS.find((p) => p.id === "researchers")!.graph;
+const saved1: SavedWorkflow = { id: "a1", label: "Research team", savedAt: 2, graph: someGraph };
+
+check("a non-array library reads as empty", sanitizeSavedWorkflows("nope").length === 0);
+check(
+  "a saved entry with no name is dropped",
+  sanitizeSavedWorkflows([{ id: "a1", label: "   ", graph: someGraph }]).length === 0,
+);
+check(
+  "a saved entry with no id is dropped",
+  sanitizeSavedWorkflows([{ label: "Team", graph: someGraph }]).length === 0,
+);
+check(
+  "duplicate ids and duplicate names collapse",
+  sanitizeSavedWorkflows([
+    saved1,
+    { ...saved1, label: "Other" },
+    { id: "b2", label: "research TEAM", graph: someGraph },
+  ]).length === 1,
+);
+check(
+  "a library cannot exceed its cap",
+  sanitizeSavedWorkflows(
+    Array.from({ length: SAVED_LIMITS.count + 10 }, (_, i) => ({
+      id: `id${i}`,
+      label: `w${i}`,
+      graph: someGraph,
+    })),
+  ).length === SAVED_LIMITS.count,
+);
+check(
+  "a saved name is cut to the label cap",
+  sanitizeSavedWorkflows([{ id: "a1", label: "x".repeat(500), graph: someGraph }])[0]!.label
+    .length === SAVED_LIMITS.labelChars,
+);
+check(
+  "a saved graph is sanitized on the way out",
+  sanitizeSavedWorkflows([
+    { id: "a1", label: "Hostile", graph: { leadId: "l", nodes: [], edges: [] } },
+  ])[0]!.graph.nodes.length > 0,
+);
+check(
+  "a saved graph cannot smuggle an unknown model",
+  sanitizeSavedWorkflows([
+    {
+      id: "a1",
+      label: "Hostile",
+      graph: {
+        leadId: "l",
+        nodes: [{ id: "l", name: "L", model: "gpt-9", prompt: "", x: 0, y: 0 }],
+        edges: [],
+      },
+    },
+  ])[0]!.graph.nodes.every((n) => MODELS.some((m) => m.id === n.model)),
+);
+check(
+  "a saved graph cannot exceed the node cap",
+  sanitizeSavedWorkflows([
+    {
+      id: "a1",
+      label: "Huge",
+      graph: {
+        leadId: "n0",
+        nodes: Array.from({ length: 40 }, (_, i) => ({
+          id: `n${i}`,
+          name: `N${i}`,
+          model: "claude-opus-5",
+          prompt: "",
+          x: 0,
+          y: 0,
+        })),
+        edges: [],
+      },
+    },
+  ])[0]!.graph.nodes.length <= GRAPH_LIMITS.nodes,
+);
+
+const library1 = saveWorkflow([], { id: "a1", label: "Research team", graph: someGraph });
+check("saving keeps the workflow", library1.length === 1 && library1[0]!.label === "Research team");
+check("a blank name saves nothing", saveWorkflow(library1, { id: "b2", label: "  ", graph: someGraph }).length === 1);
+
+// A second entry holding a different shape, so a match test is telling.
+const otherGraph = GRAPH_PRESETS.find((p) => p.id === "draft-edit")!.graph;
+const library2 = saveWorkflow(library1, { id: "b2", label: "Draft desk", graph: otherGraph });
+check("the newest save comes first", library2[0]!.label === "Draft desk" && library2.length === 2);
+check(
+  "saving over a name replaces rather than duplicates",
+  saveWorkflow(library2, { id: "c3", label: "research team", graph: DEFAULT_GRAPH }).length === 2,
+);
+check(
+  "saving over an id updates that entry",
+  saveWorkflow(library2, { id: "a1", label: "Renamed", graph: DEFAULT_GRAPH }).filter(
+    (w) => w.id === "a1",
+  ).length === 1,
+);
+check(
+  "the oldest saves fall off the end at the cap",
+  Array.from({ length: SAVED_LIMITS.count + 5 }).reduce<SavedWorkflow[]>(
+    (lib, _, i) => saveWorkflow(lib, { id: `id${i}`, label: `w${i}`, graph: someGraph }),
+    [],
+  ).length === SAVED_LIMITS.count,
+);
+
+check(
+  "renaming keeps the graph",
+  graphKey(renameSavedWorkflow(library2, "a1", "Reading crew")[1]!.graph) === graphKey(someGraph),
+);
+check(
+  "renaming onto a taken name does not leave two",
+  renameSavedWorkflow(library2, "a1", "Draft desk").length === 1,
+);
+check("renaming to nothing is a no-op", renameSavedWorkflow(library2, "a1", " ").length === 2);
+check("renaming an unknown id is a no-op", renameSavedWorkflow(library2, "zz", "New").length === 2);
+check("removing takes exactly one", removeSavedWorkflow(library2, "a1").length === 1);
+check("removing an unknown id changes nothing", removeSavedWorkflow(library2, "zz").length === 2);
+
+// Positions and ids are bookkeeping; what a graph *does* is the identity, so a
+// saved workflow still matches once its cards have been nudged around.
+const moved: WorkflowGraph = {
+  ...someGraph,
+  nodes: someGraph.nodes.map((n, i) => ({ ...n, x: n.x + 40 + i, y: n.y + 20 })),
+};
+check("graphKey ignores positions", graphKey(moved) === graphKey(someGraph));
+check("a moved graph still matches its saved workflow", matchSavedWorkflow(library2, moved) === "a1");
+check(
+  "a different brief is a different workflow",
+  matchSavedWorkflow(library2, {
+    ...someGraph,
+    nodes: someGraph.nodes.map((n) => ({ ...n, prompt: `${n.prompt} extra` })),
+  }) === null,
+);
+check("an unsaved graph matches nothing", matchSavedWorkflow([], someGraph) === null);
+check(
+  "the library summary names the lead and the team",
+  summarizeGraph(someGraph).includes(leadOf(someGraph).name) &&
+    summarizeGraph(someGraph).includes("2 teammates"),
+  summarizeGraph(someGraph),
+);
+
+console.log("\nthe library as the account holds it");
+
+/**
+ * The merge is what makes two machines able to disagree and settle, so these
+ * cover the four ways a row can reach the answer: the account had it, this
+ * browser has a newer one, this browser has one the account has not heard of,
+ * and this browser has one the account has been told about and dropped.
+ */
+const w = (id: string, label: string, savedAt: number, graph = someGraph): SavedWorkflow => ({
+  id,
+  label,
+  savedAt,
+  graph,
+});
+const none = new Set<string>();
+
+check(
+  "the account's row is adopted when this browser has none",
+  mergeLibrary([w("a", "Theirs", 10)], [], none).map((x) => x.label).join() === "Theirs",
+);
+check(
+  "a newer local save beats the account's row",
+  mergeLibrary([w("a", "Theirs", 10)], [w("a", "Mine", 20)], none)[0]!.label === "Mine",
+);
+check(
+  "an older local save loses to the account's row",
+  mergeLibrary([w("a", "Theirs", 20)], [w("a", "Mine", 10)], none)[0]!.label === "Theirs",
+);
+check(
+  "a tie goes to the account, not to this browser",
+  mergeLibrary([w("a", "Theirs", 10)], [w("a", "Mine", 10)], none)[0]!.label === "Theirs",
+);
+check(
+  "a row the account has not heard of is kept",
+  mergeLibrary([], [w("a", "Just saved", 10)], none).length === 1,
+);
+check(
+  "a row that was sent and did not come back was deleted elsewhere",
+  mergeLibrary([], [w("a", "Deleted on my phone", 10)], new Set(["a"])).length === 0,
+);
+check(
+  "the merge is ordered newest save first",
+  mergeLibrary([w("a", "Old", 10), w("b", "New", 30)], [w("c", "Middle", 20)], none)
+    .map((x) => x.label)
+    .join() === "New,Middle,Old",
+);
+check(
+  "two machines saving different graphs under one name settle on the later",
+  mergeLibrary([w("a", "Team", 10, someGraph)], [w("b", "team", 20, otherGraph)], none).length === 1,
+);
+check(
+  "the survivor of a name clash is the later save",
+  graphKey(
+    mergeLibrary([w("a", "Team", 10, someGraph)], [w("b", "team", 20, otherGraph)], none)[0]!.graph,
+  ) === graphKey(otherGraph),
+);
+check(
+  "a merge cannot exceed the library cap",
+  mergeLibrary(
+    Array.from({ length: SAVED_LIMITS.count }, (_, i) => w(`r${i}`, `remote ${i}`, 100 + i)),
+    Array.from({ length: SAVED_LIMITS.count }, (_, i) => w(`l${i}`, `local ${i}`, 200 + i)),
+    none,
+  ).length === SAVED_LIMITS.count,
+);
+check(
+  "the newest survive a merge that overflows the cap",
+  mergeLibrary(
+    Array.from({ length: SAVED_LIMITS.count }, (_, i) => w(`r${i}`, `remote ${i}`, 100 + i)),
+    Array.from({ length: SAVED_LIMITS.count }, (_, i) => w(`l${i}`, `local ${i}`, 200 + i)),
+    none,
+  ).every((x) => x.id.startsWith("l")),
+);
+check(
+  "a graph arriving from the account is sanitized like any other",
+  mergeLibrary(
+    [{ id: "a", label: "Theirs", savedAt: 10, graph: { leadId: "x", nodes: [], edges: [] } }],
+    [],
+    none,
+  )[0]!.graph.nodes.length > 0,
+);
+
+const now = 1_700_000_000_000;
+check(
+  "a junk push reads as an empty one",
+  sanitizeLibraryPush("nope", now).workflows.length === 0 &&
+    sanitizeLibraryPush(null, now).deleted.length === 0,
+);
+check(
+  "a browser with a fast clock cannot stamp a row into the future",
+  sanitizeLibraryPush({ workflows: [w("a", "Ahead", now + 60_000)] }, now).workflows[0]!.savedAt ===
+    now,
+);
+check(
+  "a real stamp is left alone",
+  sanitizeLibraryPush({ workflows: [w("a", "Earlier", now - 60_000)] }, now).workflows[0]!
+    .savedAt === now - 60_000,
+);
+check(
+  "delete ids are shapes we mint, not free text",
+  stable(sanitizeLibraryPush({ deleted: ["ok-1", "no spaces", "", 7] }, now).deleted) ===
+    stable(["ok-1"]),
+);
+check(
+  "a push cannot carry an unbounded delete list",
+  sanitizeLibraryPush(
+    { deleted: Array.from({ length: SAVED_LIMITS.count + 50 }, (_, i) => `id${i}`) },
+    now,
+  ).deleted.length === SAVED_LIMITS.count,
+);
+check(
+  "a pushed graph is sanitized before it can be stored",
+  sanitizeLibraryPush(
+    { workflows: [{ id: "a", label: "Hostile", savedAt: now, graph: { nodes: "no", edges: 3 } }] },
+    now,
+  ).workflows[0]!.graph.nodes.length > 0,
+);
 
 console.log("\ntool surface");
 

@@ -23,6 +23,7 @@ import {
   type Vote,
   type WorkerStatus,
 } from "../shared/protocol";
+import { inlineMarkdown } from "./markdown";
 import type { WorkspaceInfo } from "../shared/workspace";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { ROLES, outranks, type Role } from "../shared/access";
@@ -978,7 +979,7 @@ function BlockView({
   }
 
   if (block.type === "text") {
-    return <div className="text">{block.text}</div>;
+    return <div className="text">{inlineMarkdown(block.text)}</div>;
   }
 
   return <ToolBlock block={block} toolDisplay={toolDisplay} />;
@@ -1026,7 +1027,7 @@ function ThinkingBlock({ block }: { block: Extract<AgentBlock, { type: "thinking
       <button className="thinking-toggle" onClick={() => setOpen((v) => !v)}>
         {open ? "▾" : "▸"} Reasoning
       </button>
-      {open && <div className="thinking-body">{block.text}</div>}
+      {open && <div className="thinking-body">{inlineMarkdown(block.text)}</div>}
     </div>
   );
 }

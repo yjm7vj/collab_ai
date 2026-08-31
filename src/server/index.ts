@@ -22,6 +22,7 @@ import {
   type OAuthProvider,
 } from "./oauth";
 import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
+import { sanitizeLibraryPush, type LibrarySyncResponse } from "../shared/library";
 import {
   ROOM_ID_RE,
   UID_RE,
@@ -392,6 +393,38 @@ export default {
       const push = sanitizePush(body, Date.now(), (id) => ROOM_ID_RE.test(id));
       const snapshot = await userIndex(env, identity.uid).sync(push);
       return json(snapshot satisfies SidebarSyncResponse);
+    }
+
+    /**
+     * The account's workflow library: the agent graphs this person saved, which
+     * follow them rather than the browser they drew them in.
+     *
+     * Same shape and same rules as /api/sidebar — a signed identity is the only
+     * way in, because the uid it carries is the address of the Durable Object
+     * holding the library, and a caller that could name its own uid could read
+     * anybody's. A deployment with sign-in off has no account to sync with, and
+     * the client keeps the browser-local library it has always had.
+     *
+     * Nothing here is a room credential. A saved workflow is a drawing of a
+     * team; applying one to a room still goes over that room's socket and is
+     * still re-checked against the `workflow` capability there.
+     */
+    if (url.pathname === "/api/workflows") {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      const identity = await identityFrom(env, (body as { identity?: unknown }).identity);
+      if (!identity) return json({ error: "sign_in_required" }, 401);
+
+      const push = sanitizeLibraryPush(body, Date.now());
+      const snapshot = await userIndex(env, identity.uid).syncWorkflows(push);
+      return json(snapshot satisfies LibrarySyncResponse);
     }
 
     if (url.pathname === "/api/auth/config") {

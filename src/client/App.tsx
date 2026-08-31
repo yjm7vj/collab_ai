@@ -29,6 +29,7 @@ import type {
 import { Landing, JoinGate, SidePane, SignInGate } from "./components";
 import { LandingPage } from "./landing";
 import { isAppGated, WAITLIST_URL } from "./host";
+import { IDENTITY_KEY, readIdentity, storedIdentity } from "./identity";
 import { useTheme } from "./theme";
 import { RoomView } from "./RoomView";
 import type { WorkspaceInfo } from "../shared/workspace";
@@ -46,12 +47,8 @@ function myUid(): string {
   return fresh;
 }
 
-const IDENTITY_KEY = "collab_ai:identity";
 const PROJECTS_KEY = "collab_ai:projects";
 const ROOMS_KEY = "collab_ai:rooms";
-function storedIdentity(): string | null {
-  return localStorage.getItem(IDENTITY_KEY);
-}
 
 /**
  * `updatedAt` is what makes two browsers able to disagree and settle.
@@ -335,31 +332,6 @@ function nextUntitledLabel(projects: SidebarProject[], rooms: SidebarRoom[]): st
     if (match) highest = Math.max(highest, Number(match[1]));
   }
   return `Untitled ${highest + 1}`;
-}
-
-function base64UrlDecode(segment: string): string {
-  const padded = segment.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
-  return atob(padded + pad);
-}
-
-/**
- * Decode the display fields from an identity token.
- *
- * The token is signed, not encrypted, so reading it for display is safe.
- * This is NOT an authorisation check — the server verifies the signature on
- * every request, and nothing decoded here may decide what a user can do.
- */
-function readIdentity(token: string): { uid: string; name: string } | null {
-  try {
-    const payload = token.split(".")[0];
-    if (!payload) return null;
-    const parsed = JSON.parse(base64UrlDecode(payload)) as { uid?: unknown; role?: unknown };
-    if (typeof parsed.uid !== "string" || typeof parsed.role !== "string") return null;
-    return { uid: parsed.uid, name: parsed.role };
-  } catch {
-    return null;
-  }
 }
 
 /**

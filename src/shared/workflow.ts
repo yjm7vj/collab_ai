@@ -325,23 +325,162 @@ export const GRAPH_PRESETS: GraphPreset[] = [
 
 export const DEFAULT_GRAPH: WorkflowGraph = GRAPH_PRESETS.find((p) => p.id === "researchers")!.graph;
 
+/**
+ * What this graph *is*, ignoring where its cards happen to sit.
+ *
+ * Two graphs with the same key run identically — same lead, same team on the
+ * same models with the same briefs, same links carrying the same instructions.
+ * Node ids are deliberately not part of it: a graph saved in one room and
+ * loaded into another keeps its ids, but a graph rebuilt by hand does not, and
+ * "the same workflow" should mean the same behaviour rather than the same
+ * bookkeeping.
+ */
+export function graphKey(x: WorkflowGraph): string {
+  return JSON.stringify({
+    lead: x.nodes.find((n) => n.id === x.leadId)?.name ?? "",
+    nodes: x.nodes.map((n) => [n.name, n.model, n.prompt]).sort(),
+    edges: x.edges
+      .map((e) => [
+        x.nodes.find((n) => n.id === e.from)?.name ?? "",
+        x.nodes.find((n) => n.id === e.to)?.name ?? "",
+        e.kind,
+        e.prompt,
+      ])
+      .sort(),
+  });
+}
+
 /** Which preset this graph corresponds to, ignoring positions, or null. */
 export function matchGraphPreset(g: WorkflowGraph): string | null {
-  const key = (x: WorkflowGraph) =>
-    JSON.stringify({
-      lead: x.nodes.find((n) => n.id === x.leadId)?.name ?? "",
-      nodes: x.nodes.map((n) => [n.name, n.model, n.prompt]).sort(),
-      edges: x.edges
-        .map((e) => [
-          x.nodes.find((n) => n.id === e.from)?.name ?? "",
-          x.nodes.find((n) => n.id === e.to)?.name ?? "",
-          e.kind,
-          e.prompt,
-        ])
-        .sort(),
+  const mine = graphKey(g);
+  return GRAPH_PRESETS.find((p) => graphKey(p.graph) === mine)?.id ?? null;
+}
+
+/* ----------------------------------------------------- the saved library */
+
+/**
+ * A workflow someone kept, to start another room from.
+ *
+ * The built-in presets above are the shapes we ship; these are the shapes a
+ * person built and wants again. They are stored with the person rather than
+ * with a room — a room's graph belongs to everyone in it, but a library of
+ * team designs is the property of whoever drew them, and its whole point is to
+ * outlive the room it was drawn in.
+ *
+ * `graph` is a complete, already-sanitized graph, not a diff against a preset:
+ * loading a saved workflow years later must not depend on what the built-in
+ * presets happen to say by then.
+ */
+export type SavedWorkflow = {
+  /** Stable id, minted where the library is stored. */
+  id: string;
+  /** What the person called it. Unique within a library, case-insensitively. */
+  label: string;
+  /** Unix ms. The library is ordered newest first. */
+  savedAt: number;
+  graph: WorkflowGraph;
+};
+
+export const SAVED_LIMITS = {
+  /** How many workflows one library holds. Oldest fall off the end. */
+  count: 24,
+  labelChars: 40,
+} as const;
+
+const SAVED_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function savedLabel(v: unknown): string {
+  return text(v, SAVED_LIMITS.labelChars).trim();
+}
+
+/**
+ * Coerce a stored library into something loadable.
+ *
+ * This runs on data that has sat in a browser's storage across who knows how
+ * many versions of the app, and that anyone with devtools can rewrite by hand,
+ * so it is treated exactly like a frame off the wire: every graph goes through
+ * `sanitizeGraph`, so a library entry can never load a graph the room itself
+ * would have refused.
+ */
+export function sanitizeSavedWorkflows(input: unknown): SavedWorkflow[] {
+  const out: SavedWorkflow[] = [];
+  const seenIds = new Set<string>();
+  const seenLabels = new Set<string>();
+
+  for (const item of Array.isArray(input) ? input : []) {
+    if (out.length >= SAVED_LIMITS.count) break;
+    const r = (item ?? {}) as Partial<SavedWorkflow>;
+
+    // An entry with no usable id or name is not repairable into anything
+    // meaningful — a nameless workflow in a picker is a button nobody can
+    // choose deliberately — so it is dropped rather than invented.
+    const id = typeof r.id === "string" && SAVED_ID_RE.test(r.id) ? r.id : "";
+    const label = savedLabel(r.label);
+    if (!id || !label || seenIds.has(id) || seenLabels.has(label.toLowerCase())) continue;
+    seenIds.add(id);
+    seenLabels.add(label.toLowerCase());
+
+    out.push({
+      id,
+      label,
+      savedAt: typeof r.savedAt === "number" && Number.isFinite(r.savedAt) ? Math.max(0, Math.round(r.savedAt)) : 0,
+      graph: sanitizeGraph(r.graph),
     });
-  const mine = key(g);
-  return GRAPH_PRESETS.find((p) => key(p.graph) === mine)?.id ?? null;
+  }
+
+  return out;
+}
+
+/**
+ * Put one workflow into a library, newest first.
+ *
+ * Saving over a name that is already taken replaces that entry rather than
+ * making a second one wearing the same label: the picker shows names, so two
+ * rows reading "Research team" would be a coin toss. Saving under the same id
+ * is an update of that entry, whatever it is now called.
+ */
+export function saveWorkflow(
+  library: SavedWorkflow[],
+  entry: { id: string; label: string; graph: WorkflowGraph; savedAt?: number },
+): SavedWorkflow[] {
+  const label = savedLabel(entry.label);
+  if (!label || !SAVED_ID_RE.test(entry.id)) return sanitizeSavedWorkflows(library);
+
+  const saved: SavedWorkflow = {
+    id: entry.id,
+    label,
+    savedAt: entry.savedAt ?? Date.now(),
+    graph: sanitizeGraph(entry.graph),
+  };
+  const rest = sanitizeSavedWorkflows(library).filter(
+    (w) => w.id !== saved.id && w.label.toLowerCase() !== label.toLowerCase(),
+  );
+  return [saved, ...rest].slice(0, SAVED_LIMITS.count);
+}
+
+/** Rename one entry, dropping anything the new name collides with. */
+export function renameSavedWorkflow(
+  library: SavedWorkflow[],
+  id: string,
+  label: string,
+): SavedWorkflow[] {
+  const clean = savedLabel(label);
+  const list = sanitizeSavedWorkflows(library);
+  const target = list.find((w) => w.id === id);
+  if (!clean || !target) return list;
+  return list
+    .filter((w) => w.id === id || w.label.toLowerCase() !== clean.toLowerCase())
+    .map((w) => (w.id === id ? { ...w, label: clean } : w));
+}
+
+export function removeSavedWorkflow(library: SavedWorkflow[], id: string): SavedWorkflow[] {
+  return sanitizeSavedWorkflows(library).filter((w) => w.id !== id);
+}
+
+/** Which saved workflow this graph is, ignoring positions, or null. */
+export function matchSavedWorkflow(library: SavedWorkflow[], g: WorkflowGraph): string | null {
+  const mine = graphKey(g);
+  return library.find((w) => graphKey(w.graph) === mine)?.id ?? null;
 }
 
 /* -------------------------------------------------------------- validation */
@@ -595,8 +734,8 @@ export function graphWarnings(g: WorkflowGraph): string[] {
   return out;
 }
 
-/** Short human summary for the transcript audit line. */
-export function describeGraph(g: WorkflowGraph): string {
+/** Who runs this graph and how much of it is wiring. One line, no verdict. */
+export function summarizeGraph(g: WorkflowGraph): string {
   const lead = leadOf(g);
   const roster = delegatesOf(g);
   const mech = g.edges.filter((e) => relationInfo(e.kind).mechanical).length;
@@ -605,7 +744,12 @@ export function describeGraph(g: WorkflowGraph): string {
         .map((n) => n.name)
         .join(", ")})`
     : "no teammates";
-  return `custom · ${lead.name} on ${modelInfo(lead.model).label} · ${team} · ${mech} link${
+  return `${lead.name} on ${modelInfo(lead.model).label} · ${team} · ${mech} link${
     mech === 1 ? "" : "s"
   }`;
+}
+
+/** Short human summary for the transcript audit line. */
+export function describeGraph(g: WorkflowGraph): string {
+  return `custom · ${summarizeGraph(g)}`;
 }
