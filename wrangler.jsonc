@@ -50,12 +50,22 @@
     }
   ],
 
+  // Room is one object per room. UserIndex is one per signed-in account: the
+  // reverse map, from a uid to the rooms and projects that account knows about,
+  // so a sidebar follows the person to a second browser instead of living only
+  // in the first one's localStorage.
   "durable_objects": {
-    "bindings": [{ "name": "Room", "class_name": "Room" }]
+    "bindings": [
+      { "name": "Room", "class_name": "Room" },
+      { "name": "UserIndex", "class_name": "UserIndex" }
+    ]
   },
 
   // Never edit a migration that has shipped — add a new tag instead.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["UserIndex"] }
+  ],
 
   "observability": { "enabled": true }
 

@@ -23,16 +23,30 @@ import {
   GRAPH_PRESETS,
   MAX_POS,
   RELATIONS,
+  SAVED_LIMITS,
   delegatesOf,
   graphWarnings,
   leadOf,
   matchGraphPreset,
+  matchSavedWorkflow,
   relationInfo,
+  removeSavedWorkflow,
+  renameSavedWorkflow,
+  saveWorkflow,
+  summarizeGraph,
   type AgentNode,
   type Relation,
   type RelationKind,
+  type SavedWorkflow,
   type WorkflowGraph,
 } from "../shared/workflow";
+import {
+  getLibrary,
+  newWorkflowId,
+  setLibrary as writeLibrary,
+  subscribeLibrary,
+  syncLibrary,
+} from "./presets";
 
 const GRID = 20;
 
@@ -80,6 +94,66 @@ export function WorkflowPanel({
   const preset = useMemo(() => matchGraphPreset(draft), [draft]);
   const roster = useMemo(() => delegatesOf(draft), [draft]);
   const lead = leadOf(draft);
+
+  /* ------------------------------------------------------------- library */
+
+  /**
+   * This person's saved workflows, which belong to them rather than to this
+   * room — the same library shows up in every room they open and on every
+   * machine they sign in on, which is the whole point of saving one.
+   *
+   * The store owns the copy; this is a view of it. Writes go to the store and
+   * come back through the subscription, so a save made here and a save made in
+   * another tab reach this list by the same path.
+   */
+  const [library, setLibraryView] = useState<SavedWorkflow[]>(getLibrary);
+  /** The name being typed, or null when the save form is closed. */
+  const [saving, setSaving] = useState<string | null>(null);
+  /** Which saved workflow is being renamed, and the name so far. */
+  const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
+
+  useEffect(() => subscribeLibrary(setLibraryView), []);
+
+  // Opening this screen is the moment someone is about to reach for a workflow
+  // they may have saved on another machine, so it is the moment to go and get
+  // the account's copy. Failure is silent: the local library still works.
+  useEffect(() => {
+    void syncLibrary({ force: true });
+  }, []);
+
+  const commitLibrary = useCallback(
+    (next: SavedWorkflow[], deleted?: string[]) => writeLibrary(next, deleted),
+    [],
+  );
+
+  const savedMatch = useMemo(() => matchSavedWorkflow(library, draft), [library, draft]);
+
+  /**
+   * Keep the canvas under a name.
+   *
+   * Saving over a name already in the library replaces that entry, so "save,
+   * tweak, save again" ends with one workflow rather than three near-identical
+   * ones. Reusing the existing entry's id keeps it where it was in the list.
+   */
+  const keep = useCallback(
+    (label: string, id?: string) => {
+      const name = label.trim();
+      if (!name) return;
+      const existing = id ?? library.find((w) => w.label.toLowerCase() === name.toLowerCase())?.id;
+      commitLibrary(
+        saveWorkflow(library, { id: existing ?? newWorkflowId(), label: name, graph: draft }),
+      );
+      setSaving(null);
+    },
+    [commitLibrary, draft, library],
+  );
+
+  /** Put a graph on the canvas, from a built-in preset or the library. */
+  const load = useCallback((graph: WorkflowGraph) => {
+    setDraft(JSON.parse(JSON.stringify(graph)) as WorkflowGraph);
+    setSelected({ kind: "none" });
+    setLinking(null);
+  }, []);
 
   /* ------------------------------------------------------------- editing */
 
@@ -353,16 +427,141 @@ export function WorkflowPanel({
                   key={p.id}
                   className={`wf-preset ${preset === p.id ? "on" : ""}`}
                   disabled={!canEdit}
-                  onClick={() => {
-                    setDraft(JSON.parse(JSON.stringify(p.graph)) as WorkflowGraph);
-                    setSelected({ kind: "none" });
-                  }}
+                  onClick={() => load(p.graph)}
                 >
                   <span className="wf-preset-name">{p.label}</span>
                   <span className="wf-preset-desc">{p.description}</span>
                 </button>
               ))}
             </div>
+          </section>
+
+          {/* ------------------------------------------------------- library */}
+          <section>
+            <h3>Saved workflows</h3>
+            {library.length === 0 ? (
+              <p className="wf-note">
+                Nothing saved yet. Keep a team here and any other room can start from it.
+              </p>
+            ) : (
+              <div className="wf-presets">
+                {library.map((w) => (
+                  <div key={w.id} className={`wf-saved ${savedMatch === w.id ? "on" : ""}`}>
+                    {renaming?.id === w.id ? (
+                      <form
+                        className="wf-save-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          commitLibrary(renameSavedWorkflow(library, w.id, renaming.label));
+                          setRenaming(null);
+                        }}
+                      >
+                        <input
+                          autoFocus
+                          value={renaming.label}
+                          maxLength={SAVED_LIMITS.labelChars}
+                          aria-label={`Rename ${w.label}`}
+                          onChange={(e) => setRenaming({ id: w.id, label: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setRenaming(null);
+                          }}
+                        />
+                        <div className="wf-save-acts">
+                          <button
+                            className="primary"
+                            type="submit"
+                            disabled={!renaming.label.trim()}
+                          >
+                            Rename
+                          </button>
+                          <button type="button" onClick={() => setRenaming(null)}>
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <button
+                          className="wf-preset wf-saved-load"
+                          disabled={!canEdit}
+                          onClick={() => load(w.graph)}
+                          title="Put this workflow on the canvas"
+                        >
+                          <span className="wf-preset-name">{w.label}</span>
+                          <span className="wf-preset-desc">{summarizeGraph(w.graph)}</span>
+                        </button>
+                        {/* The library is personal, so these stay available to
+                            someone who may only look at this room's graph —
+                            they can keep a copy for a room of their own. */}
+                        <div className="wf-saved-acts">
+                          <button
+                            onClick={() => keep(w.label, w.id)}
+                            title="Save the canvas over this one"
+                          >
+                            Update
+                          </button>
+                          <button onClick={() => setRenaming({ id: w.id, label: w.label })}>
+                            Rename
+                          </button>
+                          <button
+                            onClick={() => commitLibrary(removeSavedWorkflow(library, w.id), [w.id])}
+                            title={`Delete ${w.label}`}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {saving === null ? (
+              <button
+                className="wf-add wf-save-open"
+                disabled={library.length >= SAVED_LIMITS.count && !savedMatch}
+                onClick={() => setSaving(library.find((w) => w.id === savedMatch)?.label ?? "")}
+              >
+                Save this workflow
+              </button>
+            ) : (
+              <form
+                className="wf-save-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  keep(saving);
+                }}
+              >
+                <input
+                  autoFocus
+                  value={saving}
+                  maxLength={SAVED_LIMITS.labelChars}
+                  placeholder="Name this workflow"
+                  aria-label="Name this workflow"
+                  onChange={(e) => setSaving(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setSaving(null);
+                  }}
+                />
+                <div className="wf-save-acts">
+                  <button className="primary" type="submit" disabled={!saving.trim()}>
+                    {library.some((w) => w.label.toLowerCase() === saving.trim().toLowerCase())
+                      ? "Replace"
+                      : "Save"}
+                  </button>
+                  <button type="button" onClick={() => setSaving(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+            <p className="wf-note">
+              {library.length} of {SAVED_LIMITS.count} saved.{" "}
+              {library.length >= SAVED_LIMITS.count && !savedMatch
+                ? "The library is full — delete one to keep another."
+                : "Saved workflows are yours and follow your account when you are signed in; the room runs whatever was last applied to it."}
+            </p>
           </section>
 
           <section>

@@ -249,8 +249,15 @@ input:focus, textarea:focus {
 
 /* ------------------------------------------------------------------ shell */
 
+/* The room is a fixed-height shell, not a page that grows: the transcript
+   scrolls inside it and the composer stays pinned under it. That needs a
+   *definite* height here — with only `min-height`, `.transcript`'s `flex: 1`
+   has nothing to resolve against, so a long run of output stretched this
+   element instead of scrolling, and pushed the composer past the bottom of
+   the pane (which clips) or of the window. */
 .app {
-  min-height: 100dvh;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -533,7 +540,12 @@ input:focus, textarea:focus {
 .side-main {
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  /* The room fills this pane exactly and scrolls internally, so it never asks
+     for a scrollbar here. The taller surfaces that share the pane (the landing
+     page, the join and sign-in gates) do, and clipping them would leave their
+     bottoms unreachable. */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .side-pane {
@@ -573,6 +585,12 @@ input:focus, textarea:focus {
   border-bottom: 1px solid var(--on-topbar-line-soft);
   background: var(--topbar);
   flex: none;
+}
+/* The drawer handle and its scrim belong to the phone layout; at any width
+   with room for a 276px column there is nothing to open or to close. */
+.side-drawer-toggle,
+.side-scrim {
+  display: none;
 }
 .side-head .side-kicker { color: var(--on-topbar-ink-dim); }
 .side-head .side-title { color: var(--topbar-ink); }
@@ -898,6 +916,19 @@ input:focus, textarea:focus {
   line-height: 1.25;
 }
 
+.side-rename-form {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+
+.side-rename-form input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
 .side-project-form {
   display: grid;
   gap: 8px;
@@ -1012,6 +1043,15 @@ input:focus, textarea:focus {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+.text strong, .thinking-body strong { font-weight: 600; color: var(--ink); }
+.text em, .thinking-body em { font-style: italic; }
+.text code, .thinking-body code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
 }
 
 .dots {
@@ -1558,6 +1598,10 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   }
 
   .columns { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(180px, 32vh); }
+  /* Stacked, the document is a row rather than a column — so closing it has to
+     take back the row as well, or the chat keeps stopping short and the phone
+     shows a third of a screen of nothing under the composer. */
+  .columns-doc-closed { grid-template-rows: minmax(0, 1fr); }
   .chat { border-right: none; border-bottom: 1px solid var(--line); }
 }
 
@@ -1576,18 +1620,70 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
     max-width: 100%;
   }
 
+  /* The rooms list is a drawer on a phone, not a permanent split. As a fixed
+     38vh row it took a third of the screen from the room below it — with the
+     document panel open too, the transcript was left about two lines tall.
+     Only the head stays in flow, as a bar; the list opens over the room and
+     closes on arrival. */
   .side-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(220px, 38vh) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
+  /* Above the scrim, so the bar keeps its own colour while the drawer is up
+     and the close button is the thing under the thumb that closes it. */
   .side-pane {
+    position: relative;
+    z-index: 46;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--on-topbar-line-soft);
   }
 
+  .side-head {
+    min-height: 52px;
+  }
+
+  .side-drawer-toggle {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex: none;
+    padding: 0;
+    font-size: 17px;
+    line-height: 1;
+    border: 1px solid var(--on-topbar-line-soft);
+  }
+
+  /* Anchored to the pane, which is now only as tall as its head, so `top:
+     100%` is the underside of the bar. Out of flow, so an open drawer never
+     shortens the room behind it. */
   .side-scroll {
-    padding-top: 4px;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 45;
+    max-height: min(68vh, calc(100dvh - 52px));
+    padding-top: 8px;
+    background: var(--topbar);
+    border-bottom: 1px solid var(--on-topbar-line-soft);
+    box-shadow: var(--shadow-float);
+  }
+
+  .side-pane[data-open="false"] .side-scroll {
+    display: none;
+  }
+
+  .side-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 44;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--scrim);
   }
 
   .side-section {
@@ -2259,6 +2355,30 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 
 .wf-add { width: 100%; min-height: 44px; font-weight: 600; }
 .wf-note { margin: 8px 0 0; font-size: 12px; color: var(--ink-faint); }
+
+/* One saved workflow: the card that loads it, and what can be done to it. */
+.wf-saved {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.wf-saved.on { border-color: var(--accent); }
+.wf-saved-load { width: 100%; border: none; background: none; padding: 4px 6px; }
+.wf-saved-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-saved-acts button {
+  flex: 1 1 auto;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.wf-save-open { margin-top: 8px; }
+.wf-save-form { display: grid; gap: 6px; margin-top: 8px; }
+.wf-save-form input { width: 100%; }
+.wf-save-acts { display: flex; gap: 6px; }
+.wf-save-acts button { flex: 1 1 0; min-height: 36px; }
 
 .wf-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .wf-legend li { display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; }
