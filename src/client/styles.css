@@ -1598,6 +1598,10 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   }
 
   .columns { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(180px, 32vh); }
+  /* Stacked, the document is a row rather than a column — so closing it has to
+     take back the row as well, or the chat keeps stopping short and the phone
+     shows a third of a screen of nothing under the composer. */
+  .columns-doc-closed { grid-template-rows: minmax(0, 1fr); }
   .chat { border-right: none; border-bottom: 1px solid var(--line); }
 }
 
@@ -1626,8 +1630,11 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
     grid-template-rows: auto minmax(0, 1fr);
   }
 
+  /* Above the scrim, so the bar keeps its own colour while the drawer is up
+     and the close button is the thing under the thumb that closes it. */
   .side-pane {
     position: relative;
+    z-index: 46;
     border-right: 0;
     border-bottom: 1px solid var(--on-topbar-line-soft);
   }
