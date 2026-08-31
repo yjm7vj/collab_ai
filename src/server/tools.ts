@@ -11,6 +11,7 @@
 import { resolveTools, type AccessPolicy, type ToolName } from "../shared/access";
 import { serverToolsFor, type Workflow } from "../shared/models";
 import { delegatesOf, type WorkflowGraph } from "../shared/workflow";
+import type { WorkspaceInfo } from "../shared/workspace";
 
 export type ToolCtx = {
   getDoc(): string;
@@ -359,6 +360,18 @@ export function toolsFor(
   });
 }
 
+/**
+ * Whether a room's workspace state grants the file tools.
+ *
+ * Reads `kind` and deliberately ignores `online` — see `toolsForRoom`. Named
+ * and exported rather than written inline at the call site so the invariant has
+ * somewhere to be tested: a workspace that is connected but unreachable must
+ * still grant the tools.
+ */
+export function workspaceGrantsFileTools(ws: WorkspaceInfo): boolean {
+  return ws.kind !== "none";
+}
+
 /** The tools that require a live round trip to a connected workspace. */
 const WORKSPACE_TOOL_NAMES = new Set([
   "list_files", "read_file", "search_files",
@@ -367,21 +380,30 @@ const WORKSPACE_TOOL_NAMES = new Set([
 
 /**
  * Tool definitions for a room, given its policy AND whether a workspace is
- * reachable.
+ * attached to it.
  *
- * The file tools are withheld entirely when there is no workspace online. An
- * agent handed a tool that always fails will keep trying it, so absence is
+ * The file tools are withheld from a room that has no workspace at all: an
+ * agent handed a tool that can never work will keep trying it, so absence is
  * better than a tool that only ever returns an error.
+ *
+ * Note the condition is *connected*, not *reachable*. A room whose relay has
+ * momentarily dropped keeps its file tools and gets an error from `#fs`
+ * instead. Tools render at position 0 of the prompt, so adding or removing one
+ * invalidates the entire cached prefix — system and the whole conversation with
+ * it. Keying tool presence on `online` meant a browser tab closing re-billed
+ * the room's full context at cold prices; keying it on `kind` means that
+ * happens only when someone deliberately connects or disconnects a workspace,
+ * which is rare and worth one rebuild.
  */
 export function toolsForRoom(
   policy: AccessPolicy,
   workflow: Workflow,
-  workspaceOnline: boolean,
+  workspaceConnected: boolean,
   modelId: string,
   graph?: WorkflowGraph,
 ): unknown[] {
   const base = toolsFor(policy, workflow, modelId, graph);
-  if (workspaceOnline) return base;
+  if (workspaceConnected) return base;
   return base.filter((def) => !WORKSPACE_TOOL_NAMES.has(toolName(def)));
 }
 

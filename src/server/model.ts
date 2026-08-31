@@ -268,6 +268,23 @@ function client(cfg: ModelConfig) {
 }
 
 /**
+ * How much of the request to cache.
+ *
+ * The prefix is only half the bill. Every round of a turn resends the whole
+ * conversation, so the growing tail is what actually costs money — but caching
+ * it only pays where something later reads it back.
+ *
+ * - `long`   the room's own turn: rounds within a turn, and turns across a
+ *            vote. A parked turn resumes minutes later, which is past the
+ *            5-minute window, so the tail is worth the 2x write.
+ * - `short`  a worker's loop: several rounds seconds apart, then discarded.
+ *            Reads come fast and stop, so the cheaper write wins.
+ * - `none`   a single call that nothing follows. A cache entry written and
+ *            never read is a 1.25x surcharge and nothing else.
+ */
+type CacheMode = "long" | "short" | "none";
+
+/**
  * Assemble the request body for a model, including only the parameters that
  * model actually accepts.
  */
@@ -278,18 +295,35 @@ function buildParams(
   system: string,
   tools: unknown[],
   messages: MessageParam[],
+  cache: CacheMode,
 ) {
   const info = modelInfo(model);
+  const ttl = cache === "long" ? { ttl: "1h" as const } : {};
   const params: Record<string, unknown> = {
     model,
     max_tokens: 16000,
-    system: [
-      // Frozen prefix — identical across turns, so it caches.
-      { type: "text", text: system, cache_control: { type: "ephemeral" } },
-    ],
+    system:
+      cache === "none"
+        ? system
+        : [
+            // Frozen prefix — identical across turns, so it caches. Marked
+            // explicitly rather than left to the automatic breakpoint: this is
+            // the expensive shared part, and it needs a read point that
+            // survives whatever happens later in `messages`.
+            { type: "text", text: system, cache_control: { type: "ephemeral", ...ttl } },
+          ],
     tools,
     messages,
   };
+
+  // Automatic caching for the conversation tail. The breakpoint lands on the
+  // last block and moves forward as the conversation grows, so each round reads
+  // everything accumulated so far and writes only what the last round added.
+  // The longer-TTL entry (system) renders before this one, which is the order
+  // the API requires.
+  if (cache !== "none") {
+    params.cache_control = { type: "ephemeral", ...ttl };
+  }
 
   if (info.adaptiveThinking) {
     // Without `display`, the room sees a silent pause while the model reasons.
@@ -351,6 +385,7 @@ export async function runModel(
     plan.system,
     tools,
     messages,
+    "long",
   );
 
   const stream = client(cfg).messages.stream(params as never);
@@ -412,7 +447,15 @@ export async function runWorker(
   const system = agent?.system ?? WORKER_SYSTEM;
 
   for (let round = 0; round < maxRounds; round++) {
-    const params = buildParams(model, "medium", settings.temperature, system, tools, messages);
+    const params = buildParams(
+      model,
+      "medium",
+      settings.temperature,
+      system,
+      tools,
+      messages,
+      "short",
+    );
     const message = (await api.messages.create(params as never)) as Message;
     usage.push(readUsage(message, model));
     messages.push({ role: "assistant", content: message.content });
@@ -475,7 +518,7 @@ export async function runStage(
 
   const params = buildParams(model, "medium", null, system, [], [
     { role: "user", content: input },
-  ]);
+  ], "none");
   const message = (await client(cfg).messages.create(params as never)) as Message;
   const text = message.content
     .filter((b) => b.type === "text")

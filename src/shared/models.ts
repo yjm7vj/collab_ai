@@ -232,7 +232,12 @@ export const PRESETS: Preset[] = [
       workflow: "manager",
       agentModel: "claude-opus-5",
       workerModel: "claude-haiku-4-5",
-      effort: "high",
+      // Medium, not high, because this is the default a room starts on and most
+      // of what a room says is conversation rather than work. Effort sets the
+      // band adaptive thinking regulates within, so `high` raised the floor on
+      // every turn — a greeting was costing about a thousand output tokens of
+      // reasoning. Rooms that need more raise it, or pick a deeper preset.
+      effort: "medium",
       temperature: null,
       scaling: { mode: "auto", maxWorkers: 4 },
         context: DEFAULT_CONTEXT,

@@ -91,6 +91,7 @@ import {
   summarize as summarizeCall,
   toolsForRoom,
   workerToolsFor,
+  workspaceGrantsFileTools,
   type ToolCtx,
   type ToolOutcome,
 } from "./tools";
@@ -1597,7 +1598,17 @@ export class Room extends Agent<Env, RoomState> {
       return { ok: false, error: "No workspace is connected to this room." };
     }
     if (!this.state.workspace.online) {
-      return { ok: false, error: "The workspace host is offline, so files can't be read right now." };
+      // The file tools stay in the model's tool list while the host is away, so
+      // this message is the only thing stopping a retry loop. It has to say
+      // plainly that waiting will not help and that a person has to act.
+      return {
+        ok: false,
+        error:
+          "The workspace host is offline, so no file can be read or written " +
+          "right now. Retrying will not help — this clears only when the " +
+          "person who connected the workspace reopens the room. Tell the room " +
+          "that, and carry on with whatever does not need files.",
+      };
     }
 
     // Search and list both walk the tree themselves, so neither names a single
@@ -2242,7 +2253,10 @@ export class Room extends Agent<Env, RoomState> {
           toolsForRoom(
             this.#policy(),
             this.#settings().workflow,
-            this.state.workspace.kind !== "none" && this.state.workspace.online,
+            // Connected, not online: a relay that blinks must not change the
+            // tool list, or the whole cached prefix is rebuilt with it. An
+            // offline workspace answers through #fs instead.
+            workspaceGrantsFileTools(this.state.workspace),
             graph ? leadOf(graph).model : this.#settings().agentModel,
             graph ?? undefined,
           ),

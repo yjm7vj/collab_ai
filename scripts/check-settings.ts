@@ -35,8 +35,14 @@ import {
   type Capability,
   type Role,
 } from "../src/shared/access";
-import { DEFAULT_DENY, DEFAULT_PATH_POLICY } from "../src/shared/workspace";
-import { gatedFor, toolsFor, toolsForRoom, workerToolsFor } from "../src/server/tools";
+import { DEFAULT_DENY, DEFAULT_PATH_POLICY, NO_WORKSPACE } from "../src/shared/workspace";
+import {
+  gatedFor,
+  toolsFor,
+  toolsForRoom,
+  workerToolsFor,
+  workspaceGrantsFileTools,
+} from "../src/server/tools";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail?: unknown) {
@@ -338,7 +344,7 @@ check(
 const offlineTools = toolsForRoom({ ...basePolicy, mode: "auto" }, "solo", false) as { name?: string }[];
 const offlineNames = offlineTools.map((t) => t.name);
 check(
-  "toolsForRoom(policy, 'solo', false) contains none of the file tools",
+  "toolsForRoom(policy, 'solo', connected: false) contains none of the file tools",
   FILE_TOOLS.every((n) => !offlineNames.includes(n)),
   offlineNames,
 );
@@ -346,13 +352,13 @@ check(
 const onlineTools = toolsForRoom({ ...basePolicy, mode: "auto" }, "solo", true) as { name?: string }[];
 const onlineNames = onlineTools.map((t) => t.name);
 check(
-  "toolsForRoom(policy, 'solo', true) contains all three file tools",
+  "toolsForRoom(policy, 'solo', connected: true) contains all three file tools",
   FILE_TOOLS.every((n) => onlineNames.includes(n)),
   onlineNames,
 );
 
 // toolsForRoom composes with the existing per-tool filter: a denied doc tool
-// stays denied whether or not the workspace is online.
+// stays denied whether or not a workspace is connected.
 const deniedDocPolicy = {
   ...basePolicy,
   mode: "custom" as const,
@@ -361,14 +367,31 @@ const deniedDocPolicy = {
 const composedTools = toolsForRoom(deniedDocPolicy, "solo", true) as { name?: string }[];
 const composedNames = composedTools.map((t) => t.name);
 check(
-  "toolsForRoom(workspaceOnline: true) still excludes a denied doc tool",
+  "toolsForRoom(workspaceConnected: true) still excludes a denied doc tool",
   !composedNames.includes("read_doc"),
   composedNames,
 );
 check(
-  "toolsForRoom(workspaceOnline: true) still includes the file tools alongside the denial",
+  "toolsForRoom(workspaceConnected: true) still includes the file tools alongside the denial",
   FILE_TOOLS.every((n) => composedNames.includes(n)),
   composedNames,
+);
+
+// Tools render at position 0 of the prompt, so a change to the list invalidates
+// the whole cached prefix — system and the entire conversation with it. That is
+// why the grant reads `kind` and never `online`: a host closing their tab must
+// not re-bill the room's full context at cold prices.
+check(
+  "a connected workspace grants the file tools even while its host is offline",
+  workspaceGrantsFileTools({ kind: "local", online: false, hostUid: "u1", label: "proj" }),
+);
+check(
+  "a github workspace grants the file tools while offline too",
+  workspaceGrantsFileTools({ kind: "github", online: false, hostUid: "u1", label: "o/r" }),
+);
+check(
+  "a room with no workspace never grants the file tools",
+  !workspaceGrantsFileTools(NO_WORKSPACE),
 );
 
 console.log("\nworkspace write tools");
@@ -423,7 +446,7 @@ check("gatedFor under auto does not include write_file", !gatedForAuto.has("writ
 const offlineWriteTools = toolsForRoom({ ...basePolicy, mode: "ask" }, "solo", false) as { name?: string }[];
 const offlineWriteNames = offlineWriteTools.map((t) => t.name);
 check(
-  "toolsForRoom(policy, 'solo', false) contains none of the write tools",
+  "toolsForRoom(policy, 'solo', connected: false) contains none of the write tools",
   WRITE_TOOLS.every((n) => !offlineWriteNames.includes(n)),
   offlineWriteNames,
 );
@@ -431,7 +454,7 @@ check(
 const onlineAskWriteTools = toolsForRoom({ ...basePolicy, mode: "ask" }, "solo", true) as { name?: string }[];
 const onlineAskWriteNames = onlineAskWriteTools.map((t) => t.name);
 check(
-  "toolsForRoom(policy, 'solo', true) under ask contains all three write tools",
+  "toolsForRoom(policy, 'solo', connected: true) under ask contains all three write tools",
   WRITE_TOOLS.every((n) => onlineAskWriteNames.includes(n)),
   onlineAskWriteNames,
 );
