@@ -578,6 +578,12 @@ against a live model is far less exercised.** Specifically, not yet exercised:
   repository, a real branch creation, or a real pull request.
 - **Eviction mid-vote.** Turn state is written to storage precisely so this works,
   but a genuine hibernation between proposal and vote hasn't been forced.
+- **Eviction mid-round, recovered.** `test/turn-resume.test.ts` evicts a room
+  with a turn in flight and checks that the next wake picks it up, trims the
+  round nobody finished, and gives up out loud at the cap. What that test does
+  not cover is the resume itself re-running a model call — it drives the turn to
+  its cap so the suite never reaches the Anthropic API. The retry path proper is
+  first exercised by a real deploy over a live turn.
 - **Load.** One room, a couple of people, short documents and small workspaces.
 
 ## Known limits
@@ -599,6 +605,12 @@ against a live model is far less exercised.** Specifically, not yet exercised:
   ticket is the fix.
 - `POST /api/rooms` is unauthenticated, so room creation is unbounded. It costs
   nothing but a Durable Object, and rate limiting is the control.
+- An interrupted turn is retried, not continued. The resume re-runs the round
+  that was in flight, which costs its input tokens a second time and can produce
+  different text than the tokens the room already watched appear. The abandoned
+  round is trimmed from the transcript so the reader sees one answer rather than
+  two, and after `MAX_RESUMES` interruptions the turn is dropped instead of
+  retried again.
 - A local-folder workspace request (list/read/search/write) does not survive
   Durable Object eviction the way a vote does. A vote is parked in SQLite and
   read back on resume; a filesystem round trip over the host's WebSocket is a

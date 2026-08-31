@@ -127,6 +127,26 @@ type Turn = {
   /** The member whose request caused this agent turn. */
   authorUid?: string;
   authorName?: string;
+  /**
+   * How many blocks the entry held when the current round started.
+   *
+   * A round streams straight into the entry, so an instance that dies mid-model
+   * call leaves half a block behind. The resume truncates back to this mark
+   * before re-running the round, or the reader would get the abandoned attempt
+   * followed by the second one. Absent on turns written before this existed, in
+   * which case nothing is truncated.
+   */
+  blocks?: number;
+  /** How many times this turn has been picked back up. See MAX_RESUMES. */
+  resumes?: number;
+  /**
+   * True while a round is actually being run, false once the turn parks on a
+   * vote. This is what `onStart` reads to tell "nobody is driving this turn"
+   * from "this turn is waiting for people, as designed" — and it lives in the
+   * room's own storage rather than in `state`, so it can be trusted at init
+   * time before anything else has been loaded.
+   */
+  running?: boolean;
 };
 
 type QueuedLine = { uid?: string; name: string; text: string };
@@ -150,6 +170,17 @@ type QueuedLine = { uid?: string; name: string; text: string };
  * what happens when the budget runs out anyway.
  */
 const MAX_ROUNDS = 20;
+
+/**
+ * How many times an interrupted turn may be picked back up before the room
+ * gives up on it.
+ *
+ * A deploy or an eviction mid-turn is normal and should cost nothing but the
+ * round that was in flight. A turn that dies the same way every time is not
+ * being interrupted, it is failing — retrying it forever would burn tokens on
+ * every wake and never finish.
+ */
+export const MAX_RESUMES = 3;
 
 /**
  * Set once a write has created the repository's working branch, after which
@@ -2235,11 +2266,17 @@ export class Room extends Agent<Env, RoomState> {
     let round = 0;
     try {
       for (; round < MAX_ROUNDS; round++) {
-        const turn = this.#turn();
-        if (!turn) return; // interrupted
+        const stored = this.#turn();
+        if (!stored) return; // interrupted
 
-        const entry = this.#getEntry(turn.entryId);
+        const entry = this.#getEntry(stored.entryId);
         if (!entry || entry.kind !== "agent") break;
+
+        // Mark where this round begins before the model call that writes into
+        // it. If this instance dies mid-stream, that mark is what tells the
+        // resume how much of the entry belongs to an attempt nobody finished.
+        const turn: Turn = { ...stored, blocks: entry.blocks.length, running: true };
+        this.#setTurn(turn);
 
         // Map API content-block index -> index in the entry we render.
         const slots = new Map<number, number>();
@@ -2383,7 +2420,7 @@ export class Room extends Agent<Env, RoomState> {
 
         if (gated.length > 0) {
           // Park. The vote handler resumes from here.
-          this.#setTurn({ ...turn, carried: results });
+          this.#setTurn({ ...turn, carried: results, running: false });
           this.setState({ ...this.state, status: "awaiting_approval", pending: gated });
           return;
         }
@@ -2413,6 +2450,80 @@ export class Room extends Agent<Env, RoomState> {
     this.setState({ ...this.state, status: "idle", pending: [] });
     // Anything said while the agent was busy becomes the next turn.
     if (this.#inbox().length > 0) await this.#startTurn();
+  }
+
+  /**
+   * Pick up a turn that was running when the previous instance went away.
+   *
+   * A deploy replaces the code under every live room, and the runtime evicts
+   * objects whenever it likes; either way the JavaScript running `#advance` is
+   * gone. Storage survives — but nothing was scheduled to look at it, and
+   * message intake only starts a turn when the room is idle (see `#onSay`), so
+   * a room caught mid-response would sit at "thinking" forever with everything
+   * anyone said afterwards piling up in the inbox.
+   *
+   * `onStart` runs on every wake of a fresh instance, which is exactly when
+   * "the state says a turn is running" can only mean nobody is running it. The
+   * work is handed to an alarm rather than done here: this runs before the
+   * object will serve anything, and a model call is not something to hold that
+   * open for. The alarm is also durable, so an interruption during the resume
+   * gets the same treatment as the interruption that caused it.
+   *
+   * A turn parked on a vote is not this — it sits at "awaiting_approval" and is
+   * resumed by the vote that decides it, whenever that arrives.
+   */
+  override async onStart(props?: Record<string, unknown>): Promise<void> {
+    await super.onStart(props);
+    this.#ready();
+    const turn = this.#turn();
+    // `running` rather than `state.status`: this is the object's first breath
+    // and the room's own tables are the only thing certain to be readable yet.
+    if (!turn?.running) return;
+    // Keyed by the turn's entry so repeated wakes cannot stack up rows, and so
+    // a row left over from an earlier turn is not mistaken for this one.
+    await this.schedule(0, "resumeTurn", turn.entryId, { idempotent: true });
+  }
+
+  /**
+   * The alarm body for the above. Public because the scheduler calls it by
+   * name; nothing else should.
+   */
+  async resumeTurn(entryId: string): Promise<void> {
+    this.#ready();
+    // Both guards are for a schedule that fired late: the turn may have been
+    // stopped, finished, or parked on a vote in the meantime, and a new turn
+    // may have started that this row has nothing to do with.
+    if (this.state.status !== "thinking") return;
+    const turn = this.#turn();
+    if (!turn || turn.entryId !== entryId) return;
+
+    // Drop the abandoned round, whichever way this goes below. The conversation
+    // the model sees was never told about it — `#advance` appends the assistant
+    // message only once the call returns — so re-running the round is a clean
+    // retry rather than a continuation, and the transcript has to match. If the
+    // turn is being given up on instead, half a block is not something to leave
+    // in the transcript for good.
+    const entry = this.#getEntry(entryId);
+    if (entry?.kind === "agent" && typeof turn.blocks === "number" && entry.blocks.length > turn.blocks) {
+      entry.blocks.length = turn.blocks;
+      this.#patch(entry);
+    }
+
+    const resumes = (turn.resumes ?? 0) + 1;
+    if (resumes > MAX_RESUMES) {
+      this.#system(
+        `The agent turn was interrupted ${MAX_RESUMES} times and has been stopped. ` +
+          "Say something to start it again.",
+      );
+      await this.#finishTurn();
+      return;
+    }
+
+    this.#setTurn({ ...turn, resumes });
+    // Said out loud: a reader watched text appear and then vanish, and is owed
+    // the reason. It is also the only trace a deploy leaves in a room.
+    this.#system("The agent was interrupted. Picking the turn back up.");
+    await this.#advance();
   }
 
   /**
