@@ -426,6 +426,9 @@ export function App() {
   // re-runs. The tokens themselves live in localStorage, never in state.
   const [tokenEpoch, setTokenEpoch] = useState(0);
   const [busy, setBusy] = useState(false);
+  // Only a phone reads this: the side pane is a column at any width that can
+  // spare 276px, and the drawer styles that consult it stop at 760px.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [providers, setProviders] = useState<string[] | null>(null);
   const [identity, setIdentity] = useState(() => {
@@ -447,6 +450,16 @@ export function App() {
     persistSidebar(projects, rooms);
     sidebar.current = { projects, rooms };
   }, [projects, rooms]);
+
+  // Escape closes the drawer, the same way it closes every other layer here.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [sidebarOpen]);
 
   /**
    * The last snapshot this browser sent, so a change that is not a change
@@ -963,12 +976,22 @@ export function App() {
       <SidePane
         activeRoomId={route.kind === "room" || route.kind === "invite" ? route.roomId : undefined}
         busy={busy}
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen((wasOpen) => !wasOpen)}
         projects={projects}
         rooms={rooms}
-        onCreateRoom={createRoomFromPane}
+        // Going somewhere closes the drawer: on a phone it covers the room it
+        // just navigated to, and leaving it up would hide the arrival.
+        onCreateRoom={(projectId) => {
+          setSidebarOpen(false);
+          createRoomFromPane(projectId);
+        }}
         onCreateProject={createProject}
         onRenameProject={renameProject}
-        onOpenRoom={openRoom}
+        onOpenRoom={(roomId) => {
+          setSidebarOpen(false);
+          openRoom(roomId);
+        }}
         onRenameRoom={renameRoom}
         onCopyRoomLink={copyRoomLink}
         onArchiveRoom={archiveRoom}
@@ -978,6 +1001,14 @@ export function App() {
         onRestoreProject={restoreProject}
         onDeleteProject={deleteProject}
       />
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="side-scrim"
+          aria-label="Hide rooms and projects"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <main className="side-main">{content}</main>
     </div>
   );

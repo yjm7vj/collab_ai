@@ -387,9 +387,67 @@ type SideRoom = {
   workspace: WorkspaceInfo;
 };
 
+// Renaming happens in the row itself: the title turns into an input, Enter or
+// a click away commits, Escape reverts. Names get the same trim and 42-character
+// clamp that creating one does, and an empty name reverts instead of saving.
+function InlineRename({
+  value,
+  label,
+  onCommit,
+  onCancel,
+}: {
+  value: string;
+  label: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const settled = useRef(false);
+
+  const settle = (commit: boolean) => {
+    if (settled.current) return;
+    settled.current = true;
+    const name = draft.trim().slice(0, 42);
+    if (commit && name) onCommit(name);
+    else onCancel();
+  };
+
+  return (
+    <form
+      className="side-rename-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        settle(true);
+      }}
+    >
+      <input
+        autoFocus
+        value={draft}
+        maxLength={42}
+        aria-label={label}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            settle(true);
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            settle(false);
+          }
+        }}
+        onBlur={() => settle(true)}
+      />
+    </form>
+  );
+}
+
 export function SidePane({
   activeRoomId,
   busy,
+  open,
+  onToggle,
   projects,
   rooms,
   onCreateRoom,
@@ -407,6 +465,13 @@ export function SidePane({
 }: {
   activeRoomId?: string;
   busy: boolean;
+  /**
+   * Whether the rooms list is showing. It always is on a wide screen — the
+   * pane is a column there and this is ignored. On a phone the list is a
+   * drawer over the room, and this is what opens it.
+   */
+  open: boolean;
+  onToggle: () => void;
   projects: SideProject[];
   rooms: SideRoom[];
   onCreateRoom: (projectId?: string) => void;
@@ -425,6 +490,8 @@ export function SidePane({
   const [addingProject, setAddingProject] = useState(false);
   const [projectName, setProjectName] = useState("");
   const [openProjectMenu, setOpenProjectMenu] = useState<string | null>(null);
+  const [renamingRoom, setRenamingRoom] = useState<string | null>(null);
+  const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const openProjectActionsRef = useRef<HTMLDivElement | null>(null);
   const archivedRooms = [
     ...rooms.filter((room) => room.archived),
@@ -458,24 +525,38 @@ export function SidePane({
     setAddingProject(false);
   };
 
-  const promptRename = (room: SideRoom) => {
-    const label = window.prompt("Room name", room.label);
-    if (label !== null) onRenameRoom(room.roomId, label);
+  const commitRoomRename = (room: SideRoom, label: string) => {
+    setRenamingRoom(null);
+    if (label !== room.label) onRenameRoom(room.roomId, label);
   };
 
-  const promptRenameProject = (project: SideProject) => {
-    const label = window.prompt("Project name", project.name);
-    if (label !== null) onRenameProject(project.id, label);
+  const commitProjectRename = (project: SideProject, name: string) => {
+    setRenamingProject(null);
+    if (name !== project.name) onRenameProject(project.id, name);
   };
 
   return (
-    <aside className="side-pane" aria-label="Workspace navigation">
+    <aside
+      className="side-pane"
+      data-open={open ? "true" : "false"}
+      aria-label="Workspace navigation"
+    >
       <div className="side-head">
+        <button
+          type="button"
+          className="side-drawer-toggle"
+          aria-expanded={open}
+          aria-controls="side-nav"
+          aria-label={open ? "Hide rooms and projects" : "Show rooms and projects"}
+          onClick={onToggle}
+        >
+          <span aria-hidden="true">{open ? "✕" : "☰"}</span>
+        </button>
         <LogoMark />
         <div className="side-title">Huddle.AI</div>
       </div>
 
-      <nav className="side-scroll" aria-label="Projects">
+      <nav className="side-scroll" id="side-nav" aria-label="Projects">
         <section className="side-section">
           <div className="side-section-row">
             <div className="side-section-label">Rooms</div>
@@ -494,43 +575,54 @@ export function SidePane({
             <div className="side-room-list">
               {rooms.filter((room) => !room.archived).map((room) => (
                 <div className="side-room-row" key={room.roomId}>
-                  <button
-                    type="button"
-                    className={`side-item ${room.roomId === activeRoomId ? "active" : ""}`}
-                    onClick={() => onOpenRoom(room.roomId)}
-                  >
-                    <span className="side-item-title">{room.label}</span>
-                    <span className="side-item-detail">
-                      {room.workspace.label ? `Workspace: ${room.workspace.label}` : room.roomId}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="side-room-action side-copy-room"
-                    onClick={() => onCopyRoomLink(room.roomId)}
-                    aria-label={`Copy link for ${room.label}`}
-                    title="Copy room link"
-                  >
-                    ⧉
-                  </button>
-                  <button
-                    type="button"
-                    className="side-room-action side-rename-room"
-                    onClick={() => promptRename(room)}
-                    aria-label={`Rename ${room.label}`}
-                    title={`Rename ${room.label}`}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    className="side-archive-room"
-                    onClick={() => onArchiveRoom(room.roomId)}
-                    aria-label={`Archive ${room.label}`}
-                    title={`Archive ${room.label}`}
-                  >
-                    <ArchiveIcon />
-                  </button>
+                  {renamingRoom === room.roomId ? (
+                    <InlineRename
+                      value={room.label}
+                      label="Room name"
+                      onCommit={(label) => commitRoomRename(room, label)}
+                      onCancel={() => setRenamingRoom(null)}
+                    />
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className={`side-item ${room.roomId === activeRoomId ? "active" : ""}`}
+                        onClick={() => onOpenRoom(room.roomId)}
+                      >
+                        <span className="side-item-title">{room.label}</span>
+                        <span className="side-item-detail">
+                          {room.workspace.label ? `Workspace: ${room.workspace.label}` : room.roomId}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="side-room-action side-copy-room"
+                        onClick={() => onCopyRoomLink(room.roomId)}
+                        aria-label={`Copy link for ${room.label}`}
+                        title="Copy room link"
+                      >
+                        ⧉
+                      </button>
+                      <button
+                        type="button"
+                        className="side-room-action side-rename-room"
+                        onClick={() => setRenamingRoom(room.roomId)}
+                        aria-label={`Rename ${room.label}`}
+                        title={`Rename ${room.label}`}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="side-archive-room"
+                        onClick={() => onArchiveRoom(room.roomId)}
+                        aria-label={`Archive ${room.label}`}
+                        title={`Archive ${room.label}`}
+                      >
+                        <ArchiveIcon />
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
@@ -594,7 +686,16 @@ export function SidePane({
               <div className="side-project" key={project.id}>
                 <div className="side-project-head">
                   <span className="side-folder" aria-hidden="true" />
-                  <span>{project.name}</span>
+                  {renamingProject === project.id ? (
+                    <InlineRename
+                      value={project.name}
+                      label="Project name"
+                      onCommit={(name) => commitProjectRename(project, name)}
+                      onCancel={() => setRenamingProject(null)}
+                    />
+                  ) : (
+                    <span>{project.name}</span>
+                  )}
                   <div
                     className="side-project-actions"
                     ref={openProjectMenu === project.id ? openProjectActionsRef : undefined}
@@ -623,7 +724,7 @@ export function SidePane({
                       <div className="side-project-menu" role="menu">
                         <button type="button" role="menuitem" onClick={() => {
                           setOpenProjectMenu(null);
-                          promptRenameProject(project);
+                          setRenamingProject(project.id);
                         }}>Rename project</button>
                         <button type="button" role="menuitem" onClick={() => {
                           setOpenProjectMenu(null);
@@ -640,47 +741,58 @@ export function SidePane({
                 <div className="side-channels">
                   {project.rooms.filter((room) => !room.archived).map((room) => (
                     <div className="side-room-row" key={room.roomId}>
-                      <button
-                        type="button"
-                        className={`side-item ${room.roomId === activeRoomId ? "active" : ""}`}
-                        onClick={() => onOpenRoom(room.roomId)}
-                      >
-                        <span className="side-item-title">{room.label}</span>
-                        <span className="side-item-detail">
-                          {/* The project already names its own workspace below, so a room
-                              only spells one out when it differs from what it inherited. */}
-                          {room.workspace.label && room.workspace.label !== project.workspace.label
-                            ? `Workspace: ${room.workspace.label}`
-                            : room.roomId}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="side-room-action side-copy-room"
-                        onClick={() => onCopyRoomLink(room.roomId)}
-                        aria-label={`Copy link for ${room.label}`}
-                        title="Copy room link"
-                      >
-                        ⧉
-                      </button>
-                      <button
-                        type="button"
-                        className="side-room-action side-rename-room"
-                        onClick={() => promptRename(room)}
-                        aria-label={`Rename ${room.label}`}
-                        title={`Rename ${room.label}`}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        type="button"
-                        className="side-archive-room"
-                        onClick={() => onArchiveRoom(room.roomId)}
-                        aria-label={`Archive ${room.label}`}
-                        title={`Archive ${room.label}`}
-                      >
-                        <ArchiveIcon />
-                      </button>
+                      {renamingRoom === room.roomId ? (
+                        <InlineRename
+                          value={room.label}
+                          label="Room name"
+                          onCommit={(label) => commitRoomRename(room, label)}
+                          onCancel={() => setRenamingRoom(null)}
+                        />
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className={`side-item ${room.roomId === activeRoomId ? "active" : ""}`}
+                            onClick={() => onOpenRoom(room.roomId)}
+                          >
+                            <span className="side-item-title">{room.label}</span>
+                            <span className="side-item-detail">
+                              {/* The project already names its own workspace below, so a room
+                                  only spells one out when it differs from what it inherited. */}
+                              {room.workspace.label && room.workspace.label !== project.workspace.label
+                                ? `Workspace: ${room.workspace.label}`
+                                : room.roomId}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="side-room-action side-copy-room"
+                            onClick={() => onCopyRoomLink(room.roomId)}
+                            aria-label={`Copy link for ${room.label}`}
+                            title="Copy room link"
+                          >
+                            ⧉
+                          </button>
+                          <button
+                            type="button"
+                            className="side-room-action side-rename-room"
+                            onClick={() => setRenamingRoom(room.roomId)}
+                            aria-label={`Rename ${room.label}`}
+                            title={`Rename ${room.label}`}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            type="button"
+                            className="side-archive-room"
+                            onClick={() => onArchiveRoom(room.roomId)}
+                            aria-label={`Archive ${room.label}`}
+                            title={`Archive ${room.label}`}
+                          >
+                            <ArchiveIcon />
+                          </button>
+                        </>
+                      )}
                     </div>
                   ))}
                   {project.rooms.filter((room) => !room.archived).length === 0 && (
@@ -703,53 +815,64 @@ export function SidePane({
             <div className="side-room-list">
               {archivedRooms.map((room) => (
                 <div className="side-room-row" key={room.roomId}>
-                  <button
-                    type="button"
-                    className="side-item side-item-muted"
-                    onClick={() => onOpenRoom(room.roomId)}
-                  >
-                    <span className="side-item-title">{room.label}</span>
-                    <span className="side-item-detail">{room.projectId ? "Archived project room" : "Archived standalone room"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="side-room-action side-copy-room"
-                    onClick={() => onCopyRoomLink(room.roomId)}
-                    aria-label={`Copy link for ${room.label}`}
-                    title="Copy room link"
-                  >
-                    ⧉
-                  </button>
-                  <button
-                    type="button"
-                    className="side-room-action side-rename-room"
-                    onClick={() => promptRename(room)}
-                    aria-label={`Rename ${room.label}`}
-                    title={`Rename ${room.label}`}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    className="side-restore-room"
-                    onClick={() => onRestoreRoom(room.roomId)}
-                    aria-label={`Restore ${room.label}`}
-                    title={`Restore ${room.label}`}
-                  >
-                    Restore
-                  </button>
-                  <button
-                    type="button"
-                    className="side-delete-archived-room"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDeleteRoom(room.roomId);
-                    }}
-                    aria-label={`Delete ${room.label}`}
-                    title={`Delete ${room.label}`}
-                  >
-                    Delete
-                  </button>
+                  {renamingRoom === room.roomId ? (
+                    <InlineRename
+                      value={room.label}
+                      label="Room name"
+                      onCommit={(label) => commitRoomRename(room, label)}
+                      onCancel={() => setRenamingRoom(null)}
+                    />
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="side-item side-item-muted"
+                        onClick={() => onOpenRoom(room.roomId)}
+                      >
+                        <span className="side-item-title">{room.label}</span>
+                        <span className="side-item-detail">{room.projectId ? "Archived project room" : "Archived standalone room"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="side-room-action side-copy-room"
+                        onClick={() => onCopyRoomLink(room.roomId)}
+                        aria-label={`Copy link for ${room.label}`}
+                        title="Copy room link"
+                      >
+                        ⧉
+                      </button>
+                      <button
+                        type="button"
+                        className="side-room-action side-rename-room"
+                        onClick={() => setRenamingRoom(room.roomId)}
+                        aria-label={`Rename ${room.label}`}
+                        title={`Rename ${room.label}`}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        className="side-restore-room"
+                        onClick={() => onRestoreRoom(room.roomId)}
+                        aria-label={`Restore ${room.label}`}
+                        title={`Restore ${room.label}`}
+                      >
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        className="side-delete-archived-room"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteRoom(room.roomId);
+                        }}
+                        aria-label={`Delete ${room.label}`}
+                        title={`Delete ${room.label}`}
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
