@@ -1320,7 +1320,6 @@ export function LandingPage({
           <img src="/collab-logo.svg" alt="" width={20} height={20} />
           <span>Rooms, transcripts and votes live in one durable object per room.</span>
           <span className="lp-foot-spacer" />
-          <a href="https://github.com/yjm7vj/collab_ai">Source on GitHub</a>
         </div>
       </footer>
     </div>
