@@ -1003,7 +1003,7 @@ export class GithubProvider implements WorkspaceProvider {
     return { ok: true, data: matches.join("\n") };
   }
 
-  /** Read one file's text off a specific branch — unlike `#read`, not tied to `#ref.ref`. */
+  /** Read one file's text off a specific ref. */
   async #readOnBranch(path: string, branch: string): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
     const url = `https://api.github.com/repos/${encodeURIComponent(this.#ref.owner)}/${encodeURIComponent(this.#ref.repo)}/contents/${encodeContentsPath(path)}?ref=${encodeURIComponent(branch)}`;
     const res = await this.#fetchJson(url);
@@ -1068,13 +1068,12 @@ export class GithubProvider implements WorkspaceProvider {
       return { ok: false, error: "The room's rules don't allow access to that path." };
     }
 
-    const branch = await this.#ensureWorkingBranch();
-    if (!branch.ok) return branch;
-
-    // Read from the working branch, not from `#ref` — if an earlier
-    // approved edit already landed on `#branch`, this edit must see that
-    // version, not the default branch's stale one.
-    const current = await this.#readOnBranch(path, this.#branch);
+    // Match against the same ref that `read_file` exposes. Before this room
+    // has created a working branch, that is the connected repository ref. If
+    // a prior write succeeded, #readRef() follows the working branch instead.
+    // Reading the working branch unconditionally here made a freshly-read
+    // base-branch span look missing to edit_file.
+    const current = await this.#readOnBranch(path, this.#readRef().ref);
     if (!current.ok) return current;
 
     // Same unique-match-or-reject contract as the local provider (and
@@ -1100,6 +1099,10 @@ export class GithubProvider implements WorkspaceProvider {
           "more surrounding context to make it unique.",
       };
     }
+
+    const branch = await this.#ensureWorkingBranch();
+    if (!branch.ok) return branch;
+
     const updated = current.text.slice(0, match.index) + newText + current.text.slice(match.index + oldText.length);
 
     const res = await commitFile(

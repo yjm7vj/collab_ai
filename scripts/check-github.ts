@@ -534,8 +534,8 @@ async function main() {
       check("write of a brand-new file sends no sha", putBody !== null && !("sha" in putBody), putBody);
     }
 
-    // edit: reads from the *working* branch (not #ref's branch), applies the
-    // unique-match-or-reject contract, then commits.
+    // edit: reads from the same ref as read_file, applies the
+    // unique-match-or-reject contract, then commits to the working branch.
     {
       const stub = makeStub((url, init) => {
         const method = init?.method ?? "GET";
@@ -557,7 +557,7 @@ async function main() {
         }
         return new Response("unexpected request", { status: 500 });
       });
-      const provider = new GithubProvider("test-token", ref, [], "collab-ai", stub.fetchImpl);
+      const provider = new GithubProvider("test-token", ref, [], "collab-ai", stub.fetchImpl, true);
       const res = await provider.perform({ op: "edit", path: "notes.txt", oldText: "line one", newText: "line ONE" });
       check("edit against a unique match succeeds", res.ok === true, res);
 
@@ -574,7 +574,7 @@ async function main() {
         }
         return new Response("edit must not commit an ambiguous match", { status: 500 });
       });
-      const ambiguousProvider = new GithubProvider("test-token", ref, [], "collab-ai", ambiguousStub.fetchImpl);
+      const ambiguousProvider = new GithubProvider("test-token", ref, [], "collab-ai", ambiguousStub.fetchImpl, true);
       const ambiguousRes = await ambiguousProvider.perform({ op: "edit", path: "notes.txt", oldText: "dup", newText: "x" });
       check("edit with an ambiguous match is refused and never commits", ambiguousRes.ok === false, ambiguousRes);
 
@@ -591,9 +591,45 @@ async function main() {
         }
         return new Response("edit must not commit a missing match", { status: 500 });
       });
-      const missingProvider = new GithubProvider("test-token", ref, [], "collab-ai", missingStub.fetchImpl);
+      const missingProvider = new GithubProvider("test-token", ref, [], "collab-ai", missingStub.fetchImpl, true);
       const missingRes = await missingProvider.perform({ op: "edit", path: "notes.txt", oldText: "not present", newText: "x" });
       check("edit with no match is refused and never commits", missingRes.ok === false, missingRes);
+    }
+
+    // A fresh read and edit must use the same ref. This reproduces the
+    // production failure where read_file returned text from main but edit_file
+    // looked only on an old collab-ai branch and reported zero matches.
+    {
+      const calls: string[] = [];
+      const stub = makeStub((url, init) => {
+        const method = init?.method ?? "GET";
+        calls.push(`${method} ${url}`);
+        if (method === "GET" && url.includes("/git/ref/heads/main")) {
+          return new Response(JSON.stringify({ object: { sha: "basesha" } }), { status: 200 });
+        }
+        if (method === "POST" && url.endsWith("/git/refs")) {
+          return new Response(JSON.stringify({ ref: "refs/heads/collab-ai" }), { status: 201 });
+        }
+        if (method === "GET" && url.includes("/contents/") && url.includes("ref=main")) {
+          return new Response(JSON.stringify({ sha: "filesha-main", content: btoa("#onWorkspaceDetach\n") }), { status: 200 });
+        }
+        if (method === "GET" && url.includes("/contents/") && url.includes("ref=collab-ai")) {
+          return new Response(JSON.stringify({ sha: "filesha-main" }), { status: 200 });
+        }
+        if (method === "PUT") {
+          return new Response(JSON.stringify({ commit: { sha: "commitsha-main" } }), { status: 200 });
+        }
+        return new Response("unexpected request", { status: 500 });
+      });
+      const provider = new GithubProvider("test-token", ref, [], "collab-ai", stub.fetchImpl);
+      const res = await provider.perform({
+        op: "edit",
+        path: "src/server/room.ts",
+        oldText: "#onWorkspaceDetach",
+        newText: "#onWorkspaceDetachFixed",
+      });
+      check("edit matches content from the same base ref as read_file", res.ok === true, { res, calls });
+      check("edit reads the connected ref before creating the working branch", calls.some((c) => c.includes("ref=main")), calls);
     }
 
     // remove: looks up the current sha, then DELETEs with it.
