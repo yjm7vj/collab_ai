@@ -319,6 +319,55 @@ export type Usage = {
 
 export type ModelResult = { message: Message; usage: Usage };
 
+/** Default and maximum output budgets for the room's lead agent. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 16_000;
+export const MAX_MAIN_OUTPUT_TOKENS = 128_000;
+
+/** A bounded continuation prevents a truncated response from becoming an infinite bill. */
+export const MAX_OUTPUT_CONTINUATIONS = 3;
+
+export type OutputLimitRecovery =
+  | { kind: "none" }
+  | { kind: "continue"; message: MessageParam }
+  | { kind: "retry"; maxTokens: number }
+  | { kind: "stop"; discardResponse: boolean };
+
+/**
+ * Decide how to recover a response that filled its output allowance.
+ *
+ * Ordinary text is safe to continue by adding a new user turn. A client tool
+ * call is different: it must be followed immediately by its tool result, and a
+ * call truncated while its JSON is being formed has no valid result to send.
+ * Retry that model round with more output room instead of storing an invalid
+ * assistant/tool exchange in the conversation.
+ */
+export function outputLimitRecovery(
+  message: { stop_reason: string | null; content: ReadonlyArray<{ type: string }> },
+  priorContinuations: number,
+  maxTokens: number,
+): OutputLimitRecovery {
+  if (message.stop_reason !== "max_tokens") return { kind: "none" };
+  const hasClientToolCall = message.content.some((block) => block.type === "tool_use");
+  if (priorContinuations >= MAX_OUTPUT_CONTINUATIONS) {
+    return { kind: "stop", discardResponse: hasClientToolCall };
+  }
+
+  if (hasClientToolCall) {
+    const next = Math.min(maxTokens * 2, MAX_MAIN_OUTPUT_TOKENS);
+    return next > maxTokens
+      ? { kind: "retry", maxTokens: next }
+      : { kind: "stop", discardResponse: true };
+  }
+
+  return {
+    kind: "continue",
+    message: {
+      role: "user",
+      content: "Continue exactly where you stopped. Do not repeat completed material.",
+    },
+  };
+}
+
 function client(cfg: ModelConfig) {
   return new Anthropic({ apiKey: cfg.apiKey });
 }
@@ -352,12 +401,13 @@ function buildParams(
   tools: unknown[],
   messages: MessageParam[],
   cache: CacheMode,
+  maxTokens = DEFAULT_MAX_OUTPUT_TOKENS,
 ) {
   const info = modelInfo(model);
   const ttl = cache === "long" ? { ttl: "1h" as const } : {};
   const params: Record<string, unknown> = {
     model,
-    max_tokens: 16000,
+    max_tokens: maxTokens,
     system:
       cache === "none"
         ? system
@@ -427,6 +477,7 @@ export async function runModel(
   messages: MessageParam[],
   tools: unknown[],
   hooks: StreamHooks,
+  maxTokens = DEFAULT_MAX_OUTPUT_TOKENS,
 ): Promise<ModelResult> {
   if (cfg.apiKey === "mock") return mockTurn(settings, messages, hooks);
 
@@ -442,6 +493,7 @@ export async function runModel(
     tools,
     messages,
     "long",
+    maxTokens,
   );
 
   const stream = client(cfg).messages.stream(params as never);

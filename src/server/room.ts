@@ -75,6 +75,9 @@ import {
   type WorkflowGraph,
 } from "../shared/workflow";
 import {
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  MAX_OUTPUT_CONTINUATIONS,
+  outputLimitRecovery,
   repairToolConversation,
   runModel,
   runStage,
@@ -145,6 +148,10 @@ type Turn = {
   blocks?: number;
   /** How many times this turn has been picked back up. See MAX_RESUMES. */
   resumes?: number;
+  /** Completed automatic continuations after an output-limited response. */
+  outputContinuations?: number;
+  /** Output allowance for the next model round, raised after a partial tool call. */
+  maxOutputTokens?: number;
   /**
    * True while a round is actually being run, false once the turn parks on a
    * vote. This is what `onStart` reads to tell "nobody is driving this turn"
@@ -2580,6 +2587,7 @@ export class Room extends Agent<Env, RoomState> {
         if (conversation.repaired) this.#setConvo(conversation.messages);
 
         const graph = this.#activeGraph();
+        const maxOutputTokens = stored.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
         const { message, usage } = await runModel(
           this.#config(),
           this.#settings(),
@@ -2612,10 +2620,46 @@ export class Room extends Agent<Env, RoomState> {
               this.#send({ t: "delta", entryId: entry.id, block: slot, text });
             },
           },
+          maxOutputTokens,
         );
 
-        this.#setConvo([...this.#convo(), { role: "assistant", content: message.content }]);
         this.#recordUsage(usage);
+
+        const outputRecovery = outputLimitRecovery(
+          message,
+          stored.outputContinuations ?? 0,
+          maxOutputTokens,
+        );
+
+        // A tool call cut off while its input is being generated cannot be
+        // stored: Anthropic would require a tool_result immediately after it,
+        // but there is no complete call to execute. Discard the streamed
+        // attempt and retry the same round with a larger output allowance.
+        if (outputRecovery.kind === "retry") {
+          entry.blocks.length = turn.blocks ?? entry.blocks.length;
+          this.#patch(entry);
+          this.#setTurn({
+            ...turn,
+            outputContinuations: (stored.outputContinuations ?? 0) + 1,
+            maxOutputTokens: outputRecovery.maxTokens,
+          });
+          continue;
+        }
+
+        // At the retry ceiling, an incomplete tool call is still unsafe to
+        // persist. Remove it before ending the turn so the next user message
+        // cannot inherit an orphaned tool_use block.
+        if (outputRecovery.kind === "stop" && outputRecovery.discardResponse) {
+          entry.blocks.length = turn.blocks ?? entry.blocks.length;
+          this.#patch(entry);
+          this.#system(
+            `The agent reached its output limit repeatedly and stopped after ` +
+              `${MAX_OUTPUT_CONTINUATIONS} automatic continuations.`,
+          );
+          break;
+        }
+
+        this.#setConvo([...this.#convo(), { role: "assistant", content: message.content }]);
 
         // Refusals stop the turn; there is no content to act on.
         if (message.stop_reason === "refusal") {
@@ -2636,11 +2680,26 @@ export class Room extends Agent<Env, RoomState> {
           continue;
         }
 
+        if (message.stop_reason === "max_tokens") {
+          this.#patch(entry);
+          if (outputRecovery.kind === "continue") {
+            this.#setConvo([...this.#convo(), outputRecovery.message]);
+            this.#setTurn({
+              ...turn,
+              outputContinuations: (stored.outputContinuations ?? 0) + 1,
+              maxOutputTokens,
+            });
+            continue;
+          }
+          this.#system(
+            `The agent reached its output limit repeatedly and stopped after ` +
+              `${MAX_OUTPUT_CONTINUATIONS} automatic continuations.`,
+          );
+          break;
+        }
+
         if (message.stop_reason !== "tool_use") {
           this.#patch(entry);
-          if (message.stop_reason === "max_tokens") {
-            this.#system("The agent hit its output limit and stopped early.");
-          }
           break;
         }
 
@@ -2732,7 +2791,7 @@ export class Room extends Agent<Env, RoomState> {
 
       if (round >= MAX_ROUNDS) {
         this.#system(
-          `The agent stopped after ${MAX_ROUNDS} tool rounds without finishing. ` +
+          `The agent stopped after ${MAX_ROUNDS} model rounds without finishing. ` +
             "Say something to nudge it in a different direction.",
         );
       }

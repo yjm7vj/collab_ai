@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { repairToolConversation } from "../src/server/model";
+import {
+  MAX_OUTPUT_CONTINUATIONS,
+  outputLimitRecovery,
+  repairToolConversation,
+} from "../src/server/model";
 
 describe("tool conversation recovery", () => {
   it("keeps a complete client tool exchange unchanged", () => {
@@ -57,5 +61,53 @@ describe("tool conversation recovery", () => {
     ];
 
     expect(repairToolConversation(messages)).toEqual({ messages, repaired: false });
+  });
+});
+
+describe("output limit recovery", () => {
+  it("continues a truncated text response without exposing a stop message", () => {
+    expect(
+      outputLimitRecovery(
+        { stop_reason: "max_tokens", content: [{ type: "text" }] },
+        0,
+        16_000,
+      ),
+    ).toEqual({
+      kind: "continue",
+      message: {
+        role: "user",
+        content: "Continue exactly where you stopped. Do not repeat completed material.",
+      },
+    });
+  });
+
+  it("retries a truncated tool call with more output room", () => {
+    expect(
+      outputLimitRecovery(
+        { stop_reason: "max_tokens", content: [{ type: "tool_use" }] },
+        0,
+        16_000,
+      ),
+    ).toEqual({ kind: "retry", maxTokens: 32_000 });
+  });
+
+  it("stops after the bounded number of automatic continuations", () => {
+    expect(
+      outputLimitRecovery(
+        { stop_reason: "max_tokens", content: [{ type: "text" }] },
+        MAX_OUTPUT_CONTINUATIONS,
+        16_000,
+      ),
+    ).toEqual({ kind: "stop", discardResponse: false });
+  });
+
+  it("discards a partial tool call when no safe retry remains", () => {
+    expect(
+      outputLimitRecovery(
+        { stop_reason: "max_tokens", content: [{ type: "tool_use" }] },
+        MAX_OUTPUT_CONTINUATIONS,
+        128_000,
+      ),
+    ).toEqual({ kind: "stop", discardResponse: true });
   });
 });
