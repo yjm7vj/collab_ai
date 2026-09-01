@@ -154,6 +154,43 @@ type Turn = {
   running?: boolean;
 };
 
+/**
+ * Anthropic requires one result for each tool use in a conversation. A room
+ * can be evicted between the conversation write and the turn checkpoint, so
+ * old state may contain a duplicated result after a resume. Clean that state
+ * before it reaches the API, while preserving all ordinary text and thinking
+ * blocks.
+ */
+export function normalizeConversation(convo: MessageParam[]): MessageParam[] {
+  let changed = false;
+  const normalized = convo.map((message) => {
+    if (!Array.isArray(message.content)) return message;
+
+    const seen = new Set<string>();
+    const content = message.content.filter((block) => {
+      if (block.type !== "tool_result" && block.type !== "tool_use") return true;
+      const id = block.type === "tool_result" ? block.tool_use_id : block.id;
+      if (seen.has(id)) {
+        changed = true;
+        return false;
+      }
+      seen.add(id);
+      return true;
+    });
+    return content.length === message.content.length ? message : { ...message, content };
+  });
+  return changed ? normalized : convo;
+}
+
+function uniqueToolResults(results: ToolResultBlockParam[]): ToolResultBlockParam[] {
+  const seen = new Set<string>();
+  return results.filter((result) => {
+    if (seen.has(result.tool_use_id)) return false;
+    seen.add(result.tool_use_id);
+    return true;
+  });
+}
+
 type QueuedLine = { uid?: string; name: string; text: string };
 
 /** Hard stop on tool round-trips so a confused turn can't loop forever. */
@@ -332,7 +369,10 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   #convo(): MessageParam[] {
-    return this.#kvGet<MessageParam[]>("convo", []);
+    const stored = this.#kvGet<MessageParam[]>("convo", []);
+    const normalized = normalizeConversation(stored);
+    if (normalized !== stored) this.#kvSet("convo", normalized);
+    return normalized;
   }
   #setConvo(m: MessageParam[]) {
     this.#kvSet("convo", m);
@@ -2601,12 +2641,15 @@ export class Room extends Agent<Env, RoomState> {
 
         // ---- tool round ----
         const calls = message.content.filter((b) => b.type === "tool_use");
-        const results: ToolResultBlockParam[] = [...turn.carried];
+        const results: ToolResultBlockParam[] = uniqueToolResults([...turn.carried]);
+        const handledCallIds = new Set<string>();
         const gated: PendingTool[] = [];
         const gatedNames = gatedFor(this.#policy());
         const docs = this.#docBuffer(turn.authorUid, turn.authorName);
 
         for (const call of calls) {
+          if (handledCallIds.has(call.id)) continue;
+          handledCallIds.add(call.id);
           entry.blocks.push({
             type: "tool",
             toolUseId: call.id,
@@ -2678,7 +2721,7 @@ export class Room extends Agent<Env, RoomState> {
           return;
         }
 
-        this.#setConvo([...this.#convo(), { role: "user", content: results }]);
+        this.#setConvo([...this.#convo(), { role: "user", content: uniqueToolResults(results) }]);
         this.#setTurn({ ...turn, carried: [] });
       }
 
@@ -2798,7 +2841,7 @@ export class Room extends Agent<Env, RoomState> {
     const entry = this.#getEntry(turn.entryId);
     if (!entry || entry.kind !== "agent") return;
 
-    const results: ToolResultBlockParam[] = [...turn.carried];
+    const results: ToolResultBlockParam[] = uniqueToolResults([...turn.carried]);
     const docs = this.#docBuffer(turn.authorUid, turn.authorName);
     for (const { p, approved } of verdicts) {
       let outcome: ToolOutcome;
@@ -2838,7 +2881,7 @@ export class Room extends Agent<Env, RoomState> {
     docs.flush();
     this.#patch(entry);
 
-    this.#setConvo([...this.#convo(), { role: "user", content: results }]);
+    this.#setConvo([...this.#convo(), { role: "user", content: uniqueToolResults(results) }]);
     this.#setTurn({ ...turn, carried: [] });
     this.setState({ ...this.state, status: "thinking", pending: [] });
 
