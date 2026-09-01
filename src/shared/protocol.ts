@@ -254,7 +254,33 @@ export type ServerMsg =
    * connection: which repositories someone can see is their business, not the
    * room's, so this is never broadcast.
    */
-  | { t: "github.repos"; repos: GithubRepo[] };
+  | { t: "github.repos"; repos: GithubRepo[]; source?: GithubRepoSource };
+
+/**
+ * Where a repository list came from, so the picker can say so.
+ *
+ * A short list has several very different causes — the App is installed on
+ * one account, an organisation never installed it, a whole installation went
+ * unreadable — and they are indistinguishable from the list itself. Naming
+ * the route and the accounts it covered turns "my repository is missing" from
+ * a guess into something checkable.
+ */
+export type GithubRepoSource = {
+  /**
+   * `installations` enumerated every installation the account belongs to.
+   * `account` is the plain per-account listing, used when this deployment's
+   * credentials cannot enumerate installations at all. `installation` is the
+   * single stored installation a room falls back to when nobody has
+   * authorised an account.
+   */
+  via: "installations" | "account" | "installation";
+  /** Which accounts' installations answered, for the `installations` route. */
+  accounts?: string[];
+  /** Installations that refused, and so may be hiding repositories. */
+  unreadable?: number;
+  /** Why the wider route was unavailable, when one was tried and failed. */
+  note?: string;
+};
 
 export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */

@@ -14,6 +14,7 @@ import {
   type AgentBlock,
   type Entry,
   type GithubRepo,
+  type GithubRepoSource,
   type GithubStatus,
   type InviteSummary,
   type MemberSummary,
@@ -2073,6 +2074,7 @@ export function WorkspacePanel({
   github,
   repos,
   reposLoading,
+  repoSource,
   onAttach,
   onDetach,
   onConnectGithub,
@@ -2088,6 +2090,7 @@ export function WorkspacePanel({
   github: GithubStatus;
   repos: GithubRepo[] | null;
   reposLoading: boolean;
+  repoSource: GithubRepoSource | null;
   onAttach: (allowWrites: boolean) => void;
   onDetach: () => void;
   onConnectGithub: (repo: string) => void;
@@ -2320,6 +2323,34 @@ export function WorkspacePanel({
                               {filtered.length > 50 && (
                                 <p className="field-note">
                                   Showing the first 50. Use the search box to narrow it down.
+                                </p>
+                              )}
+                              {repoSource && (
+                                <p className="field-note">
+                                  {repoSource.via === "installations" ? (
+                                    <>
+                                      Found through {repoSource.accounts?.length ?? 0} GitHub App
+                                      {(repoSource.accounts?.length ?? 0) === 1 ? " installation" : " installations"}
+                                      {repoSource.accounts && repoSource.accounts.length > 0
+                                        ? ` (${repoSource.accounts.join(", ")})`
+                                        : ""}
+                                      . A private repository owned by someone else appears only once
+                                      they have installed this app and granted it that repository.
+                                      {repoSource.unreadable
+                                        ? ` ${repoSource.unreadable} installation(s) refused, and may be hiding more.`
+                                        : ""}
+                                    </>
+                                  ) : repoSource.via === "account" ? (
+                                    <>
+                                      Listed from your account directly, because this server could not
+                                      enumerate app installations{repoSource.note ? `: ${repoSource.note}` : ""}.
+                                    </>
+                                  ) : (
+                                    <>
+                                      Listed through this room's single app installation, which sees only
+                                      the repositories that one installation was granted.
+                                    </>
+                                  )}
                                 </p>
                               )}
                             </>

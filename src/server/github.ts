@@ -1533,12 +1533,17 @@ export async function listUserInstallationRepos(
 export async function listAllAccessibleRepos(
   token: string,
   fetchImpl?: typeof fetch,
-): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; repos: UserRepo[]; accounts: string[]; unreadable: number }
+  | { ok: false; error: string }
+> {
   const installations = await listUserInstallations(token, fetchImpl);
   if (!installations.ok) return installations;
 
   const seen = new Set<string>();
   const repos: UserRepo[] = [];
+  const accounts: string[] = [];
+  let unreadable = 0;
   let lastError: string | null = null;
 
   for (const installation of installations.installations) {
@@ -1548,8 +1553,10 @@ export async function listAllAccessibleRepos(
       // organisation can suspend an installation, or revoke this person's
       // access to it, while every other one still answers perfectly.
       lastError = res.error;
+      unreadable++;
       continue;
     }
+    accounts.push(installation.accountLogin);
     for (const repo of res.repos) {
       if (seen.has(repo.fullName)) continue;
       seen.add(repo.fullName);
@@ -1560,5 +1567,5 @@ export async function listAllAccessibleRepos(
   // Nothing readable anywhere, and a reason for it, is a failure worth
   // reporting rather than an empty list the person cannot explain.
   if (repos.length === 0 && lastError !== null) return { ok: false, error: lastError };
-  return { ok: true, repos };
+  return { ok: true, repos, accounts, unreadable };
 }

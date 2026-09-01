@@ -1990,7 +1990,11 @@ export class Room extends Agent<Env, RoomState> {
       if (res.ok) {
         // Sent to this one connection, never broadcast — see the comment on
         // the "github.repos" ServerMsg case.
-        connection.send(JSON.stringify({ t: "github.repos", repos: res.repos } satisfies ServerMsg));
+        connection.send(JSON.stringify({
+          t: "github.repos",
+          repos: res.repos,
+          source: { via: "installations", accounts: res.accounts, unreadable: res.unreadable },
+        } satisfies ServerMsg));
         return;
       }
 
@@ -2000,7 +2004,13 @@ export class Room extends Agent<Env, RoomState> {
       // `repo` scope and is bounded by the account rather than by an App.
       const fallback = await listUserRepos(authorized.account.token);
       if (fallback.ok) {
-        connection.send(JSON.stringify({ t: "github.repos", repos: fallback.repos } satisfies ServerMsg));
+        // The reason the wider route was unavailable travels with the list.
+        // Falling back silently is what made a short list unexplainable.
+        connection.send(JSON.stringify({
+          t: "github.repos",
+          repos: fallback.repos,
+          source: { via: "account", note: res.error },
+        } satisfies ServerMsg));
         return;
       }
       this.#refuse(connection, res.error);
@@ -2028,7 +2038,11 @@ export class Room extends Agent<Env, RoomState> {
         this.#refuse(connection, res.error);
         return;
       }
-      connection.send(JSON.stringify({ t: "github.repos", repos: res.repos } satisfies ServerMsg));
+      connection.send(JSON.stringify({
+        t: "github.repos",
+        repos: res.repos,
+        source: { via: "installation" },
+      } satisfies ServerMsg));
       return;
     }
 

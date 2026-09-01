@@ -6,6 +6,7 @@ import {
   type ClientMsg,
   type Entry,
   type GithubRepo,
+  type GithubRepoSource,
   type InviteSummary,
   type MemberSummary,
   type DocumentRevision,
@@ -116,6 +117,8 @@ export function RoomView({
   // The repository list for the GitHub picker. `null` means "not fetched
   // yet"; an array means fetched, possibly empty.
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
+  // Where the list above came from, so the picker can explain a short one.
+  const [repoSource, setRepoSource] = useState<GithubRepoSource | null>(null);
   const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("hidden");
   const [showDocument, setShowDocument] = useState(false);
@@ -256,6 +259,7 @@ export function RoomView({
         break;
       case "github.repos":
         setRepos(msg.repos);
+        setRepoSource(msg.source ?? null);
         setReposLoading(false);
         break;
     }
@@ -897,6 +901,7 @@ export function RoomView({
           github={state.github}
           repos={repos}
           reposLoading={reposLoading}
+          repoSource={repoSource}
           onAttach={attachWorkspace}
           onDetach={detachWorkspace}
           onConnectGithub={connectGithub}
