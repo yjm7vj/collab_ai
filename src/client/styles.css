@@ -2777,6 +2777,75 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 .wf-empty h3 { margin: 0 0 8px; }
 .wf-empty p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-dim); }
 
+/* ------------------------------------------------------- describe-it chat */
+
+.wf-chat-open { margin-bottom: 4px; }
+
+.wfc-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: var(--bg);
+}
+
+.wfc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.wfc-head h3 { margin: 0; font-size: 15px; }
+.wfc-head-acts { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.wfc-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  min-height: 0;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 16px 18px;
+  gap: 12px;
+}
+
+.wfc-turns { overflow-y: auto; display: grid; align-content: start; gap: 12px; min-height: 0; }
+.wfc-turn { display: grid; gap: 3px; }
+.wfc-turn p { margin: 0; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.wfc-turn-who { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.wfc-turn-user { justify-items: end; text-align: right; }
+.wfc-turn-pending p { color: var(--ink-faint); }
+.wfc-error {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--danger, var(--warn));
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.wfc-proposal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+}
+.wfc-proposal b { font-size: 13px; }
+.wfc-proposal .wf-warnings { margin-top: 8px; }
+
+.wfc-composer { display: flex; gap: 8px; align-items: flex-end; }
+.wfc-composer textarea { flex: 1 1 auto; width: 100%; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; }
+.wfc-composer button { flex-shrink: 0; min-height: 44px; }
+
 /* The header chip that says which drawn workflow is live. */
 .wf-chip {
   min-height: 28px;

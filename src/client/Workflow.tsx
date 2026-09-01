@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MODELS, modelInfo } from "../shared/models";
+import type { WorkflowChatTurn } from "../shared/protocol";
 import {
   CARD,
   GRAPH_LIMITS,
@@ -57,6 +58,13 @@ type Selection =
   | { kind: "edge"; id: string }
   | { kind: "none" };
 
+export type WorkflowChatState = {
+  turns: WorkflowChatTurn[];
+  pending: boolean;
+  error: string | null;
+  proposal: { graph: WorkflowGraph; note: string; warnings: string[] } | null;
+};
+
 export function WorkflowPanel({
   graph,
   active,
@@ -65,6 +73,9 @@ export function WorkflowPanel({
   busy,
   onApply,
   onClose,
+  chat,
+  onChatSend,
+  onChatReset,
 }: {
   graph: WorkflowGraph;
   /** Whether the room is currently running on this graph. */
@@ -75,12 +86,18 @@ export function WorkflowPanel({
   busy: boolean;
   onApply: (graph: WorkflowGraph, useCustom: boolean) => void;
   onClose: () => void;
+  /** State of the "describe your workflow" chat, lived above this panel — a
+   *  reply arrives over the room's socket, which this panel does not own. */
+  chat: WorkflowChatState;
+  onChatSend: (text: string) => void;
+  onChatReset: () => void;
 }) {
   const [draft, setDraft] = useState<WorkflowGraph>(graph);
   const [useCustom, setUseCustom] = useState(active);
   const [selected, setSelected] = useState<Selection>({ kind: "none" });
   /** Source node id while a link is being drawn, else null. */
   const [linking, setLinking] = useState<string | null>(null);
+  const [showChat, setShowChat] = useState(false);
 
   const surfaceRef = useRef<HTMLDivElement>(null);
   /** Live drag, kept in a ref: it changes on every pointer move. */
@@ -341,13 +358,14 @@ export function WorkflowPanel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (linking) setLinking(null);
+      if (showChat) setShowChat(false);
+      else if (linking) setLinking(null);
       else if (selected.kind !== "none") setSelected({ kind: "none" });
       else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [linking, selected.kind, onClose]);
+  }, [showChat, linking, selected.kind, onClose]);
 
   /* --------------------------------------------------------------- render */
 
@@ -419,6 +437,19 @@ export function WorkflowPanel({
       <div className="wf-body">
         {/* ------------------------------------------------------- left rail */}
         <aside className="wf-rail" aria-label="Workflow tools">
+          {canEdit && (
+            <section>
+              <h3>Describe it instead</h3>
+              <button className="wf-add wf-chat-open" onClick={() => setShowChat(true)}>
+                Describe your workflow
+              </button>
+              <p className="wf-note">
+                Tell an assistant what you want the team to do, and it drafts a graph here for
+                you to check and adjust.
+              </p>
+            </section>
+          )}
+
           <section>
             <h3>Start from</h3>
             <div className="wf-presets">
@@ -734,6 +765,159 @@ export function WorkflowPanel({
             </div>
           )}
         </aside>
+      </div>
+
+      {showChat && (
+        <WorkflowChatPanel
+          chat={chat}
+          busy={busy}
+          onSend={onChatSend}
+          onUseDraft={(g) => {
+            load(g);
+            setShowChat(false);
+          }}
+          onReset={onChatReset}
+          onClose={() => setShowChat(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------- describe chat */
+
+/**
+ * "Describe your workflow" — a chat overlay that drafts a graph, and hands it
+ * to the canvas underneath rather than applying anything itself.
+ *
+ * Nothing here writes to the room. `onUseDraft` puts the proposal on the same
+ * `draft` the manual editor uses, so Apply, Revert, and every warning in
+ * `graphWarnings` behave exactly as if the graph had been drawn by hand — this
+ * screen only ever proposes a starting point to react to.
+ */
+function WorkflowChatPanel({
+  chat,
+  busy,
+  onSend,
+  onUseDraft,
+  onReset,
+  onClose,
+}: {
+  chat: WorkflowChatState;
+  busy: boolean;
+  onSend: (text: string) => void;
+  onUseDraft: (graph: WorkflowGraph) => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [chat.turns.length, chat.pending]);
+
+  const submit = () => {
+    const trimmed = text.trim();
+    if (!trimmed || chat.pending || busy) return;
+    onSend(trimmed);
+    setText("");
+  };
+
+  return (
+    <div className="wfc-overlay" role="dialog" aria-label="Describe your workflow">
+      <header className="wfc-head">
+        <div>
+          <h3>Describe your workflow</h3>
+          <p className="wf-sub">
+            Say what the team should do. Answer if it asks one question back, then check the
+            draft it puts on the canvas.
+          </p>
+        </div>
+        <div className="wfc-head-acts">
+          {chat.turns.length > 0 && (
+            <button onClick={onReset} disabled={chat.pending}>
+              Start over
+            </button>
+          )}
+          <button className="icon" onClick={onClose} aria-label="Back to canvas">
+            ✕
+          </button>
+        </div>
+      </header>
+
+      {busy && (
+        <div className="notice wf-notice">
+          The agent is working, so a draft cannot be applied yet — you can still describe one.
+        </div>
+      )}
+
+      <div className="wfc-body">
+        <div className="wfc-turns" ref={listRef}>
+          {chat.turns.length === 0 && !chat.pending && (
+            <p className="wf-note">
+              For example: “A lead that plans posts, a researcher that gathers sources, and an
+              editor that polishes the final copy.”
+            </p>
+          )}
+          {chat.turns.map((t, i) => (
+            <div key={i} className={`wfc-turn wfc-turn-${t.role}`}>
+              <span className="wfc-turn-who">{t.role === "user" ? "You" : "Assistant"}</span>
+              <p>{t.text}</p>
+            </div>
+          ))}
+          {chat.pending && (
+            <div className="wfc-turn wfc-turn-assistant wfc-turn-pending">
+              <span className="wfc-turn-who">Assistant</span>
+              <p>Thinking…</p>
+            </div>
+          )}
+          {chat.error && <p className="wfc-error">{chat.error}</p>}
+        </div>
+
+        {chat.proposal && (
+          <div className="wfc-proposal">
+            <div>
+              <b>{chat.proposal.note}</b>
+              <p className="wf-note">{summarizeGraph(chat.proposal.graph)}</p>
+              {chat.proposal.warnings.length > 0 && (
+                <ul className="wf-warnings">
+                  {chat.proposal.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <button className="primary" onClick={() => onUseDraft(chat.proposal!.graph)}>
+              Put this on the canvas
+            </button>
+          </div>
+        )}
+
+        <form
+          className="wfc-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <textarea
+            rows={3}
+            value={text}
+            placeholder="Describe the team you want…"
+            disabled={chat.pending}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <button className="primary" type="submit" disabled={!text.trim() || chat.pending}>
+            {chat.pending ? "Sending…" : "Send"}
+          </button>
+        </form>
       </div>
     </div>
   );

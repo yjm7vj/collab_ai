@@ -254,7 +254,9 @@ export type ServerMsg =
    * connection: which repositories someone can see is their business, not the
    * room's, so this is never broadcast.
    */
-  | { t: "github.repos"; repos: GithubRepo[]; source?: GithubRepoSource };
+  | { t: "github.repos"; repos: GithubRepo[]; source?: GithubRepoSource }
+  /** A reply from the "describe your workflow" chat. Sent only to the asker. */
+  | { t: "workflow.chat"; reply: WorkflowChatReply };
 
 /**
  * Where a repository list came from, so the picker can say so.
@@ -265,6 +267,21 @@ export type ServerMsg =
  * the route and the accounts it covered turns "my repository is missing" from
  * a guess into something checkable.
  */
+/** One turn of the "describe your workflow" chat. */
+export type WorkflowChatTurn = { role: "user" | "assistant"; text: string };
+
+/**
+ * What the assistant sends back for one chat turn.
+ *
+ * `graph` always carries an already-`sanitizeGraph`d graph — the client never
+ * receives anything from this path that the server has not already checked by
+ * the same rule an Apply would be checked by.
+ */
+export type WorkflowChatReply =
+  | { kind: "question"; text: string }
+  | { kind: "graph"; graph: WorkflowGraph; note: string; warnings: string[] }
+  | { kind: "error"; message: string };
+
 export type GithubRepoSource = {
   /**
    * `installations` enumerated every installation the account belongs to.
@@ -331,7 +348,14 @@ export type ClientMsg =
   /** List the repositories the authorising member can reach. Answered with "github.repos". */
   | { t: "github.repos" }
   /** Forget this room's stored GitHub authorisation. Owners and admins only. */
-  | { t: "github.signout" };
+  | { t: "github.signout" }
+  /**
+   * One turn of describing a workflow in prose, for the assistant to draft as a
+   * graph. `turns` is the whole conversation so far, ending with the new user
+   * message — the room holds none of it, so the client is the one source of
+   * truth for a conversation that never touches `RoomState`.
+   */
+  | { t: "workflow.chat"; turns: WorkflowChatTurn[] };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

@@ -13,9 +13,10 @@ import {
   type RoomState,
   type ServerMsg,
   type Vote,
+  type WorkflowChatTurn,
 } from "../shared/protocol";
 import { modelInfo, type RoomSettings } from "../shared/models";
-import { delegatesOf, leadOf, type WorkflowGraph } from "../shared/workflow";
+import { delegatesOf, leadOf, summarizeGraph, type WorkflowGraph } from "../shared/workflow";
 import { asRole, can, canSeeFileContents, type Role } from "../shared/access";
 import type { AccessPolicy } from "../shared/access";
 import {
@@ -104,6 +105,12 @@ export function RoomView({
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const [showPermissions, setShowPermissions] = useState(false);
   const [showWorkflow, setShowWorkflow] = useState(false);
+  const [workflowChat, setWorkflowChat] = useState<{
+    turns: WorkflowChatTurn[];
+    pending: boolean;
+    error: string | null;
+    proposal: { graph: WorkflowGraph; note: string; warnings: string[] } | null;
+  }>({ turns: [], pending: false, error: null, proposal: null });
   const [renaming, setRenaming] = useState(false);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
   const [showInvites, setShowInvites] = useState(false);
@@ -262,6 +269,32 @@ export function RoomView({
         setRepoSource(msg.source ?? null);
         setReposLoading(false);
         break;
+      case "workflow.chat":
+        setWorkflowChat((prev) => {
+          const reply = msg.reply;
+          if (reply.kind === "error") {
+            return { ...prev, pending: false, error: reply.message };
+          }
+          if (reply.kind === "question") {
+            return {
+              ...prev,
+              pending: false,
+              error: null,
+              turns: [...prev.turns, { role: "assistant", text: reply.text }],
+            };
+          }
+          return {
+            ...prev,
+            pending: false,
+            error: null,
+            proposal: { graph: reply.graph, note: reply.note, warnings: reply.warnings },
+            turns: [
+              ...prev.turns,
+              { role: "assistant", text: `${reply.note} — ${summarizeGraph(reply.graph)}` },
+            ],
+          };
+        });
+        break;
     }
   }, []);
 
@@ -325,6 +358,22 @@ export function RoomView({
   const applyWorkflow = useCallback(
     (graph: WorkflowGraph, useCustom: boolean) => send({ t: "workflow", graph, useCustom }),
     [send],
+  );
+  const sendWorkflowChat = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setWorkflowChat((prev) => {
+        const turns = [...prev.turns, { role: "user" as const, text: trimmed }];
+        send({ t: "workflow.chat", turns });
+        return { ...prev, turns, pending: true, error: null };
+      });
+    },
+    [send],
+  );
+  const resetWorkflowChat = useCallback(
+    () => setWorkflowChat({ turns: [], pending: false, error: null, proposal: null }),
+    [],
   );
   const compactNow = useCallback(() => send({ t: "compact" }), [send]);
   const openRevisionHistory = useCallback((uid: string) => send({ t: "revision.list", uid }), [send]);
@@ -877,6 +926,9 @@ export function RoomView({
             setShowWorkflow(false);
           }}
           onClose={() => setShowWorkflow(false)}
+          chat={workflowChat}
+          onChatSend={sendWorkflowChat}
+          onChatReset={resetWorkflowChat}
         />
       )}
 

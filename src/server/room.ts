@@ -62,6 +62,7 @@ import {
   sanitizeSettings,
   type RoomSettings,
 } from "../shared/models";
+import { proposeWorkflow, sanitizeChatTurns } from "./workflowChat";
 import {
   DEFAULT_GRAPH,
   delegatesOf,
@@ -1308,6 +1309,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onPolicy(connection, msg.policy);
       case "workflow":
         return this.#onWorkflow(connection, msg.graph, msg.useCustom);
+      case "workflow.chat":
+        return this.#onWorkflowChat(connection, msg.turns);
       case "compact":
         return this.#onCompact(connection);
       case "invite.create":
@@ -1435,6 +1438,41 @@ export class Room extends Agent<Env, RoomState> {
         ? `${name} changed the workflow — ${describeGraph(graph)}`
         : `${name} saved the workflow and switched the room back to ${workflow}`,
     );
+  }
+
+  /**
+   * Draft a graph from a chat description, or ask one clarifying question.
+   *
+   * Deliberately outside the settle-when-idle rule `#onWorkflow` follows: this
+   * never touches `RoomState`, only a proposal sent back to whoever asked, so
+   * there is nothing here for a concurrent turn to race. Gated on the same
+   * `workflow` capability as drawing the graph by hand, since that is exactly
+   * what this does on someone's behalf.
+   */
+  async #onWorkflowChat(connection: Connection, incoming: unknown) {
+    if (
+      !this.#allow(
+        connection,
+        "workflow",
+        "You need to be an editor or above to describe a workflow.",
+      )
+    )
+      return;
+
+    const turns = sanitizeChatTurns(incoming);
+    if (turns.length === 0) {
+      connection.send(
+        JSON.stringify({
+          t: "workflow.chat",
+          reply: { kind: "error", message: "Describe what you want the team to do first." },
+        } satisfies ServerMsg),
+      );
+      return;
+    }
+
+    const model = this.#settings().agentModel;
+    const { reply } = await proposeWorkflow(this.#config(), model, turns);
+    connection.send(JSON.stringify({ t: "workflow.chat", reply } satisfies ServerMsg));
   }
 
   /**
