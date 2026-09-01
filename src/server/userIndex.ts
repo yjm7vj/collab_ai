@@ -698,5 +698,15 @@ export class UserIndex extends DurableObject<Env> {
     this.#sql(`DELETE FROM rooms WHERE deleted = 1 AND updated_at < ?`, cutoff);
     this.#sql(`DELETE FROM projects WHERE deleted = 1 AND updated_at < ?`, cutoff);
     this.#sql(`DELETE FROM workflows WHERE deleted = 1 AND updated_at < ?`, cutoff);
+    this.#sql(`DELETE FROM skills WHERE deleted = 1 AND updated_at < ?`, cutoff);
+    // Bodies are keyed by content and shared between refs, so one cannot be
+    // dropped with the row that removed it — another ref may still point at the
+    // same hash. Sweeping by "nothing live references this" is the only correct
+    // rule, and it runs here rather than on delete so a body outlives a
+    // tombstone that might still be reversed by a merge.
+    this.#sql(
+      `DELETE FROM skill_bodies
+        WHERE hash NOT IN (SELECT hash FROM skills WHERE deleted = 0)`,
+    );
   }
 }
