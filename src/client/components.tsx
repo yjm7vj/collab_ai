@@ -2195,10 +2195,17 @@ export function WorkspacePanel({
                       no private key, no app installation.
                     </p>
                   </>
-                ) : github.app && !github.installed ? (
+                ) : github.app && !github.installed && !github.authorized ? (
                   // GitHub App installation is preferred whenever the app is
-                  // configured, even if this room still has an older OAuth
-                  // authorization stored.
+                  // configured — but only while nothing is authorised yet.
+                  // Preferring it unconditionally stranded any deployment
+                  // that has both configured and an App nobody can install:
+                  // installing on a repository needs admin on it, so a
+                  // collaborator with push and no more would authorise
+                  // successfully and still be shown this button, with the
+                  // repositories they had just granted access to nowhere in
+                  // sight. An authorization that exists is never worse than
+                  // one being asked for.
                   <>
                     <p className="field-note">
                       Connect the HuddleAI GitHub App to choose from your private and public repositories.
@@ -2210,9 +2217,12 @@ export function WorkspacePanel({
                       The app uses the installation only for repositories you grant it, and changes still require room approval.
                     </p>
                   </>
-                ) : !github.app && github.oauth && !github.authorized ? (
+                ) : github.oauth && !github.authorized ? (
                   // OAuth is configured but nobody here has authorised yet —
-                  // one button starts the fallback round trip.
+                  // one button starts the round trip. Reached now whether or
+                  // not an App is also configured: the branch above hands
+                  // over once it has an uninstalled App and no
+                  // authorization, so this is the offer that remains.
                   <>
                     <p className="field-note">
                       Connect your GitHub account, then pick a repository from the list. Works in any
