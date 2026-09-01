@@ -516,45 +516,60 @@ export default {
 
           if (githubConfigured(env)) {
             if (!fetched.ok) return new Response(fetched.error, { status: 502 });
+
+            // Recovering an existing App installation is opportunistic. The
+            // token was stored above and the room is connected either way;
+            // all this can do is save someone an install round trip.
+            //
+            // It cannot always be attempted. /user/installations answers only
+            // to a GitHub App user-to-server token, so a deployment whose
+            // OAuth credentials belong to a classic OAuth App is refused here
+            // every time, for every account — and failing the connect on that
+            // made the OAuth path unusable on any deployment that also has an
+            // App configured. So a listing that cannot be read now means
+            // "nothing to recover" rather than an error. The cost is that a
+            // transient GitHub failure quietly skips the shortcut instead of
+            // reporting itself, which is the right way round for a step that
+            // is only ever a shortcut.
             const found = await listUserInstallations(exchanged.accessToken);
-            if (!found.ok) return new Response(found.error, { status: 502 });
+            if (found.ok) {
+              const ownInstallation = found.installations.find(
+                (installation) => installation.targetType === "User" && installation.accountId === fetched.profile.providerId,
+              );
+              const installation = ownInstallation ?? (found.installations.length === 1 ? found.installations[0] : undefined);
 
-            const ownInstallation = found.installations.find(
-              (installation) => installation.targetType === "User" && installation.accountId === fetched.profile.providerId,
-            );
-            const installation = ownInstallation ?? (found.installations.length === 1 ? found.installations[0] : undefined);
-
-            if (installation) {
-              const installed = await stub.fetch("https://room/github-installed", {
-                method: "POST",
-                body: JSON.stringify({ installationId: installation.id, uid: claims.uid }),
-                headers: {
-                  "content-type": "application/json",
-                  "x-internal-auth": env.ROOM_SECRET,
-                },
-              });
-              if (!installed.ok) {
-                return new Response(installed.body, { status: installed.status, headers: installed.headers });
+              if (installation) {
+                const installed = await stub.fetch("https://room/github-installed", {
+                  method: "POST",
+                  body: JSON.stringify({ installationId: installation.id, uid: claims.uid }),
+                  headers: {
+                    "content-type": "application/json",
+                    "x-internal-auth": env.ROOM_SECRET,
+                  },
+                });
+                if (!installed.ok) {
+                  return new Response(installed.body, { status: installed.status, headers: installed.headers });
+                }
+                return Response.redirect(`${url.origin}/?app=1&gh=installed#/r/${claims.rid}`, 302);
               }
-              return Response.redirect(`${url.origin}/?app=1&gh=installed#/r/${claims.rid}`, 302);
-            }
 
-            if (found.installations.length > 1) {
-              return new Response(
-                "More than one organization installation is available. Install the app on your personal account or select one organization and try again.",
-                { status: 409 },
+              if (found.installations.length > 1) {
+                return new Response(
+                  "More than one organization installation is available. Install the app on your personal account or select one organization and try again.",
+                  { status: 409 },
+                );
+              }
+
+              const slug = await appSlug({
+                appId: env.GITHUB_APP_ID,
+                privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
+              });
+              if (!slug.ok) return new Response(slug.error, { status: 502 });
+              return Response.redirect(
+                `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${encodeURIComponent(state)}`,
+                302,
               );
             }
-
-            const slug = await appSlug({
-              appId: env.GITHUB_APP_ID,
-              privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
-            });
-            if (!slug.ok) return new Response(slug.error, { status: 502 });
-            return Response.redirect(
-              `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${encodeURIComponent(state)}`,
-              302,
-            );
           }
 
           return Response.redirect(`${url.origin}/?gh=connected#/r/${claims.rid}`, 302);
