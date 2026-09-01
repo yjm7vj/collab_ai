@@ -99,8 +99,11 @@ describe("skills library sync", () => {
     });
     expect(stale.skills[0]!.description).toBe("Current.");
 
+    // Deliberately ahead of the clock: the server clamps it to its own `now`,
+    // which is still at or after `base`, so the update wins on merit rather
+    // than on skew.
     const fresh = await sync(identity, {
-      skills: [skill("unlazy", { description: "Updated.", addedAt: base - 1, hash: OTHER_HASH })],
+      skills: [skill("unlazy", { description: "Updated.", addedAt: base + 5_000, hash: OTHER_HASH })],
     });
     expect(fresh.skills[0]!.description).toBe("Updated.");
     expect(fresh.skills[0]!.hash).toBe(OTHER_HASH);
