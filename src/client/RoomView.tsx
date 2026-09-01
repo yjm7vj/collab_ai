@@ -1061,6 +1061,15 @@ export function RoomView({
                     Workspace
                   </button>
                 )}
+                {mayPolicy && (
+                  <button
+                    type="button"
+                    className="chat-action"
+                    onClick={() => setShowIde(true)}
+                  >
+                    Code workspace
+                  </button>
+                )}
               </>
             }
             onSend={say}
