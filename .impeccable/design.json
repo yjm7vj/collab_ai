@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-28T20:55:34.953Z",
+  "generatedAt": "2026-09-01T03:57:49.427069+00:00",
   "title": "Design System: collab_ai",
   "extensions": {
     "colorMeta": {
@@ -198,29 +198,49 @@
         "displayName": "Stat",
         "purpose": "The one numeric readout on the landing — the token gauge value. 800 weight, clamp(1.9rem, 3vw, 2.6rem)."
       },
-      "title": {
-        "displayName": "Title",
-        "purpose": "App gate/sign-in headline and modal h2 (Operate ramp). 600 weight, 22px."
-      },
       "lead": {
         "displayName": "Lead",
         "purpose": "The paragraph under the landing hero headline. clamp(1.05rem, 1.35vw, 1.28rem)/1.5, max 46ch."
       },
-      "body-landing": {
-        "displayName": "Body (Persuade)",
-        "purpose": "Landing default reading size, set on .lp itself. 17px/1.6, max 58ch. Does not replace the app's 15px body — both ramps are live."
-      },
       "body": {
-        "displayName": "Body (Operate)",
-        "purpose": "Default reading size for chat text and prose in the app shell (15px/1.55)."
+        "displayName": "Body",
+        "purpose": "The app shell's real working size (13px): list-row titles, input text, panel prose, banners, document bodies. 37 rules."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Uppercase section kickers and field labels (11-13px, 700 weight, 0.06-0.08em tracking). The one step shared verbatim by both ramps."
+        "purpose": "Uppercase section kickers, modal section headings, panel-bar captions (11px/700, 0.06-0.08em). Identical in both modes."
       },
-      "mono": {
-        "displayName": "Mono role",
-        "purpose": "Tool names, diffs, doc bodies, revision stamps — same Inter face, smaller and quieter, no separate monospace font. The landing's diff <pre> takes font: inherit for the same reason."
+      "close": {
+        "displayName": "Close",
+        "purpose": "The landing's closing call to action only, set below the hero so the page does not end louder than it began."
+      },
+      "body-lg": {
+        "displayName": "Body Large",
+        "purpose": "The landing's default reading size (17px/1.6, max 58ch), set on .lp itself. Unused in the app shell; doubles as a glyph size."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Landing button and close-form input text (16px/600); modal and screen h2 headings in the app. Doubles as a glyph size."
+      },
+      "ui": {
+        "displayName": "UI",
+        "purpose": "Text inside the landing's demo panels; in the app, the sidebar project row, one step above the rooms nested under it (14px)."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "The app's most-used size (12px, 64 rules): chips, field notes, timestamps, counts, tool names, diff text. Tabular figures via [data-num]."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "Smallest labels only (10px): topbar status word, settings menu captions, IDE file-list heading."
+      },
+      "glyph-sm": {
+        "displayName": "Glyph Small",
+        "purpose": "Sizes a Unicode character used as an icon, not text (15px, line-height 1). Not part of the reading hierarchy."
+      },
+      "glyph-lg": {
+        "displayName": "Glyph Large",
+        "purpose": "The largest glyph-as-icon trigger (18px, line-height 1). Not part of the reading hierarchy."
       }
     },
     "shadows": [
@@ -372,44 +392,28 @@
       "css": ".ds-lp-votes { display: inline-flex; gap: 10px; } .ds-lp-vote { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 13px; border-radius: 7px; border: 1px solid rgba(154,192,240,0.2); background: rgba(154,192,240,0.07); color: #eaf2ff; font: 600 14px/1 Inter, ui-sans-serif, system-ui, sans-serif; cursor: pointer; transition: border-color 180ms cubic-bezier(0.16,1,0.3,1), background 180ms cubic-bezier(0.16,1,0.3,1), color 180ms cubic-bezier(0.16,1,0.3,1); } .ds-lp-vote:hover { background: rgba(154,192,240,0.14); } .ds-lp-vote[data-cast=\"true\"][data-kind=\"approve\"] { border-color: #6bc48c; color: #6bc48c; } .ds-lp-vote[data-muted=\"true\"] { opacity: 0.45; }"
     },
     {
-      "name": "Landing Primary Button (on stage)",
-      "kind": "button",
-      "refersTo": "button-landing-primary-on-stage",
-      "description": "The landing's committed action, on a stage act. 48px tall, 8px radius, lifts 1px on hover — the only control in the system that moves.",
-      "html": "<button class=\"ds-lp-btn-primary\">Create a room</button>",
-      "css": ".ds-lp-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 48px; padding: 0 22px; border-radius: 8px; border: 1px solid #5aa7ff; background: #5aa7ff; color: #06101f; font: 600 16px/1 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; transition: background 160ms cubic-bezier(0.16,1,0.3,1), border-color 160ms cubic-bezier(0.16,1,0.3,1), transform 160ms cubic-bezier(0.16,1,0.3,1); } .ds-lp-btn-primary:hover { background: #8ac2ff; border-color: #8ac2ff; transform: translateY(-1px); } .ds-lp-btn-primary:active { transform: translateY(0); } .ds-lp-btn-primary:focus-visible { outline: 2px solid #5aa7ff; outline-offset: 3px; border-radius: 6px; }"
-    },
-    {
-      "name": "Landing Ghost Button",
-      "kind": "button",
-      "refersTo": "button-landing-ghost",
-      "description": "The secondary action beside the primary, stage-only — it depends on a dark ground to read.",
-      "html": "<button class=\"ds-lp-btn-ghost\">See how it works</button>",
-      "css": ".ds-lp-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 48px; padding: 0 22px; border-radius: 8px; border: 1px solid rgba(154,192,240,0.2); background: transparent; color: #eaf2ff; font: 600 16px/1 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.01em; cursor: pointer; transition: background 160ms cubic-bezier(0.16,1,0.3,1), border-color 160ms cubic-bezier(0.16,1,0.3,1), transform 160ms cubic-bezier(0.16,1,0.3,1); } .ds-lp-btn-ghost:hover { background: rgba(154,192,240,0.07); border-color: #5aa7ff; transform: translateY(-1px); } .ds-lp-btn-ghost:focus-visible { outline: 2px solid #5aa7ff; outline-offset: 3px; border-radius: 6px; }"
-    },
-    {
-      "name": "Landing Demo Panel",
+      "name": "Status Pip",
       "kind": "custom",
-      "refersTo": "panel-landing",
-      "description": "The landing's signature container: a working demo of the real mechanism, 14px radius, border plus tint, no shadow. Its bar always carries the dashed Illustration chip.",
-      "html": "<div class=\"ds-lp-panel\"><div class=\"ds-lp-panel-bar\"><span class=\"ds-lp-panel-label\">Sample room<span class=\"ds-lp-synthetic\">Illustration</span></span><span class=\"ds-lp-presence\"><span class=\"ds-lp-dot\"></span>3 here</span></div><div class=\"ds-lp-panel-body\">Ana, Ravi and Mia typed at once. The agent got one message.</div></div>",
-      "css": ".ds-lp-panel { border: 1px solid #cddced; border-radius: 14px; background: #ffffff; overflow: hidden; font: 400 14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; color: #1e2636; } .ds-lp-panel-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #cddced; background: #f6faff; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #617085; } .ds-lp-panel-label { display: inline-flex; align-items: center; gap: 9px; } .ds-lp-synthetic { padding: 1px 8px; border: 1px dashed #7b8a9b; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: #617085; } .ds-lp-presence { display: inline-flex; align-items: center; gap: 7px; text-transform: none; letter-spacing: 0; font-weight: 600; } .ds-lp-dot { width: 6px; height: 6px; border-radius: 999px; background: #297e50; } .ds-lp-panel-body { padding: 18px; }"
+      "refersTo": "pip",
+      "description": "The 7px status dot, shared by tool rows, member presence, and the workspace card. Never the only carrier of a state.",
+      "html": "<span class=\"ds-pip ds-pip-ok\"></span><span class=\"ds-pip\"></span>",
+      "css": ".ds-pip { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ink-faint); margin-right: 8px; } .ds-pip-ok { background: var(--ok); }"
     },
     {
-      "name": "Illustration Chip",
-      "kind": "chip",
-      "refersTo": "chip-illustration",
-      "description": "The dashed pill every landing demo wears. No evidence exists, so a fabricated room labels itself — reusing the app's dashed cue for an unfilled slot.",
-      "html": "<span class=\"ds-lp-chip-illustration\">Illustration</span>",
-      "css": ".ds-lp-chip-illustration { display: inline-flex; align-items: center; padding: 1px 8px; border: 1px dashed #7b8a9b; border-radius: 999px; font: 700 11px/1.6 Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: #617085; }"
+      "name": "Connected Workspace Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The workspace panel's connected state: pip and name left, write-access chip right, kind and online/offline beneath. Quiet when healthy; only degraded access takes colour.",
+      "html": "<div class=\"ds-wsconn\"><p class=\"ds-wsconn-head\"><span class=\"ds-pip ds-pip-ok\"></span><span class=\"ds-wsconn-name\">acme/widgets</span><span class=\"ds-chip ds-chip-warn\">Read-only</span></p><p class=\"ds-wsconn-meta\">GitHub repository · Online</p></div>",
+      "css": ".ds-wsconn { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 10px 12px; } .ds-wsconn-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; } .ds-wsconn-name { flex: 1 1 12ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; } .ds-wsconn-meta { margin: 4px 0 0; padding-left: 15px; font-size: 12px; color: var(--ink-faint); } .ds-chip { display: inline-flex; align-items: center; font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; } .ds-chip-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }"
     },
     {
-      "name": "Vote Control",
-      "kind": "button",
-      "refersTo": "button-landing-vote",
-      "description": "The landing's stage-bound vote button. Once cast, the chosen option takes the semantic border and text; the unchosen one rests at 0.45 — the No-Fade Rule's one documented carve-out.",
-      "html": "<span class=\"ds-lp-votes\"><button class=\"ds-lp-vote\" data-cast=\"true\" data-kind=\"approve\">Approve</button><button class=\"ds-lp-vote\" data-muted=\"true\">Deny</button></span>",
-      "css": ".ds-lp-votes { display: inline-flex; gap: 10px; } .ds-lp-vote { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 13px; border-radius: 7px; border: 1px solid rgba(154,192,240,0.2); background: rgba(154,192,240,0.07); color: #eaf2ff; font: 600 14px/1 Inter, ui-sans-serif, system-ui, sans-serif; cursor: pointer; transition: border-color 180ms cubic-bezier(0.16,1,0.3,1), background 180ms cubic-bezier(0.16,1,0.3,1), color 180ms cubic-bezier(0.16,1,0.3,1); } .ds-lp-vote:hover { background: rgba(154,192,240,0.14); } .ds-lp-vote[data-cast=\"true\"][data-kind=\"approve\"] { border-color: #6bc48c; color: #6bc48c; } .ds-lp-vote[data-muted=\"true\"] { opacity: 0.45; }"
+      "name": "Project Disclosure Row",
+      "kind": "nav",
+      "refersTo": "nav",
+      "description": "A sidebar project: the whole name row is the collapse control, with the project's actions as siblings. Collapsed, it shows the count of rooms it hides.",
+      "html": "<div class=\"ds-projhead\"><button class=\"ds-projtoggle\" aria-expanded=\"false\"><span class=\"ds-disclosure\">▸</span><span class=\"ds-projname\">Huddle rewrite</span><span class=\"ds-projcount\">3</span></button></div>",
+      "css": ".ds-projhead { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 8px; font-size: 14px; } .ds-projtoggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; } .ds-projtoggle:hover { background: var(--panel-2); } .ds-disclosure { color: var(--ink-faint); font-size: 11px; width: 10px; flex: none; } .ds-projname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-projcount { flex: none; font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }"
     }
   ],
   "narrative": {
@@ -421,48 +425,40 @@
       "Flat by default — structure comes from border + background-tint, not shadow",
       "Every state (ok / bad / warn / mine / auto-accept) has one committed color, reused verbatim across chat, votes, diffs, and chips",
       "Full parallel dark theme via [data-theme=\"dark\"], not an afterthought; every surface inverts, including the topbar",
-      "Two coexisting ramps: a compact Operate ramp in the app, a display-scale Persuade ramp scoped under .lp"
+      "One shared UI ramp (17/16/14/13/12/11/10) used by both modes, with display-scale clamp() steps that only the landing adds"
     ],
     "rules": [
       {
         "name": "The One State, One Color Rule",
-        "body": "Ok/bad/warn/mine map to exactly one meaning each, reused verbatim across chat, votes, tool results, and diffs. Never introduce a second color for \"success\" or borrow ok/bad for something that isn't actually approve/deny.",
-        "section": "colors"
+        "body": "Ok/bad/warn/mine map to exactly one meaning each, reused verbatim across chat, votes, tool results, and diffs. Never introduce a second color for \"success\" or borrow ok/bad for something that isn't actually approve/deny."
       },
       {
         "name": "The No-Fade Rule",
-        "body": "Quiet is a token, never an opacity. --ink-faint is the quietest legible tier and already sits at the contrast floor, so fading it produces unreadable text rather than a subtler one. Only :disabled may fade, because WCAG exempts it. Where something needs to read as degraded — a revoked invite, a viewer chip, a denied tool — the non-color cue carries it: strikethrough, a dashed border, the status pip.",
-        "section": "colors"
+        "body": "Quiet is a token, never an opacity. --ink-faint is the quietest legible tier and already sits at the contrast floor, so fading it produces unreadable text rather than a subtler one. Only :disabled may fade, because WCAG exempts it. Where something needs to read as degraded — a revoked invite, a viewer chip, a denied tool — the non-color cue carries it: strikethrough, a dashed border, the status pip."
       },
       {
         "name": "The Stage Rule",
-        "body": "The stage is a ground, not a theme. Anything drawn on --lp-stage takes its color from the --lp-stage- set — never from --ink, --line, --panel, or the bare --accent. Conversely, --lp-stage- never appears on a pale surface. The two palettes meet at a section boundary and nowhere else.",
-        "section": "colors"
+        "body": "The stage is a ground, not a theme. Anything drawn on --lp-stage takes its color from the --lp-stage-* set — never from --ink, --line, --panel, or the bare --accent. Conversely, --lp-stage-* never appears on a pale surface. The two palettes meet at a section boundary and nowhere else. The one element exempt is the fixed scroll rail, which crosses every ground on the page and therefore takes neither palette: it draws from --lp-spine, an alias of --logo-mid, the system's one hue already fixed across themes and tuned to read against a pale or a dark bar alike (3.2:1 on --bg, 4.9:1 on --lp-stage)."
       },
       {
         "name": "The Boundary Rule",
-        "body": "--line divides; --line-strong bounds. If a user can click it or type into it and its fill does not separate it from the surface behind it, its border is what identifies the control and takes --line-strong. On the stage, --lp-stage-line plays the --line-strong part: stage controls carry a visible border because their translucent fill is deliberately near-invisible.",
-        "section": "colors"
+        "body": "--line divides; --line-strong bounds. If a user can click it or type into it and its fill does not separate it from the surface behind it, its border is what identifies the control and takes --line-strong. On the stage, --lp-stage-line plays the --line-strong part: stage controls carry a visible border because their translucent fill is deliberately near-invisible."
       },
       {
         "name": "The One Face Rule",
-        "body": "Every weight of hierarchy — including code-like content (tool names, diffs, doc bodies) — stays on the Inter stack. Don't introduce a monospace font; distinguish \"code-like\" content by size and background tint instead. The landing enforces this literally: its diff rows are real <pre> elements taking font: inherit, so a code block is code by tint and layout, never by face.",
-        "section": "typography"
+        "body": "Every weight of hierarchy — including code-like content (tool names, diffs, doc bodies) — stays on the Inter stack. Don't introduce a monospace font; distinguish \"code-like\" content by size and background tint instead. The landing enforces this literally: its diff rows are real <pre> elements taking font: inherit, so a code block is code by tint and layout, never by face."
       },
       {
-        "name": "The Two Ramps Rule",
-        "body": "The app's compact ramp and the landing's display ramp both exist, and neither replaces the other. A screen belongs to exactly one: if it lives inside the app shell it uses the Operate steps and unprefixed tokens; if it lives under .lp it uses the --lp- steps. Never mix a --lp- size into the app or a 15px working size into a landing act. A new marketing-scale surface joins the .lp scope rather than growing a third ramp.",
-        "section": "typography"
+        "name": "The One Ramp Rule",
+        "body": "There is one UI ramp — 17 / 16 / 14 / 13 / 12 / 11 / 10 — and both modes use it. The landing writes it as --lp-fs-* tokens; the app shell writes the same values as literals. What separates the two modes is not a different set of UI sizes but the **display steps**, which only the landing has, and density. A new marketing-scale surface joins the .lp scope and reaches for a display step; it does not grow a third ramp. Never invent a size between two steps because a specific block \"needs\" it."
       },
       {
         "name": "The Declared Step Rule",
-        "body": "No font-size literal outside a token declaration. Both ramps name every step they use — including the small ones (14/13/12/11) that are tempting to inline — so a size is always a decision that already exists, not one invented at the call site.",
-        "section": "typography"
+        "body": "A size must be a step on the ramp above, not a number invented at the call site. Where it is declared is a separate question, and the two halves of the product answer it differently today: **landing.css is fully tokenised** — every font-size is a var(--lp-fs-*) — while **the app shell still writes 49 literals**. That gap is known and is the one place this document describes an intention rather than the state of the code. New work in the app shell should use a value from the ramp; converting the existing literals to tokens is a mechanical change nobody has made yet. Until it happens, a literal is acceptable in styles.css only if it is already a named step."
       },
       {
         "name": "The Flat-By-Default Rule",
-        "body": "Structure comes from border + background-tint (panel / panel-2 / panel-3), not shadow. Cards, modals, and panels sit flush against their neighbors with a 1px --line border; there is no ambient card shadow anywhere in the system. Shadow is reserved for things that genuinely float above the layout flow, and each depth is a token so it themes: --shadow for the deepest overlay, --shadow-float for a control hovering over a pane (the reopen-document button), --shadow-node for a draggable workflow node. Every one of them has a dark-theme value — a literal rgba() shadow would stay light-theme pale on a dark ground, which is exactly the bug this token set exists to prevent. Ordinary surfaces still take none of them.",
-        "section": "elevation"
+        "body": "Structure comes from border + background-tint (panel / panel-2 / panel-3), not shadow. Cards, modals, and panels sit flush against their neighbors with a 1px --line border; there is no ambient card shadow anywhere in the system. Shadow is reserved for things that genuinely float above the layout flow, and each depth is a token so it themes: --shadow for the deepest overlay, --shadow-float for a control hovering over a pane (the reopen-document button), --shadow-node for a draggable workflow node. Every one of them has a dark-theme value — a literal rgba() shadow would stay light-theme pale on a dark ground, which is exactly the bug this token set exists to prevent. Ordinary surfaces still take none of them."
       }
     ],
     "dos": [
@@ -471,19 +467,19 @@
       "Do keep new interactive controls at 7px radius and new containing surfaces at 9–10px, reserving pill radius for chips/tags/toggles only.",
       "Do give any new clickable or typable control a --line-strong border, and any new divider --line.",
       "Do reach for a quieter token when something should recede — never an opacity on text.",
-      "Do keep the topbar's --on-topbar- translucency set to the topbar, and the --lp-stage- set to the landing; each is a ground-specific vocabulary and neither travels.",
-      "Do declare a new landing value as a --lp- token in the .lp block, next to the step it belongs beside, before using it anywhere in the file.",
+      "Do keep the topbar's --on-topbar-* translucency set to the topbar, and the --lp-stage-* set to the landing; each is a ground-specific vocabulary and neither travels.",
+      "Do declare a new landing value as a --lp-* token in the .lp block, next to the step it belongs beside, before using it anywhere in the file.",
       "Do put every landing demo panel's dashed Illustration chip in its panel bar — the page has no evidence to show, and a fabricated room must label itself.",
       "Do scale landing controls up under (pointer: coarse) (42px controls, 44px links) and leave the app's compact heights alone."
     ],
     "donts": [
       "Don't introduce a second typeface for code/mono content — the system deliberately reuses Inter everywhere, distinguishing \"code-like\" content by size and tint only.",
       "Don't add ambient drop-shadows to cards, panels, or modals. The shadow tokens are reserved for elements that float above the layout (see Elevation & Depth), and a shadow written as a literal rgba() is a bug — it will not theme.",
-      "Don't write a color or size literal outside a token block. There are exactly three: :root, :root[data-theme=\"dark\"], and the .lp scope (plus its two-line dark override). A value that isn't in one of them is a value nobody decided.",
+      "Don't invent a color or a size that isn't already a decision. Colors have exactly three token blocks — :root, :root[data-theme=\"dark\"], and the .lp scope (plus its two-line dark override) — and a color outside them is a value nobody decided. Sizes are governed by the ramp rather than by where they are written: landing.css names every step as a token, while styles.css still spells its steps as literals, so in the app shell the test is \"is this a step on the ramp?\", not \"is this a var()?\"",
       "Don't put a colored border-left above 1px on a card or list row. Tool status is carried by the pip; the hairline edge only echoes it.",
-      "Don't treat the topbar as a fixed dark bar. It inverts with the theme; its landmark quality comes from position and from the --on-topbar- construction, not from a color that never changes.",
+      "Don't treat the topbar as a fixed dark bar. It inverts with the theme; its landmark quality comes from position and from the --on-topbar-* construction, not from a color that never changes.",
       "Don't describe the landing's stage as \"the topbar color.\" It is the landing's own committed dark ground (--lp-stage), unrelated to --topbar — which is white in light mode — and it is the only surface in the system that stays dark in both themes.",
-      "Don't let a --lp- token onto an app surface, or an app size onto a landing act. The two ramps coexist; mixing them is what makes a page look like two products.",
+      "Don't let a --lp-* token onto an app surface, or a landing display step into the app shell. The UI ramp is shared, so a 13px row is 13px in both places; what must not cross is the landing's display scale, its stage palette, and its coarse-pointer control heights.",
       "Don't add an ambient shadow to a landing panel to make it \"pop.\" Ground color (pale / tinted / stage) is this system's entire depth vocabulary at page scale.",
       "Don't give a landing chapter a second entrance effect. One reveal grammar, used once per region; the demo carries the interest."
     ]

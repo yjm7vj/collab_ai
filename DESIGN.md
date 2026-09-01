@@ -71,34 +71,61 @@ typography:
     fontWeight: 800
     lineHeight: 1
     letterSpacing: "-0.03em"
-  title:
+  close:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    fontSize: "22px"
-    fontWeight: 600
+    fontSize: "clamp(2.1rem, 5vw, 3.6rem)"
+    fontWeight: 800
+    lineHeight: 1.02
+    letterSpacing: "-0.035em"
   lead:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
     fontSize: "clamp(1.05rem, 1.35vw, 1.28rem)"
     fontWeight: 400
     lineHeight: 1.5
-  body-landing:
+  body-lg:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
     fontSize: "17px"
     fontWeight: 400
     lineHeight: 1.6
+  control:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    fontSize: "16px"
+    fontWeight: 600
+  ui:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
   body:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    fontSize: "15px"
+    fontSize: "13px"
     fontWeight: 400
-    lineHeight: 1.55
+    lineHeight: 1.5
+  meta:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.5
   label:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
     fontSize: "11px"
     fontWeight: 700
     letterSpacing: "0.08em"
-  mono:
+  micro:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-    fontSize: "12px"
+    fontSize: "10px"
+    fontWeight: 700
+    letterSpacing: "0.08em"
+  glyph-sm:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    fontSize: "15px"
+    lineHeight: 1
+  glyph-lg:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    fontSize: "18px"
+    lineHeight: 1
 rounded:
+  xxs: "2px"
+  xs: "4px"
   sm: "7px"
   md: "9px"
   lg: "10px"
@@ -136,7 +163,7 @@ components:
   button-landing:
     backgroundColor: "{colors.panel-2}"
     textColor: "{colors.ink}"
-    typography: "{typography.body-landing}"
+    typography: "{typography.control}"
     rounded: "{rounded.lp-md}"
     padding: "0 22px"
     height: "48px"
@@ -183,7 +210,7 @@ Huddle.AI is not a dashboard people report to — it's a desk several people sit
 
 The palette and type scale are a considered, working system already — cool blue-white surfaces, a single sky-blue accent, tinted state colors (ok/bad/warn) reused consistently for votes, tool results, and diffs. It is not treated as final identity; color values here are documented as the current source of truth, not locked doctrine, and may be revisited.
 
-**The system runs in two modes.** *Operate* is the app shell: a fixed-height frame that never scrolls the document, a compact 15px working ramp, 7–12px radii, everything on the inverting light/dark surfaces. *Persuade* is the signed-out landing route, scoped entirely under `.lp` (`src/client/landing.css`), which keeps the same palette, the same one accent, the same flat border-plus-tint construction and the same one typeface — but declares its own larger type ramp, its own two extra radius steps, and a committed dark **stage** ground for the acts that go quiet and large. Persuade does not replace Operate: both ramps are live, and which one applies is decided by which surface you are on, never by what a screen is "for."
+**The system runs in two modes.** *Operate* is the app shell: a fixed-height frame that never scrolls the document, a compact 13/12px working ramp, 7–12px radii, everything on the inverting light/dark surfaces. *Persuade* is the signed-out landing route, scoped entirely under `.lp` (`src/client/landing.css`), which keeps the same palette, the same one accent, the same flat border-plus-tint construction and the same one typeface — but declares its own larger type ramp, its own two extra radius steps, and a committed dark **stage** ground for the acts that go quiet and large. Persuade does not replace Operate: both ramps are live, and which one applies is decided by which surface you are on, never by what a screen is "for."
 
 **Key Characteristics:**
 - Cool, pale blue-white surfaces at rest, with a deep slate stage reserved for the landing's quiet acts
@@ -191,7 +218,7 @@ The palette and type scale are a considered, working system already — cool blu
 - Flat by default — structure comes from border + background-tint, not shadow
 - Every state (ok / bad / warn / mine / auto-accept) has one committed color, reused verbatim across chat, votes, diffs, and chips
 - Full parallel dark theme via `[data-theme="dark"]`, not an afterthought; every surface inverts, including the topbar
-- Two coexisting ramps: a compact Operate ramp in the app, a display-scale Persuade ramp scoped under `.lp`
+- One shared UI ramp (17/16/14/13/12/11/10) used by both modes, with display-scale `clamp()` steps that only the landing adds
 
 ## Colors
 
@@ -245,37 +272,40 @@ A narrow, cool palette: one background family, one ink family, one accent, and a
 
 **Character:** One typeface throughout, doing all the work through size, weight, and color rather than a second face. Utilitarian and calm, matching the "shared desk" instrumentation feel rather than an editorial or marketing voice.
 
-### Hierarchy (Operate ramp — the app shell)
+### Hierarchy (the shared UI ramp)
 
-The app ramp is compact and tops out low on purpose: this is a tool read at a desk, all day, with two panes side by side.
+One ramp of seven steps serves both modes. It is compact and tops out low on purpose: this is a tool read at a desk, all day, with two panes side by side, and the landing's larger voice comes from the display steps below rather than from a second set of UI sizes.
 
-- **Title** (600, 22px): gate/sign-in headline, modal `h2` (16px variant for in-modal headings).
-- **Body** (400, 15px, line-height 1.55): default reading size for chat text and prose.
-- **Label** (600–700, 11–13px, uppercase + 0.08em tracking for section kickers): side-panel section labels, modal section headings, field labels.
-- **Meta/Mono** (400–600, 11–12px): timestamps, tool names, revision stamps, diff text — same face as body, smaller and quieter.
+The landing declares the ramp as tokens (`--lp-fs-*`); the app shell writes the same values as literals. They are the same scale — see **The One Ramp Rule**.
 
-### Hierarchy (Persuade ramp — the landing, scoped under `.lp`)
+- **Body-lg** (400, 17px, line-height 1.6, max 58ch): the landing's default reading size, set on `.lp` itself. Unused in the app shell.
+- **Control** (600, 16px): text inside landing buttons and the close-form input; modal and screen `h2` headings in the app.
+- **UI** (400–600, 14px): text inside the landing's demo panels — chat lines, vote labels, workspace rows. In the app it is the sidebar's project row, one step above the rooms nested under it.
+- **Body** (400, 13px, line-height ~1.5): **the app shell's real working size** — list-row titles, input text, panel prose, banners, document bodies. The single most load-bearing text step in the product (37 rules).
+- **Meta** (400–600, 12px, tabular figures via `[data-num]`): the app's most-used size of all (64 rules) — chips, field notes, timestamps, counts, tool names, diff text. Quieter than body, never smaller than legible.
+- **Label** (700, 11px, uppercase, 0.06–0.08em): section kickers, modal section headings, panel-bar captions. Identical in both modes.
+- **Micro** (700, 10px): the smallest labels only — the topbar status word, settings menu captions, the IDE file-list heading.
 
-A 15px body is right at a desk and far too quiet on a page someone is deciding from, so the landing declares its own steps once in the `.lp` block instead of scattering literals. Every headline step is a `clamp()` — the ramp is fluid between a phone and a wide desktop, not stepped at breakpoints.
+### Display steps (Persuade — the landing, scoped under `.lp`)
+
+A 13px working size is right at a desk and far too quiet on a page someone is deciding from, so the landing adds display steps above the shared ramp. Every one is a `clamp()` — fluid between a phone and a wide desktop, not stepped at breakpoints.
 
 - **Display** (800, `clamp(2.55rem, 6.6vw, 5rem)`, line-height 0.98, −0.04em, max 15ch): the hero headline. One per page.
 - **Headline** (800, `clamp(1.85rem, 3.6vw, 2.85rem)`, 1.04, −0.032em, max 20ch): every chapter `h2`.
 - **Close** (800, `clamp(2.1rem, 5vw, 3.6rem)`, 1.02, −0.035em, max 17ch): the closing call to action only — a display-weight step deliberately set below the hero so the page does not end louder than it began.
 - **Stat** (800, `clamp(1.9rem, 3vw, 2.6rem)`, −0.03em): the one numeric readout (the token gauge value).
 - **Lead** (400, `clamp(1.05rem, 1.35vw, 1.28rem)`, 1.5, max 46ch): the paragraph directly under the hero headline.
-- **Body** (400, 17px, line-height 1.6, max 58ch): the landing's default reading size, set on `.lp` itself.
-- **Control** (600, 16px): text inside landing buttons and the close-form input.
-- **UI** (400–600, 14px): text inside the demo panels — the chat lines, vote labels, workspace rows, transcript announcements. This is the step that keeps a demo reading as a demo rather than as page copy.
-- **Small** (13px) / **Meta** (12px, tabular figures via `[data-num]`) / **Label** (11px, 700, uppercase, 0.06–0.08em): notes and captions, timestamps and counts, and the uppercase kickers on panel bars, the scroll cue, and the wordmark slot.
 
-The two ramps overlap nowhere except in intent: `--lp-fs-label` (11px) matches the app's label step exactly, because a small uppercase label is the same object in both modes.
+### Glyph steps (icon sizing, not type)
+
+Several app controls draw their icon as a Unicode character rather than an SVG (`⋯`, `☰`, `✕`, `✎`, `⧉`, `+`), so their `font-size` sizes an icon, not text. These sit on fixed square buttons with `line-height: 1` and are not part of the reading hierarchy: **glyph-sm** (15px), **Control** (16px) and **Body-lg** (17px) doubling as glyph sizes, and **glyph-lg** (18px) for the largest trigger. Drawn icons (`ArchiveIcon`, the CSS-drawn folder) take no type step at all.
 
 ### Named Rules
 **The One Face Rule.** Every weight of hierarchy — including code-like content (tool names, diffs, doc bodies) — stays on the Inter stack. Don't introduce a monospace font; distinguish "code-like" content by size and background tint instead. The landing enforces this literally: its diff rows are real `<pre>` elements taking `font: inherit`, so a code block is code by tint and layout, never by face.
 
-**The Two Ramps Rule.** The app's compact ramp and the landing's display ramp both exist, and neither replaces the other. A screen belongs to exactly one: if it lives inside the app shell it uses the Operate steps and unprefixed tokens; if it lives under `.lp` it uses the `--lp-*` steps. Never mix a `--lp-*` size into the app or a 15px working size into a landing act. A new marketing-scale surface joins the `.lp` scope rather than growing a third ramp.
+**The One Ramp Rule.** There is one UI ramp — 17 / 16 / 14 / 13 / 12 / 11 / 10 — and both modes use it. The landing writes it as `--lp-fs-*` tokens; the app shell writes the same values as literals. What separates the two modes is not a different set of UI sizes but the **display steps**, which only the landing has, and density. A new marketing-scale surface joins the `.lp` scope and reaches for a display step; it does not grow a third ramp. Never invent a size between two steps because a specific block "needs" it.
 
-**The Declared Step Rule.** No font-size literal outside a token declaration. Both ramps name every step they use — including the small ones (14/13/12/11) that are tempting to inline — so a size is always a decision that already exists, not one invented at the call site.
+**The Declared Step Rule.** A size must be a step on the ramp above, not a number invented at the call site. Where it is declared is a separate question, and the two halves of the product answer it differently today: **`landing.css` is fully tokenised** — every `font-size` is a `var(--lp-fs-*)` — while **the app shell still writes 49 literals**. That gap is known and is the one place this document describes an intention rather than the state of the code. New work in the app shell should use a value from the ramp; converting the existing literals to tokens is a mechanical change nobody has made yet. Until it happens, a literal is acceptable in `styles.css` only if it is already a named step.
 
 ## Layout
 
@@ -298,6 +328,13 @@ The landing holds the same line at display scale: its demo panels are 1px border
 ## Shapes
 
 Two radius steps cover almost everything in the app: **7px** for interactive controls (buttons, inputs, chips-as-controls, selects) and a slightly larger **9–10px** (`--radius`) for containing surfaces (cards, invite/member rows), with modals at 12px. Fully pill-shaped (`999px`) radius is reserved for status chips, presence pills, and toggle tracks — anything that reads as a small, discrete tag rather than a container. Corners are consistently rounded; nothing in the system uses a sharp 0px corner.
+
+Below the control step sit two steps for things that are not containers at all, and both are shared with the landing's scale rather than being app inventions:
+
+- **8px** — the app uses this as widely as 7px, on chips, gauges, and icon-button triggers. It is the same value the landing calls `--lp-r-md`; the two are one step, not two.
+- **6px** — inset rows inside a surface: a diff row, a collapsed tool head, a `field-warn` block, an IDE file row. The landing calls it `--lp-r-xs`.
+- **4px** (`{rounded.xs}`) — inline `code` inside prose. The smallest rounding that still reads as rounded at text scale.
+- **2px** (`{rounded.xxs}`) — icon geometry only, not UI: the corners of the CSS-drawn folder mark in the sidebar. It exists so a 14×10px drawn shape does not look sharp beside 7px controls, and it should never be used on a control or a container.
 
 The landing names the same family as a six-step scale and adds two steps at the ends, because its objects are bigger than the app's:
 
@@ -324,6 +361,7 @@ The nesting is the point: a 14px panel contains 9px cards contains 6px rows, eac
 - **Style:** transparent background, 1px `--line` border, pill radius, 12px text, no fill at rest — chips are labels first, not buttons.
 - **State:** `chip-me` is bold (marks "you" in presence); `chip-empty` is dashed-border and faint (marks an unfilled slot); on the topbar, chips take `--on-topbar-fill` and `--on-topbar-line` instead of transparent-on-`--line`, so they stay legible whichever way the bar has resolved.
 - **Policy chips** (read-only / ask / auto / custom) reuse this shape but carry semantic color: `auto` is the one policy state styled with `--bad` (a shared agent editing unattended is treated as the state that should visually stand out).
+- **`chip-warn`** carries `--warn` text on a border mixed 45% from the same hue. It marks a limitation rather than a failure — a read-only workspace, not a broken one — and is the reason `--bad` stays reserved for things that actually went wrong.
 
 ### Cards / Containers
 - **Corner Style:** `--radius` (9–10px) for most cards (side-room-card, invite-row, member-row, side-project-form); 12px for modals specifically.
@@ -331,6 +369,12 @@ The nesting is the point: a 14px panel contains 9px cards contains 6px rows, eac
 - **Shadow Strategy:** none — see Elevation & Depth. Cards are separated by border + tint, never shadow.
 - **Border:** 1px `--line` on every card; dashed `--line` marks an explicit "empty/placeholder" state (side-empty, dead invite rows use faint + strikethrough instead).
 - **Internal Padding:** 8–14px depending on density (list rows tighter, forms and empty-states looser).
+
+### The pip (shared status dot)
+A 7px round dot, `flex: none`, carrying state in one glyph wherever the app reports it: a collapsed tool row, a member's presence, a connected workspace. Unmodified it is `--ink-faint`, which is the honest default for *nothing is happening here* — offline, idle, not yet run — and it takes `--ok` / `--bad` / `--accent` for the states that are. **It is never the only carrier of a state:** the text beside it always says the same thing, so the dot is redundancy, not information. One class, `.pip`; there is no second dot construction in the system.
+
+### Connected-workspace card
+The connected state of the workspace panel, built deliberately like the repository row someone clicked to reach it: pip and name on the left, a state chip on the right, kind and online/offline underneath, all inside a `--panel-2` card at `--radius`. The card stays quiet while the connection is healthy — only the two degraded write-access states take colour — so the eye lands on the connection that needs something rather than on the one that is fine. Write access is three-valued: writable (plain chip), read-only (`chip-warn`), and **unchecked** (`chip-empty`, the dashed unfilled-slot cue), because a connection made before the app started asking has never been asked and saying "no" would be as false as saying "yes".
 
 ### Inputs / Fields
 - **Style:** `--bg` background (not `--panel` — inputs sit visually "below" the surface they're on), 1px `--line` border, 7px radius.
@@ -340,6 +384,8 @@ The nesting is the point: a 14px panel contains 9px cards contains 6px rows, eac
 ### Navigation (side panel)
 - Left nav items (`side-item`) are full-width rows, no border by default; the active row gets a `--panel-2` fill, nothing else changes (no accent bar, no bold text) — deliberately understated so the active state doesn't compete with unread/status signals elsewhere in the row.
 - Section labels are uppercase, 11px, `--ink-faint`, 0.08em tracking — the same label treatment used for modal section headings, so the two contexts feel like one system.
+- **A project row is a disclosure.** The whole name row is the control — caret, folder mark, and name inside one button — with the project's `+` and `⋯` actions as siblings beside it rather than nested inside. It takes the pane's hover fill but explicitly *not* the pane's hover border, because an outlined box around a name reads as a text field. Collapsed, the row shows the count of rooms it is hiding, since the caret alone says nothing about how much is behind it.
+- Which projects are collapsed is a **per-browser view preference** in `localStorage`, never part of synced room state — it describes the viewer, not the project. Opening a room always reveals it, once per room opened.
 
 ### Topbar
 The room's header bar. It inverts with the theme like every other surface (`--topbar`: white in light, `#050b14` in dark), so it is a *structural* landmark, not a chromatic one — its constancy comes from position and construction rather than from staying dark. What is fixed is the way controls on it are drawn: chips, buttons, and the token gauge take the named `--on-topbar-*` translucencies of the bar's own ink (fill 0.06/0.08, hover 0.11/0.15, line 0.18, track 0.22, well 0.04) rather than the normal panel tokens, which would either vanish or clash. The same tokens resolve dark-on-light or light-on-dark, so one rule serves both themes. The logo tints (`--logo-mid/key/lift`) are the exception that really is fixed: identical values in both themes, tuned once to read on either bar.
@@ -384,10 +430,10 @@ One easing token (`--lp-ease`, `cubic-bezier(0.16, 1, 0.3, 1)`) and one entrance
 ### Don't:
 - **Don't** introduce a second typeface for code/mono content — the system deliberately reuses Inter everywhere, distinguishing "code-like" content by size and tint only.
 - **Don't** add ambient drop-shadows to cards, panels, or modals. The shadow tokens are reserved for elements that float above the layout (see Elevation & Depth), and a shadow written as a literal `rgba()` is a bug — it will not theme.
-- **Don't** write a color or size literal outside a token block. There are exactly three: `:root`, `:root[data-theme="dark"]`, and the `.lp` scope (plus its two-line dark override). A value that isn't in one of them is a value nobody decided.
+- **Don't** invent a color or a size that isn't already a decision. Colors have exactly three token blocks — `:root`, `:root[data-theme="dark"]`, and the `.lp` scope (plus its two-line dark override) — and a color outside them is a value nobody decided. Sizes are governed by the ramp rather than by where they are written: `landing.css` names every step as a token, while `styles.css` still spells its steps as literals, so in the app shell the test is "is this a step on the ramp?", not "is this a `var()`?"
 - **Don't** put a colored `border-left` above 1px on a card or list row. Tool status is carried by the pip; the hairline edge only echoes it.
 - **Don't** treat the topbar as a fixed dark bar. It inverts with the theme; its landmark quality comes from position and from the `--on-topbar-*` construction, not from a color that never changes.
 - **Don't** describe the landing's stage as "the topbar color." It is the landing's own committed dark ground (`--lp-stage`), unrelated to `--topbar` — which is white in light mode — and it is the only surface in the system that stays dark in both themes.
-- **Don't** let a `--lp-*` token onto an app surface, or an app size onto a landing act. The two ramps coexist; mixing them is what makes a page look like two products.
+- **Don't** let a `--lp-*` token onto an app surface, or a landing **display** step into the app shell. The UI ramp is shared, so a 13px row is 13px in both places; what must not cross is the landing's display scale, its stage palette, and its coarse-pointer control heights.
 - **Don't** add an ambient shadow to a landing panel to make it "pop." Ground color (pale / tinted / stage) is this system's entire depth vocabulary at page scale.
 - **Don't** give a landing chapter a second entrance effect. One reveal grammar, used once per region; the demo carries the interest.
