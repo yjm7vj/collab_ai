@@ -74,6 +74,7 @@ import {
   type AgentNode,
   type WorkflowGraph,
 } from "../shared/workflow";
+import type { GithubAccount } from "./userIndex";
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   MAX_OUTPUT_CONTINUATIONS,
@@ -241,6 +242,17 @@ export const MAX_RESUMES = 3;
  */
 const GITHUB_WORKING_KEY = "github:working";
 
+/**
+ * Set when someone signs GitHub out of this room, and cleared the moment an
+ * authorisation is filed here again.
+ *
+ * Without it, an admin who disconnects a member's GitHub from a room would
+ * watch it come straight back: the member's authorisation lives on their
+ * account, and #syncGithubAccount would adopt it again the next time they
+ * connected. Adoption is for rooms that have never been told otherwise.
+ */
+const GITHUB_SIGNED_OUT_KEY = "github:signed-out";
+
 export class Room extends Agent<Env, RoomState> {
   initialState: RoomState = INITIAL_ROOM_STATE;
 
@@ -325,12 +337,20 @@ export class Room extends Agent<Env, RoomState> {
     } catch {
       /* column already present */
     }
-    // The one place in this app where a long-lived OAuth credential is stored. It is
-    // here and not in RoomState because RoomState is synced to every connected
-    // client; this table is not on the wire at all. Only the member who
-    // authorised can cause it to be used, only to list their own repositories
-    // and to read the one repository this room has connected, and disconnecting
-    // the workspace deletes the row.
+    // Which member's GitHub authorisation this room runs on. A pointer, not a
+    // credential: the token itself belongs to the person and lives in their
+    // UserIndex, which is asked for it at the moment it is needed — see
+    // #githubAccount. That is what lets one authorisation serve every room the
+    // person opens, and one sign-out end it in all of them.
+    //
+    // `token` is retained empty for rooms that authorised before the account
+    // store existed; #syncGithubAccount lifts any value still in it up to the
+    // account and blanks it. Nothing reads it, and nothing new writes to it.
+    //
+    // Not on the wire at all — RoomState carries GithubStatus, which is
+    // booleans and a public login. Only the member who authorised can cause the
+    // authorisation to be used, and only to list their own repositories and to
+    // read the one repository this room has connected.
     this.sql`CREATE TABLE IF NOT EXISTS github_oauth (
       k TEXT PRIMARY KEY,
       uid TEXT NOT NULL,
@@ -525,6 +545,33 @@ export class Room extends Agent<Env, RoomState> {
   #memberRole(uid: string): string | null {
     const rows = this.sql<{ role: string }>`SELECT role FROM members WHERE uid = ${uid}`;
     return rows.length ? rows[0]!.role : null;
+  }
+
+  /** The Durable Object holding one account's own state, including its GitHub authorisation. */
+  #userIndex(uid: string) {
+    return this.env.UserIndex.get(this.env.UserIndex.idFromName(uid));
+  }
+
+  /**
+   * The GitHub authorisation this room runs on, fetched live from the account
+   * of the member who gave it.
+   *
+   * Read at the moment of use rather than cached here, because the point of
+   * keeping it in one place is that signing out reaches every room. A room
+   * holding its own copy would go on serving a repository with a token its
+   * owner believes they revoked, and would only find out the next time that
+   * member happened to open it.
+   *
+   * Null covers both "nobody here has authorised" and "they signed out
+   * somewhere else"; callers turn either into the same offer to reconnect.
+   * The returned token is a credential: hold it in a local, use it, and let it
+   * go. It must never reach RoomState, a broadcast, a transcript, or a log.
+   */
+  async #githubAccount(): Promise<{ uid: string; account: GithubAccount } | null> {
+    const row = this.sql<{ uid: string }>`SELECT uid FROM github_oauth WHERE k = 'current'`[0];
+    if (!row) return null;
+    const account = await this.#userIndex(row.uid).githubAccount();
+    return account ? { uid: row.uid, account } : null;
   }
 
   /**
@@ -817,8 +864,9 @@ export class Room extends Agent<Env, RoomState> {
       const installationId = String(body.installationId ?? "");
       if (!/^[0-9]+$/.test(installationId)) return json({ error: "bad_request" }, 400);
 
-      const oauth = this.sql<{ uid: string; token: string; github_id: string }>`SELECT uid, token, github_id FROM github_oauth WHERE k = 'current'`[0];
-      if (!oauth || oauth.uid !== uid) return json({ error: "github_authorization_required" }, 403);
+      const authorized = await this.#githubAccount();
+      if (!authorized || authorized.uid !== uid) return json({ error: "github_authorization_required" }, 403);
+      const oauth = authorized.account;
 
       // Claiming an installation has to be proved, not taken on the word of
       // whoever posted the id. There are two ways to prove it and the right
@@ -854,7 +902,7 @@ export class Room extends Agent<Env, RoomState> {
         // An empty stored id proves nothing and must never match an empty
         // accountId, which is why both sides are required to be non-empty.
         const claimed = viaApp.installations.find((installation) => installation.id === installationId);
-        if (!claimed || oauth.github_id.length === 0 || claimed.accountId !== oauth.github_id) {
+        if (!claimed || oauth.githubId.length === 0 || claimed.accountId !== oauth.githubId) {
           return json({ error: "installation_not_accessible" }, 403);
         }
       }
@@ -865,6 +913,12 @@ export class Room extends Agent<Env, RoomState> {
                  uid = excluded.uid,
                  installation_id = excluded.installation_id,
                  created_at = excluded.created_at`;
+      // Filed against the account as well, so the next room this person opens
+      // starts from the installation they have already proved rather than
+      // sending them round the install trip again. Not a credential — an
+      // installation id is public, and it is useless without the App's own
+      // private key.
+      await this.#userIndex(uid).rememberGithubInstallation(installationId);
 
       if (!pending) {
         this.setState({ ...this.state, github: this.#githubStatus() });
@@ -916,8 +970,9 @@ export class Room extends Agent<Env, RoomState> {
     // round trip (see #onGithubAuth): the Worker has already verified the
     // state token and exchanged the code for an access token, and hands it
     // here to be stored. This route carries the one long-lived credential in
-    // this app — it is written straight to github_oauth and never touches
-    // RoomState, a broadcast, or a log line.
+    // this app — it is written straight to the authorising member's account
+    // and never touches RoomState, a broadcast, or a log line. What stays
+    // here is a pointer to whose authorisation this room runs on.
     if (url.pathname === "/github-oauth") {
       const role = this.#memberRole(uid);
       if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
@@ -934,14 +989,25 @@ export class Room extends Agent<Env, RoomState> {
       // tolerated as '' rather than required here.
       const githubId = String(body.githubId ?? "");
 
+      // The account first: a pointer to an authorisation that was never
+      // stored would leave the room claiming to be connected to nothing.
+      await this.#userIndex(uid).rememberGithub({ token, login, githubId });
+
+      // `token` and `github_id` are written empty on purpose. Both now live on
+      // the account, and a second copy here is one that can go stale — the
+      // room would keep answering with a token the person has since replaced.
+      // `login` is kept because GithubStatus displays it and it is public.
       this.sql`INSERT INTO github_oauth (k, uid, token, login, github_id, created_at)
-               VALUES ('current', ${uid}, ${token}, ${login}, ${githubId}, ${now})
+               VALUES ('current', ${uid}, '', ${login}, '', ${now})
                ON CONFLICT(k) DO UPDATE SET
                  uid = excluded.uid,
                  token = excluded.token,
                  login = excluded.login,
                  github_id = excluded.github_id,
                  created_at = excluded.created_at`;
+      // Someone authorising here is the room being told, explicitly, that it
+      // should use GitHub after all.
+      this.#kvDel(GITHUB_SIGNED_OUT_KEY);
 
       this.setState({ ...this.state, github: this.#githubStatus() });
       // The login, never the token, is safe to name in a transcript everyone
@@ -952,6 +1018,126 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     return json({ error: "not_found" }, 404);
+  }
+
+  /**
+   * Reconcile this room's GitHub pointer with the account it points at, as a
+   * member connects.
+   *
+   * Three things happen here, and all three exist so that a GitHub
+   * authorisation behaves like something the person has rather than something
+   * a room has.
+   *
+   * ADOPT. A room with no pointer, entered by someone who may connect a
+   * repository and has already authorised, points at them. This is what
+   * "signed in to GitHub" surviving into the next room actually is: they
+   * authorised once, and opening a second room is not a second decision. It is
+   * suppressed after a sign-out here (see GITHUB_SIGNED_OUT_KEY) so that
+   * disconnecting GitHub from a room is not silently undone by the next
+   * reconnect.
+   *
+   * RELEASE. A pointer whose account no longer has an authorisation is stale —
+   * they signed out somewhere else — and is dropped, along with a repository
+   * that was being served by it. Without this the room would go on publishing
+   * `authorized: true` and a login for an account that is gone, and every file
+   * request behind it would fail.
+   *
+   * LIFT. A room that authorised before the account store existed still holds
+   * the token in its own row. It is moved up to the account and blanked here,
+   * so those rooms keep working and stop being the only copy.
+   *
+   * A failed RPC leaves everything exactly as it is. This runs on every
+   * connect, and a transient error is not evidence that anyone signed out —
+   * treating it as such would disconnect a working repository over a blip.
+   */
+  async #syncGithubAccount(uid: string, role: Role): Promise<void> {
+    const pointer = this.sql<{ uid: string; token: string; login: string; github_id: string }>`
+      SELECT uid, token, login, github_id FROM github_oauth WHERE k = 'current'`[0];
+
+    if (!pointer) {
+      if (!can(role, "policy")) return;
+      if (this.#kvGet<boolean>(GITHUB_SIGNED_OUT_KEY, false)) return;
+
+      let account: GithubAccount | null = null;
+      try {
+        account = await this.#userIndex(uid).githubAccount();
+      } catch {
+        return;
+      }
+      if (!account) return;
+
+      const now = Date.now();
+      this.sql`INSERT INTO github_oauth (k, uid, token, login, github_id, created_at)
+               VALUES ('current', ${uid}, '', ${account.login}, '', ${now})`;
+      // The installation travels with it, for the same reason: proving it once
+      // is enough, and this room would otherwise offer an install trip the
+      // person has already made.
+      if (account.installationId) {
+        this.sql`INSERT INTO github_installations (k, uid, installation_id, created_at)
+                 VALUES ('current', ${uid}, ${account.installationId}, ${now})
+                 ON CONFLICT(k) DO UPDATE SET
+                   uid = excluded.uid,
+                   installation_id = excluded.installation_id,
+                   created_at = excluded.created_at`;
+      }
+      return;
+    }
+
+    // LIFT, before anything reads the account: until this has run, the room's
+    // own row is the only copy there is, and the check below would read the
+    // empty account and take it for a sign-out.
+    if (pointer.token.length > 0) {
+      try {
+        const existing = await this.#userIndex(pointer.uid).githubAccount();
+        if (!existing) {
+          await this.#userIndex(pointer.uid).rememberGithub({
+            token: pointer.token,
+            login: pointer.login,
+            githubId: pointer.github_id,
+          });
+          const installation = this.sql<{ uid: string; installation_id: string }>`
+            SELECT uid, installation_id FROM github_installations WHERE k = 'current'`[0];
+          if (installation && installation.uid === pointer.uid) {
+            await this.#userIndex(pointer.uid).rememberGithubInstallation(installation.installation_id);
+          }
+        }
+      } catch {
+        return;
+      }
+      this.sql`UPDATE github_oauth SET token = '', github_id = '' WHERE k = 'current'`;
+      return;
+    }
+
+    let account: GithubAccount | null = null;
+    try {
+      account = await this.#userIndex(pointer.uid).githubAccount();
+    } catch {
+      return;
+    }
+
+    if (account) {
+      // A login can change, and it is the one thing here the room displays.
+      if (account.login !== pointer.login) {
+        this.sql`UPDATE github_oauth SET login = ${account.login} WHERE k = 'current'`;
+      }
+      return;
+    }
+
+    // RELEASE. Deliberately the same shape as #onGithubSignout, because it is
+    // the same event — the sign-out simply happened in another room.
+    this.sql`DELETE FROM github_oauth WHERE k = 'current'`;
+    this.sql`DELETE FROM github_installations WHERE k = 'current'`;
+
+    const connected = this.sql<{ auth: string }>`SELECT auth FROM github WHERE k = 'current'`[0];
+    if (connected && connected.auth === "oauth") {
+      this.sql`DELETE FROM github WHERE k = 'current'`;
+      this.#kvDel(GITHUB_WORKING_KEY);
+      this.#pending.failAll("The GitHub connection was signed out.");
+      this.setState({ ...this.state, workspace: NO_WORKSPACE });
+      this.#system(
+        `${this.#memberName(pointer.uid) ?? "someone"} signed out of GitHub, so the repository was disconnected`,
+      );
+    }
   }
 
   // ------------------------------------------------------------ connections
@@ -989,6 +1175,11 @@ export class Room extends Agent<Env, RoomState> {
     if (stored && this.state.visibility !== stored.visibility) {
       this.setState({ ...this.state, visibility: asVisibility(stored.visibility) });
     }
+
+    // Bring the room's GitHub pointer into line with the account behind it
+    // before the status below is computed from it, so the first thing this
+    // connection is told is already right.
+    await this.#syncGithubAccount(uid, asRole(role));
 
     // Same reasoning as visibility above: a fresh instance starts from
     // INITIAL_ROOM_STATE's NO_GITHUB, which knows nothing about this
@@ -1519,13 +1710,14 @@ export class Room extends Agent<Env, RoomState> {
     // The working branch belonged to that connection; a later one starts
     // over from its own base branch.
     this.#kvDel(GITHUB_WORKING_KEY);
-    // Disconnecting the workspace is the obvious moment a person expects the
-    // stored credential to go away, so it does — github_oauth is not
-    // per-workspace state, but leaving someone's access token behind after
-    // they have just disconnected the thing it was for is exactly the kind
-    // of surprise a stored credential should never spring. Deleted before
-    // #githubStatus() runs below, so the republished state reflects it.
-    this.sql`DELETE FROM github_oauth WHERE k = 'current'`;
+    // The GitHub authorisation deliberately survives this. Disconnecting a
+    // workspace says "not this repository", not "not this account", and the
+    // two used to be the same act: the row was deleted here, so putting a
+    // different repository back meant going round the whole authorise trip
+    // again — in a room where the person was still signed in everywhere else.
+    // Signing out is its own button (#onGithubSignout), and it is the only
+    // thing that ends the authorisation. What goes is the repository, so the
+    // picker that comes back is already populated with their repositories.
     this.setState({ ...this.state, workspace: NO_WORKSPACE, github: this.#githubStatus() });
     this.#system(`${name ?? "someone"} disconnected the workspace`);
   }
@@ -1617,15 +1809,16 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
-    const oauthRow = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
-    if (oauthRow && oauthRow.uid === uid) {
+    const authorized = await this.#githubAccount();
+    if (authorized && authorized.uid === uid) {
+      const token = authorized.account.token;
       // Parsing proves the shape of the name, never that GitHub has anything
       // behind it: a typo, a repository someone else's account can see, or a
       // branch that was never pushed all parse perfectly. Asking GitHub here
       // is what turns those into a refusal at the moment of connecting,
       // instead of a workspace that publishes `online: true` and only fails
       // when the agent first tries to read it.
-      const access = await repoAccess(oauthRow.token, ref);
+      const access = await repoAccess(token, ref);
       if (!access.ok) {
         this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${access.error}`);
         return;
@@ -1648,7 +1841,7 @@ export class Room extends Agent<Env, RoomState> {
       // repository is there, and a repository with no commits yet is a
       // legitimate thing to connect.
       if (ref.ref !== "HEAD") {
-        const head = await refHead(oauthRow.token, ref);
+        const head = await refHead(token, ref);
         if (!head.ok) {
           this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
           return;
@@ -1788,21 +1981,21 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
-    const row = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
-    if (!row) {
+    const authorized = await this.#githubAccount();
+    if (!authorized) {
       this.#refuse(connection, "Connect a GitHub account first.");
       return;
     }
 
     // Which repositories a person can see is their own business, so even
     // another admin in the room may not enumerate them through someone
-    // else's stored token — only the member who actually authorised may.
-    if (!uid || uid !== row.uid) {
+    // else's authorisation — only the member who actually authorised may.
+    if (!uid || uid !== authorized.uid) {
       this.#refuse(connection, "Only the member who connected GitHub can list their repositories.");
       return;
     }
 
-    const res = await listUserRepos(row.token);
+    const res = await listUserRepos(authorized.account.token);
     if (!res.ok) {
       this.#refuse(connection, res.error);
       return;
@@ -1816,18 +2009,38 @@ export class Room extends Agent<Env, RoomState> {
   /**
    * Forget this room's stored GitHub authorisation.
    *
-   * A repository connected over OAuth is served entirely by the token being
-   * deleted here, so it has to go too. Leaving it would publish a workspace
-   * that says `online: true` while every file request behind it fails — a
-   * state that reads as a bug to everyone in the room. The GitHub App path
-   * does not depend on this token, so a repository connected that way is
+   * This is the only thing that ends a GitHub authorisation — not
+   * disconnecting a workspace, not leaving the room, not opening another one.
+   * It is also what "use a different account" runs first, because changing
+   * accounts is a sign-out followed by a sign-in.
+   *
+   * A repository connected over OAuth is served entirely by the authorisation
+   * being dropped here, so it has to go too. Leaving it would publish a
+   * workspace that says `online: true` while every file request behind it
+   * fails — a state that reads as a bug to everyone in the room. The GitHub
+   * App path does not depend on it, so a repository connected that way is
    * deliberately left alone.
    */
   async #onGithubSignout(connection: Connection) {
     if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
 
+    const uid = this.#uidOf(connection);
+    const pointer = this.sql<{ uid: string }>`SELECT uid FROM github_oauth WHERE k = 'current'`[0];
+
+    // Signing out of the account itself is the authorising member's call
+    // alone. An admin may take a member's GitHub off this room — that is what
+    // the rest of this method does — but the authorisation is the person's,
+    // held on their account and serving every other room they are in, and an
+    // admin here has no standing to end it there.
+    if (uid && pointer && pointer.uid === uid) {
+      await this.#userIndex(uid).forgetGithub();
+    }
+
     this.sql`DELETE FROM github_oauth WHERE k = 'current'`;
     this.sql`DELETE FROM github_installations WHERE k = 'current'`;
+    // Remembered so the member's own account authorisation is not adopted
+    // straight back the next time they connect — see GITHUB_SIGNED_OUT_KEY.
+    this.#kvSet(GITHUB_SIGNED_OUT_KEY, true);
 
     const connected = this.sql<{ auth: string }>`SELECT auth FROM github WHERE k = 'current'`[0];
     const workspace = connected ? NO_WORKSPACE : this.state.workspace;
@@ -2000,15 +2213,17 @@ export class Room extends Agent<Env, RoomState> {
 
       if (row.auth === "oauth") {
         // Unlike the installation path below — where a fresh short-lived
-        // token is minted per request — this token is long-lived and was
-        // read from storage at connect time. It is fetched at the last
-        // possible moment, held only in this local, and never returned,
-        // broadcast, or logged.
-        const authRow = this.sql<{ token: string }>`SELECT token FROM github_oauth WHERE k = 'current'`[0];
-        if (!authRow) {
+        // token is minted per request — this token is long-lived, and it is
+        // read from the authorising member's account at the last possible
+        // moment: asking per request is what makes their sign-out take effect
+        // here immediately rather than whenever they next open this room. It
+        // is held only in this local, and never returned, broadcast, or
+        // logged.
+        const authorized = await this.#githubAccount();
+        if (!authorized) {
           return { ok: false, error: "The GitHub connection was signed out. Reconnect it." };
         }
-        return this.#runGithub(authRow.token, ref, denyGlobs, clamped);
+        return this.#runGithub(authorized.account.token, ref, denyGlobs, clamped);
       }
 
       const pkcs8 = pemToPkcs8(this.env.GITHUB_APP_PRIVATE_KEY);

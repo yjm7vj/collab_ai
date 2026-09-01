@@ -12,15 +12,20 @@
  * rows are graphs, not bookmarks, so they are sanitized on the way in AND on
  * the way out — see #workflowRows.
  *
+ * It holds one credential, and exactly one: the GitHub access token the person
+ * authorised. That lives here rather than in a Room because it is the person's,
+ * not the room's — see the `github` table below. Everything else in this object
+ * is a bookmark, not a grant: membership still lives in the Room and is still
+ * re-checked on every connect, so deleting a row here loses a way in, not a
+ * right to be there.
+ *
  * Addressed by uid, which is derived from (provider, account id) and is
  * therefore the same on every device the person signs in on — see `deriveUid`
- * in ./oauth. Nothing here is a credential: membership still lives in the Room
- * and is still re-checked on every connect, so a row in this object is a
- * bookmark, not a grant. Deleting one loses a way in, not a right to be there.
+ * in ./oauth.
  *
- * Only the Worker can reach a Durable Object, so these are plain RPC methods
- * with no internal-auth header of their own — there is no route in or out of
- * this class that a browser could address.
+ * Only the Worker and other Durable Objects can reach a Durable Object, so
+ * these are plain RPC methods with no internal-auth header of their own —
+ * there is no route in or out of this class that a browser could address.
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -64,6 +69,32 @@ type WorkflowRow = {
   updated_at: number;
 };
 
+type GithubRow = {
+  token: string;
+  login: string;
+  github_id: string;
+  installation_id: string;
+  created_at: number;
+};
+
+/**
+ * One account's GitHub authorisation, as the rooms see it.
+ *
+ * CARRIES A TOKEN. It is handed to a Room over the internal RPC channel and is
+ * used there to talk to GitHub; it must never be put into RoomState, a
+ * broadcast, a URL, or a log line. `GithubStatus` in ../shared/protocol is the
+ * shape that is safe to publish, and it is deliberately a different type.
+ */
+export type GithubAccount = {
+  token: string;
+  /** The GitHub login, for display. */
+  login: string;
+  /** GitHub's own numeric account id — public, and the only thing that can prove an App installation belongs to this person. */
+  githubId: string;
+  /** The GitHub App installation this account has, or "" if none is known. */
+  installationId: string;
+};
+
 export class UserIndex extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -94,6 +125,24 @@ export class UserIndex extends DurableObject<Env> {
       graph      TEXT NOT NULL,
       deleted    INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
+    )`);
+    // The account's GitHub authorisation, and the one long-lived credential
+    // this app stores. It is here rather than in each Room because it is the
+    // person's authorisation, not the room's: they authorised once, and a
+    // second room is not a second decision. Rooms keep only a pointer to the
+    // member who authorised — see github_oauth in ./room — and ask for the
+    // token at the moment they need it, so signing out here is what signs out
+    // everywhere, and disconnecting a workspace touches none of it.
+    //
+    // Single-row, keyed 'current', because an account has one GitHub account
+    // connected at a time; connecting another replaces it.
+    this.#sql(`CREATE TABLE IF NOT EXISTS github (
+      k               TEXT PRIMARY KEY,
+      token           TEXT NOT NULL,
+      login           TEXT NOT NULL DEFAULT '',
+      github_id       TEXT NOT NULL DEFAULT '',
+      installation_id TEXT NOT NULL DEFAULT '',
+      created_at      INTEGER NOT NULL
     )`);
   }
 
@@ -349,6 +398,79 @@ export class UserIndex extends DurableObject<Env> {
       });
     }
     return out;
+  }
+
+  /* -------------------------------------------------- github authorisation */
+
+  /**
+   * The account's GitHub authorisation, token included, or null if there is
+   * none.
+   *
+   * Called by a Room over the internal RPC channel every time it needs to talk
+   * to GitHub on this person's behalf, rather than at connect time into a copy
+   * the room then keeps. One store, read live, is what makes `forgetGithub`
+   * below a real sign-out instead of a sign-out from whichever room happened to
+   * be open.
+   */
+  githubAccount(): GithubAccount | null {
+    const row = this.#sql<GithubRow>(`SELECT * FROM github WHERE k = 'current'`)[0];
+    if (!row || row.token.length === 0) return null;
+    return {
+      token: row.token,
+      login: row.login,
+      githubId: row.github_id,
+      installationId: row.installation_id,
+    };
+  }
+
+  /**
+   * Record the token GitHub just issued.
+   *
+   * The installation id is deliberately left alone: authorising again — after
+   * a token expires, or to widen a scope — is not a reason to forget which App
+   * installation this account has. Authorising as a *different* GitHub account
+   * is, and that arrives as `forgetGithub` first, because changing accounts is
+   * a sign-out followed by a sign-in.
+   */
+  rememberGithub(account: { token: string; login: string; githubId: string }): void {
+    if (account.token.length === 0) return;
+    this.#sql(
+      `INSERT INTO github (k, token, login, github_id, installation_id, created_at)
+       VALUES ('current', ?, ?, ?, '', ?)
+       ON CONFLICT(k) DO UPDATE SET
+         token = excluded.token,
+         login = excluded.login,
+         github_id = excluded.github_id,
+         created_at = excluded.created_at`,
+      account.token,
+      account.login,
+      account.githubId,
+      Date.now(),
+    );
+  }
+
+  /**
+   * Record which GitHub App installation this account has.
+   *
+   * Only ever an update: an installation is claimed by proving it against the
+   * token stored above (see /github-installed in ./room), so a row that is not
+   * here yet means there was no authorisation to prove it with, and writing one
+   * would be inventing an account that never authorised.
+   */
+  rememberGithubInstallation(installationId: string): void {
+    this.#sql(`UPDATE github SET installation_id = ? WHERE k = 'current'`, installationId);
+  }
+
+  /**
+   * Forget the account's GitHub authorisation entirely.
+   *
+   * This is the explicit sign-out, and the only thing that ends the
+   * authorisation. Every room that pointed at it reads null from
+   * `githubAccount` the next time it asks, which is what makes one sign-out
+   * reach all of them.
+   */
+  forgetGithub(): void {
+    this.#sql(`DELETE FROM github WHERE k = 'current'`);
   }
 
   /**
