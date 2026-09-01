@@ -436,6 +436,40 @@ export default {
       return json(snapshot satisfies LibrarySyncResponse);
     }
 
+    /**
+     * The account's skills library: the Agent Skills this person installed,
+     * which follow them rather than the browser they pasted a repo URL into.
+     *
+     * Same shape and same rules as the two routes above, and a signed identity
+     * is again the only way in — the uid is the address of the Durable Object
+     * holding the library, so a caller that could name its own uid could read
+     * and rewrite anybody's.
+     *
+     * Nothing here is a room credential, and the `enabledIn` field this route
+     * happily accepts is not one either. It records which rooms a person has
+     * *asked* to enable a skill in; whether the shared agent actually loads it
+     * is decided in the room, against that room's vote and its own capability
+     * check, exactly as applying a saved workflow is. A push that claims a room
+     * id nobody approved buys nothing but a row in its own library.
+     */
+    if (url.pathname === "/api/skills") {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      const identity = await identityFrom(env, (body as { identity?: unknown }).identity);
+      if (!identity) return json({ error: "sign_in_required" }, 401);
+
+      const push = sanitizeSkillsPush(body, Date.now());
+      const snapshot = await userIndex(env, identity.uid).syncSkills(push);
+      return json(snapshot satisfies SkillsSyncResponse);
+    }
+
     if (url.pathname === "/api/auth/config") {
       // Never include secrets — this is how the client decides whether to
       // render sign-in buttons at all.
