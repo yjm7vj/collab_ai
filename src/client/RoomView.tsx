@@ -954,7 +954,12 @@ export function RoomView({
 
       <div className={`columns ${showDocument ? "" : "columns-doc-closed"}`}>
         <section className="chat">
-          <Transcript entries={entries} me={me} toolDisplay={toolDisplay} />
+          <Transcript
+            entries={entries}
+            me={me}
+            working={state.status === "thinking"}
+            toolDisplay={toolDisplay}
+          />
 
           {state.workers.length > 0 && <WorkerStrip workers={state.workers} />}
 

@@ -1035,10 +1035,13 @@ export function Presence({ users, me }: { users: PresenceUser[]; me: string | nu
 export function Transcript({
   entries,
   me,
+  working = false,
   toolDisplay = "compact",
 }: {
   entries: Entry[];
   me: string | null;
+  /** True while the agent is mid-turn, so the last entry may still fill in. */
+  working?: boolean;
   toolDisplay?: "hidden" | "compact" | "full";
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -1068,8 +1071,14 @@ export function Transcript({
           </p>
         </div>
       )}
-      {entries.map((entry) => (
-        <EntryView key={entry.id} entry={entry} me={me} toolDisplay={toolDisplay} />
+      {entries.map((entry, i) => (
+        <EntryView
+          key={entry.id}
+          entry={entry}
+          me={me}
+          live={working && i === entries.length - 1}
+          toolDisplay={toolDisplay}
+        />
       ))}
     </div>
   );
@@ -1078,10 +1087,13 @@ export function Transcript({
 const EntryView = memo(function EntryView({
   entry,
   me,
+  live,
   toolDisplay,
 }: {
   entry: Entry;
   me: string | null;
+  /** This is the entry the agent is still writing into. */
+  live: boolean;
   toolDisplay: "hidden" | "compact" | "full";
 }) {
   if (entry.kind === "system") {
@@ -1132,7 +1144,10 @@ const EntryView = memo(function EntryView({
     <div className="msg agent">
       <div className="who agent-who">Agent</div>
       <div className="body">
-        {entry.blocks.length === 0 && <span className="dots" aria-label="Working" />}
+        {/* Only while the turn is actually running: a turn that ended without
+            producing a block — interrupted, or failed before the model spoke —
+            would otherwise leave these dots pulsing for good. */}
+        {entry.blocks.length === 0 && live && <span className="dots" aria-label="Working" />}
         {rendered}
       </div>
     </div>

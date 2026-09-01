@@ -3082,9 +3082,19 @@ export class Room extends Agent<Env, RoomState> {
       }
     } catch (err) {
       console.error("agent turn failed", err);
-      this.#system(
-        `The agent turn failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // Say it inside the agent's own entry, not as a system line beside it: a
+      // turn that fails before producing a block leaves that entry empty, and
+      // an empty agent entry is what the transcript draws its spinner for. The
+      // exception itself stays in the logs — the room only needs to know the
+      // turn is over.
+      const stored = this.#turn();
+      const entry = stored ? this.#getEntry(stored.entryId) : null;
+      if (entry?.kind === "agent") {
+        entry.blocks.push({ type: "text", text: "Agent hit an error." });
+        this.#patch(entry);
+      } else {
+        this.#system("Agent hit an error.");
+      }
     }
 
     await this.#finishTurn();
