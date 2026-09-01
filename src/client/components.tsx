@@ -139,7 +139,7 @@ export function ContextGauge({
       <div className="gauge-track" aria-hidden>
         <div
           className={`gauge-fill ${near ? "gauge-hot" : ""}`}
-          style={{ width: `${pct}%` }}
+          style={{ transform: `translateX(-${100 - pct}%)` }}
         />
       </div>
       <span className="gauge-text">

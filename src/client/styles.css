@@ -1396,11 +1396,18 @@ input:focus, textarea:focus {
   border-radius: 999px;
   overflow: hidden;
 }
+/* The track clips; the fill slides. This bar redraws on every streamed token,
+   and animating its width re-ran layout on the whole topbar each frame — a
+   transform stays off the layout path entirely. Sliding rather than scaling is
+   what keeps the leading cap round: scaleX would squash a 2.5px radius into an
+   ellipse. */
 .gauge-fill {
+  width: 100%;
   height: 100%;
   background: var(--accent);
   border-radius: 999px;
-  transition: width 300ms ease, background 300ms ease;
+  transform: translateX(-100%);
+  transition: transform 300ms ease, background 300ms ease;
 }
 .gauge-hot { background: var(--bad); }
 .gauge-text {
@@ -2765,4 +2772,6 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .wf-node { transition: none; }
+  /* The gauge still moves, it just arrives rather than travelling. */
+  .gauge-fill { transition: none; }
 }
