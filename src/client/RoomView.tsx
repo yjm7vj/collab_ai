@@ -380,7 +380,10 @@ export function RoomView({
       }
       if (cancelled) return;
       if (!handle) {
-        setHandleMissing(true);
+        // A directory can be picked while the IndexedDB lookup above is still
+        // in flight. Do not let that stale "missing" result detach the folder
+        // the user just selected.
+        if (!rootRef.current) setHandleMissing(true);
         return;
       }
       const granted = await ensureReadPermission(handle);
@@ -406,8 +409,13 @@ export function RoomView({
         ? await ensureWritePermission(handle)
         : await ensureReadPermission(handle);
       if (!granted) return;
-      await saveHandle(workspaceKey, handle);
+      // Publish the newly picked handle before saving it. A slower initial
+      // IndexedDB read may still be finishing, and it must see that a current
+      // selection now exists rather than marking the workspace as stranded.
       rootRef.current = handle;
+      setHandleMissing(false);
+      strandedRef.current = false;
+      await saveHandle(workspaceKey, handle);
       setWsReady(true);
       setCanWrite(allowWrites);
       send({ t: "workspace.attach", kind: "local", label: handle.name });
@@ -502,6 +510,21 @@ export function RoomView({
     setRepos(null);
     send({ t: "github.signout" });
   }, [send]);
+
+  /**
+   * A room switch only unmounts this view, so it must stay silent. `pagehide`
+   * is different: the browser is actually leaving the application. A beacon
+   * survives that navigation long enough to record the real departure.
+   */
+  const announceApplicationExit = useCallback(() => {
+    const body = new Blob([JSON.stringify({ token })], { type: "application/json" });
+    navigator.sendBeacon(`/api/rooms/${encodeURIComponent(roomId)}/exit`, body);
+  }, [roomId, token]);
+
+  useEffect(() => {
+    window.addEventListener("pagehide", announceApplicationExit);
+    return () => window.removeEventListener("pagehide", announceApplicationExit);
+  }, [announceApplicationExit]);
 
   const requestWorkspace = useCallback((req: FsRequest): Promise<FsResponse> => {
     if (state.workspace.kind === "local" && rootRef.current) {
@@ -702,6 +725,7 @@ export function RoomView({
                         role="menuitem"
                         onClick={() => {
                           setShowAccountMenu(false);
+                          announceApplicationExit();
                           onSignOut();
                         }}
                       >

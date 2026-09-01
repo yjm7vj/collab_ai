@@ -746,6 +746,18 @@ export class Room extends Agent<Env, RoomState> {
       return json({ role: "editor", title: room.title });
     }
 
+    if (url.pathname === "/presence-exit") {
+      if (this.#memberRole(uid) === null) return json({ error: "forbidden" }, 403);
+      const key = `presence:exited:${uid}`;
+      // Logout followed by pagehide can send two beacons. Keep the transcript
+      // to one departure and leave a marker for the next genuine return.
+      if (!this.#kvGet<boolean>(key, false)) {
+        this.#kvSet(key, true);
+        this.#system(`${this.#memberName(uid) ?? "someone"} exited`);
+      }
+      return json({ ok: true });
+    }
+
     if (url.pathname === "/github-installed") {
       const role = this.#memberRole(uid);
       if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
@@ -952,12 +964,17 @@ export class Room extends Agent<Env, RoomState> {
       } satisfies ServerMsg),
     );
 
+    const exitKey = `presence:exited:${uid}`;
+    if (this.#kvGet<boolean>(exitKey, false)) {
+      this.#kvDel(exitKey);
+      this.#system(`${this.#memberName(uid) ?? "someone"} entered the chat`);
+    }
+
     // The workspace stays configured while its host is offline — see onClose —
     // so a reconnect from that same host is what brings it back, not a fresh
     // "workspace.attach".
     if (this.state.workspace.hostUid === uid && !this.state.workspace.online) {
       this.setState({ ...this.state, workspace: { ...this.state.workspace, online: true } });
-      this.#system(`${this.#memberName(uid) ?? "someone"}'s workspace is back online`);
     }
 
     await this.#refreshPresence();
@@ -989,7 +1006,6 @@ export class Room extends Agent<Env, RoomState> {
       if (!stillConnected) {
         this.#pending.failAll("The workspace host went offline.");
         this.setState({ ...this.state, workspace: { ...this.state.workspace, online: false } });
-        this.#system(`${this.#memberName(hostUid) ?? "someone"}'s workspace went offline`);
       }
     }
 

@@ -363,6 +363,41 @@ export default {
       return json({ token, role } satisfies JoinRoomResponse);
     }
 
+    const roomExitMatch = url.pathname.match(/^\/api\/rooms\/([0-9A-Za-z]{22})\/exit$/);
+    if (roomExitMatch) {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+
+      let body: { token?: unknown };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      const roomId = roomExitMatch[1]!;
+      const token = typeof body.token === "string" ? body.token : "";
+      const claims = token ? await verifyToken(env.ROOM_SECRET, token) : null;
+      if (!claims || claims.rid !== roomId || !UID_RE.test(claims.uid)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+
+      const exitRes = await (await roomStub(env, roomId)).fetch("https://room/presence-exit", {
+        method: "POST",
+        body: JSON.stringify({ uid: claims.uid }),
+        headers: {
+          "content-type": "application/json",
+          "x-internal-auth": env.ROOM_SECRET,
+        },
+      });
+      if (!exitRes.ok) {
+        return new Response(exitRes.body, {
+          status: exitRes.status,
+          headers: exitRes.headers,
+        });
+      }
+      return new Response(null, { status: 204 });
+    }
+
     /**
      * The account's sidebar: rooms and projects that follow the person rather
      * than the browser.
