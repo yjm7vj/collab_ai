@@ -21,6 +21,7 @@ import {
   safeAvatarUrl,
   type OAuthProvider,
 } from "./oauth";
+import { appSlug, listUserInstallations } from "./github";
 import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
 import { sanitizeLibraryPush, type LibrarySyncResponse } from "../shared/library";
 import {
@@ -489,8 +490,9 @@ export default {
           );
           if (!exchanged.ok) return new Response(exchanged.error, { status: 502 });
 
-          // A failure here is not fatal — the login is only a display label
-          // for the picker, not something the connection depends on.
+          // OAuth-only deployments can proceed without a display label. A
+          // GitHub App deployment requires the immutable provider id below to
+          // match a personal installation to the person who authorized it.
           const fetched = await fetchProfile("github", exchanged.accessToken);
           const login = fetched.ok ? fetched.profile.name : "";
 
@@ -505,6 +507,49 @@ export default {
           });
           if (!stored.ok) {
             return new Response(stored.body, { status: stored.status, headers: stored.headers });
+          }
+
+          if (githubConfigured(env)) {
+            if (!fetched.ok) return new Response(fetched.error, { status: 502 });
+            const found = await listUserInstallations(exchanged.accessToken);
+            if (!found.ok) return new Response(found.error, { status: 502 });
+
+            const ownInstallation = found.installations.find(
+              (installation) => installation.targetType === "User" && installation.accountId === fetched.profile.providerId,
+            );
+            const installation = ownInstallation ?? (found.installations.length === 1 ? found.installations[0] : undefined);
+
+            if (installation) {
+              const installed = await stub.fetch("https://room/github-installed", {
+                method: "POST",
+                body: JSON.stringify({ installationId: installation.id, uid: claims.uid }),
+                headers: {
+                  "content-type": "application/json",
+                  "x-internal-auth": env.ROOM_SECRET,
+                },
+              });
+              if (!installed.ok) {
+                return new Response(installed.body, { status: installed.status, headers: installed.headers });
+              }
+              return Response.redirect(`${url.origin}/?app=1&gh=installed#/r/${claims.rid}`, 302);
+            }
+
+            if (found.installations.length > 1) {
+              return new Response(
+                "More than one organization installation is available. Install the app on your personal account or select one organization and try again.",
+                { status: 409 },
+              );
+            }
+
+            const slug = await appSlug({
+              appId: env.GITHUB_APP_ID,
+              privateKeyPem: env.GITHUB_APP_PRIVATE_KEY,
+            });
+            if (!slug.ok) return new Response(slug.error, { status: 502 });
+            return Response.redirect(
+              `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${encodeURIComponent(state)}`,
+              302,
+            );
           }
 
           return Response.redirect(`${url.origin}/?gh=connected#/r/${claims.rid}`, 302);

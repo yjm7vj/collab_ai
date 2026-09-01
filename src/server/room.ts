@@ -98,10 +98,10 @@ import {
 import { constantTimeEqual, mintToken, newInviteCode } from "./auth";
 import { GITHUB_REPO_STATE_ROLE, repoAuthorizeUrl } from "./oauth";
 import {
-  appSlug,
   GithubProvider,
   installationToken,
   listInstallationRepos,
+  listUserInstallations,
   listUserRepos,
   parseRepoRef,
   pemToPkcs8,
@@ -731,9 +731,19 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     if (url.pathname === "/github-installed") {
+      const role = this.#memberRole(uid);
+      if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
       const pending = this.#kvGet<{ repo: string; uid: string } | null>("github:pending", null);
       const installationId = String(body.installationId ?? "");
       if (!/^[0-9]+$/.test(installationId)) return json({ error: "bad_request" }, 400);
+
+      const oauth = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
+      if (!oauth || oauth.uid !== uid) return json({ error: "github_authorization_required" }, 403);
+      const verified = await listUserInstallations(oauth.token);
+      if (!verified.ok) return json({ error: verified.error }, 502);
+      if (!verified.installations.some((installation) => installation.id === installationId)) {
+        return json({ error: "installation_not_accessible" }, 403);
+      }
 
       this.sql`INSERT INTO github_installations (k, uid, installation_id, created_at)
                VALUES ('current', ${uid}, ${installationId}, ${now})
@@ -775,6 +785,8 @@ export class Room extends Agent<Env, RoomState> {
     // this app — it is written straight to github_oauth and never touches
     // RoomState, a broadcast, or a log line.
     if (url.pathname === "/github-oauth") {
+      const role = this.#memberRole(uid);
+      if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
       const token = body.token;
       if (typeof token !== "string" || token.length === 0) {
         return json({ error: "bad_request" }, 400);
@@ -1462,27 +1474,28 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     if (this.env.GITHUB_APP_ID && this.env.GITHUB_APP_PRIVATE_KEY) {
-      const role = this.#roleOf(connection);
+      this.#kvSet("github:pending", { repo, uid });
+      if (!this.env.GITHUB_OAUTH_CLIENT_ID || !this.env.GITHUB_OAUTH_CLIENT_SECRET) {
+        this.#refuse(connection, "GitHub user authorization is required before installing the GitHub App.");
+        return;
+      }
 
-      // Ten minutes is plenty for an install round trip and keeps the replay
-      // window on this state token small.
       const token = await mintToken(this.env.ROOM_SECRET, {
         rid: this.name,
         uid,
-        role,
+        role: GITHUB_REPO_STATE_ROLE,
         exp: Math.floor(Date.now() / 1000) + 600,
       });
-
-      this.#kvSet("github:pending", { repo, uid });
-
-      const slug = this.env.GITHUB_APP_SLUG?.trim()
-        ? { ok: true as const, slug: this.env.GITHUB_APP_SLUG.trim() }
-        : await appSlug({ appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY });
-      if (!slug.ok) {
-        this.#refuse(connection, `Couldn't identify the GitHub App. ${slug.error}`);
+      const origin = this.#origin();
+      if (!origin) {
+        this.#refuse(connection, "Couldn't work out this server's address. Reload the page and try again.");
         return;
       }
-      const url = `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${token}`;
+      const url = repoAuthorizeUrl(
+        this.env.GITHUB_OAUTH_CLIENT_ID,
+        `${origin}/api/auth/github/callback`,
+        token,
+      );
 
       connection.send(JSON.stringify({ t: "github.install", url } satisfies ServerMsg));
       return;
@@ -1495,11 +1508,11 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   /**
-   * Begin the GitHub App installation round trip, with OAuth retained as a
-   * fallback for deployments that do not have an App configured.
+   * Authorize the current GitHub user so the callback can securely discover
+   * an existing App installation or send them to install it when none exists.
    *
    * The state token minted here deliberately does NOT carry the member's own
-   * role, unlike the GitHub App install token above — it only says "this is
+   * role — it only says "this is
    * a repository connect for this room, begun by this member". Authority is
    * re-checked from membership when the repository is actually connected
    * (in #onGithubConnect and, before that, in #onGithubRepos), so a stale or
@@ -1511,27 +1524,6 @@ export class Room extends Agent<Env, RoomState> {
 
     const uid = this.#uidOf(connection);
     if (!uid) return;
-
-    if (this.env.GITHUB_APP_ID && this.env.GITHUB_APP_PRIVATE_KEY) {
-      const token = await mintToken(this.env.ROOM_SECRET, {
-        rid: this.name,
-        uid,
-        role: GITHUB_REPO_STATE_ROLE,
-        exp: Math.floor(Date.now() / 1000) + 600,
-      });
-      const slug = this.env.GITHUB_APP_SLUG?.trim()
-        ? { ok: true as const, slug: this.env.GITHUB_APP_SLUG.trim() }
-        : await appSlug({ appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY });
-      if (!slug.ok) {
-        this.#refuse(connection, `Couldn't identify the GitHub App. ${slug.error}`);
-        return;
-      }
-      connection.send(JSON.stringify({
-        t: "github.install",
-        url: `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${token}`,
-      } satisfies ServerMsg));
-      return;
-    }
 
     if (!this.env.GITHUB_OAUTH_CLIENT_ID || !this.env.GITHUB_OAUTH_CLIENT_SECRET) {
       this.#refuse(

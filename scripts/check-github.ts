@@ -18,6 +18,7 @@ import {
   installationToken,
   openPullRequest,
   listInstallationRepos,
+  listUserInstallations,
   listUserRepos,
   parseRepoRef,
   pemToPkcs8,
@@ -145,6 +146,23 @@ async function main() {
     );
     const malformedSlugRes = await appSlug(cfg, malformedAppInfo.fetchImpl);
     check("appSlug rejects malformed slugs", malformedSlugRes.ok === false, malformedSlugRes);
+
+    const userInstallations = makeStub(() => new Response(JSON.stringify({
+      total_count: 1,
+      installations: [{
+        id: 158090581,
+        target_type: "User",
+        account: { id: 42, login: "octocat" },
+      }],
+    }), { status: 200 }));
+    const userInstallationsRes = await listUserInstallations("user-token", userInstallations.fetchImpl);
+    check(
+      "listUserInstallations maps installations accessible to the user",
+      userInstallationsRes.ok === true
+        && userInstallationsRes.installations[0]?.id === "158090581"
+        && userInstallationsRes.installations[0]?.accountId === "42",
+      userInstallationsRes,
+    );
 
     const created = makeStub(() =>
       new Response(JSON.stringify({ token: "ghs_abc123", expires_at: "2026-01-01T00:00:00Z" }), { status: 201 }),

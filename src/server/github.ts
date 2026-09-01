@@ -1126,6 +1126,54 @@ export class GithubProvider implements WorkspaceProvider {
 
 export type UserRepo = { fullName: string; private: boolean; defaultBranch: string };
 
+export type UserInstallation = {
+  id: string;
+  accountId: string;
+  accountLogin: string;
+  targetType: "User" | "Organization";
+};
+
+/** List this GitHub App's installations that the authenticated user may access. */
+export async function listUserInstallations(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; installations: UserInstallation[] } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  const installations: UserInstallation[] = [];
+  try {
+    for (let page = 1; page <= 100; page++) {
+      const res = await doFetch(`https://api.github.com/user/installations?per_page=100&page=${page}`, {
+        headers: ghHeaders(token),
+      });
+      if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+      const body = (await res.json()) as { installations?: unknown };
+      const items = Array.isArray(body.installations) ? body.installations : [];
+      for (const item of items) {
+        if (typeof item !== "object" || item === null) continue;
+        const entry = item as {
+          id?: unknown;
+          target_type?: unknown;
+          account?: { id?: unknown; login?: unknown } | null;
+        };
+        if (typeof entry.id !== "number" || !Number.isSafeInteger(entry.id) || entry.id <= 0) continue;
+        if (entry.target_type !== "User" && entry.target_type !== "Organization") continue;
+        if (typeof entry.account?.id !== "number" || !Number.isSafeInteger(entry.account.id)) continue;
+        if (typeof entry.account.login !== "string" || entry.account.login.length === 0) continue;
+        installations.push({
+          id: String(entry.id),
+          accountId: String(entry.account.id),
+          accountLogin: entry.account.login,
+          targetType: entry.target_type,
+        });
+      }
+      if (items.length < 100) break;
+    }
+    return { ok: true, installations };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to list GitHub App installations." };
+  }
+}
+
 function mapUserRepos(body: unknown): UserRepo[] {
   const items = Array.isArray(body)
     ? body

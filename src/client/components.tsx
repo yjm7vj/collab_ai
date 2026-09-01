@@ -2097,10 +2097,11 @@ export function WorkspacePanel({
                   // authorization stored.
                   <>
                     <p className="field-note">
-                      Install the HuddleAI GitHub App to choose from your private and public repositories.
-                      On GitHub, select the account or organization and choose All repositories or specific ones.
+                      Connect the HuddleAI GitHub App to choose from your private and public repositories.
+                      If it is already installed, HuddleAI will detect it automatically. Otherwise, GitHub will ask
+                      you to select an account or organization and choose All repositories or specific ones.
                     </p>
-                    <button className="primary" onClick={onAuthGithub}>Install GitHub App</button>
+                    <button className="primary" onClick={onAuthGithub}>Connect GitHub App</button>
                     <p className="field-note">
                       The app uses the installation only for repositories you grant it, and changes still require room approval.
                     </p>
