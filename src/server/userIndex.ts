@@ -444,12 +444,6 @@ export class UserIndex extends DurableObject<Env> {
   /* ---------------------------------------------------------------- skills */
 
   /**
-   * One installed skill as stored. `source`, `allowed_tools` and `enabled_in`
-   * are JSON, re-parsed and re-sanitized on the way out — see #skillRows.
-   */
-  #skillRow!: never;
-
-  /**
    * Merge one browser's skills library and hand back the account's.
    *
    * Structurally the same as `syncWorkflows`, and deliberately so: it is the
