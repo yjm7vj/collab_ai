@@ -133,6 +133,40 @@ export class UserIndex extends DurableObject<Env> {
       deleted    INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     )`);
+    // The account's skills library. `updated_at` is the ref's own `addedAt`,
+    // the same trick as workflows above: installing is the only thing that
+    // writes a row, so the stamp the person's machine wrote is exactly the
+    // stamp the merge needs, and there is no second clock to keep in step.
+    //
+    // `enabled_in` is a JSON array of room ids and is the one column that is
+    // not about this account alone — it is what puts a skill in front of a
+    // shared agent. It still lives here rather than in the Room because the
+    // library is the person's; the Room re-checks the vote before acting on
+    // it, exactly as it re-checks membership.
+    this.#sql(`CREATE TABLE IF NOT EXISTS skills (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      description   TEXT NOT NULL,
+      allowed_tools TEXT NOT NULL DEFAULT '[]',
+      source        TEXT NOT NULL,
+      hash          TEXT NOT NULL,
+      enabled_in    TEXT NOT NULL DEFAULT '[]',
+      deleted       INTEGER NOT NULL DEFAULT 0,
+      updated_at    INTEGER NOT NULL
+    )`);
+    // Skill text, keyed by its own digest and therefore stored once however
+    // many refs point at it. Two people installing the same skill, or one
+    // person updating to a new commit and back, cost one row each rather than
+    // one per install. Bodies are deliberately not in the `skills` table: a
+    // ref syncs on every push and a body is tens of kilobytes of third-party
+    // Markdown the client never needs — only the agent does, and it asks for
+    // it by hash at the moment it loads the skill.
+    this.#sql(`CREATE TABLE IF NOT EXISTS skill_bodies (
+      hash       TEXT PRIMARY KEY,
+      body       TEXT NOT NULL,
+      bytes      INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`);
     // The account's GitHub authorisation, and the one long-lived credential
     // this app stores. It is here rather than in each Room because it is the
     // person's authorisation, not the room's: they authorised once, and a
