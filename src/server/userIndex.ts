@@ -441,6 +441,166 @@ export class UserIndex extends DurableObject<Env> {
     return out;
   }
 
+  /* ---------------------------------------------------------------- skills */
+
+  /**
+   * One installed skill as stored. `source`, `allowed_tools` and `enabled_in`
+   * are JSON, re-parsed and re-sanitized on the way out — see #skillRows.
+   */
+  #skillRow!: never;
+
+  /**
+   * Merge one browser's skills library and hand back the account's.
+   *
+   * Structurally the same as `syncWorkflows`, and deliberately so: it is the
+   * same problem — two browsers, one account, no coordination — and a second
+   * merge rule invented for skills would be a second thing to get wrong.
+   *
+   * A third method rather than a field on either of the others, for the reason
+   * given above `syncWorkflows`: these are edited in different places at
+   * different times, and folding them into one request would make every
+   * install re-push every graph the account owns.
+   */
+  syncSkills(push: SkillsPush): SkillsSnapshot {
+    const now = Date.now();
+
+    // Deletes first, so a push that both carries a skill and deletes it — what
+    // a removal looks like from the browser that made it — ends deleted rather
+    // than racing.
+    for (const id of push.deleted) {
+      this.#sql(
+        `INSERT INTO skills (id, name, description, allowed_tools, source, hash, enabled_in, deleted, updated_at)
+         VALUES (?, '', '', '[]', '', '', '[]', 1, ?)
+         ON CONFLICT(id) DO UPDATE SET deleted = 1, enabled_in = '[]', updated_at = ?`,
+        id,
+        now,
+        now,
+      );
+    }
+    const deleted = new Set(push.deleted);
+
+    const stored = new Map(
+      this.#sql<SkillStorageRow>(`SELECT * FROM skills`).map((row) => [row.id, row] as const),
+    );
+    let live = [...stored.values()].filter((row) => row.deleted === 0).length;
+
+    for (const skill of push.skills) {
+      if (deleted.has(skill.id)) continue;
+      const row = stored.get(skill.id);
+      if (row && !wins(skill.addedAt, row.updated_at)) continue;
+      // Refuses new rows only, as everywhere else here: a full library should
+      // be unable to grow, not unable to be corrected.
+      if (!row && live >= SKILL_LIMITS.count) continue;
+      if (!row) live++;
+      this.#sql(
+        `INSERT INTO skills (id, name, description, allowed_tools, source, hash, enabled_in, deleted, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           description = excluded.description,
+           allowed_tools = excluded.allowed_tools,
+           source = excluded.source,
+           hash = excluded.hash,
+           enabled_in = excluded.enabled_in,
+           deleted = 0,
+           updated_at = excluded.updated_at`,
+        skill.id,
+        skill.name,
+        skill.description,
+        JSON.stringify(skill.allowedTools),
+        JSON.stringify(skill.source),
+        skill.hash,
+        JSON.stringify(skill.enabledIn),
+        skill.addedAt,
+      );
+    }
+
+    this.#sweep(now);
+    return { skills: this.#skillRows() };
+  }
+
+  /** The account's live skills library, newest install first. */
+  skills(): SkillsSnapshot {
+    return { skills: this.#skillRows() };
+  }
+
+  /**
+   * Stored rows as refs again.
+   *
+   * Re-sanitized on the way out, not only on the way in, and for a sharper
+   * reason than the workflow library's. A row here carries a name and a
+   * description written by somebody outside this codebase, and those strings
+   * end up in the agent's system prompt. A row that reaches a prompt without
+   * passing the sanitizer is the one thing this section must never produce, so
+   * the check runs again at the point of use — where an older writer, a
+   * migrated row, or a hand-edited database cannot get around it. A row whose
+   * JSON will not parse, or that no longer sanitizes, is dropped rather than
+   * repaired into a guess.
+   */
+  #skillRows(): SkillRef[] {
+    const now = Date.now();
+    const out: SkillRef[] = [];
+    for (const row of this.#sql<SkillStorageRow>(
+      `SELECT * FROM skills WHERE deleted = 0 ORDER BY updated_at DESC`,
+    )) {
+      let source: unknown;
+      let allowedTools: unknown;
+      let enabledIn: unknown;
+      try {
+        source = JSON.parse(row.source);
+        allowedTools = JSON.parse(row.allowed_tools);
+        enabledIn = JSON.parse(row.enabled_in);
+      } catch {
+        continue;
+      }
+      const clean = sanitizeSkill(
+        {
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          allowedTools,
+          source,
+          hash: row.hash,
+          addedAt: row.updated_at,
+          enabledIn,
+        },
+        now,
+      );
+      if (clean) out.push(clean);
+    }
+    return out;
+  }
+
+  /**
+   * Store the text of a skill under its digest.
+   *
+   * Idempotent, because the key is the content: writing the same body twice is
+   * the same row. The caller is whoever fetched it — see the GitHub install
+   * path — and is responsible for having computed the hash from this exact
+   * string; a mismatch here would mean a ref pointing at text it never
+   * described, so the digest is not recomputed, it is required to be right by
+   * construction at the one place bodies are created.
+   */
+  putSkillBody(hash: string, body: string): void {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return;
+    if (body.length === 0 || body.length > SKILL_LIMITS.bodyBytes) return;
+    this.#sql(
+      `INSERT INTO skill_bodies (hash, body, bytes, created_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(hash) DO NOTHING`,
+      hash,
+      body,
+      body.length,
+      Date.now(),
+    );
+  }
+
+  /** The text of a skill, or null if it was never stored or has been swept. */
+  skillBody(hash: string): string | null {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+    return this.#sql<{ body: string }>(`SELECT body FROM skill_bodies WHERE hash = ?`, hash)[0]?.body ?? null;
+  }
+
   /* -------------------------------------------------- github authorisation */
 
   /**
