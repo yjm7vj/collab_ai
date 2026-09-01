@@ -1485,3 +1485,80 @@ export async function listInstallationRepos(
     fetchImpl,
   );
 }
+
+/**
+ * List the repositories one installation holds that this *user* can reach.
+ *
+ * The distinction from listInstallationRepos is the credential, and it is the
+ * whole reason this exists: that route authenticates as the installation and
+ * needs an installation token, which only the server can mint and only for an
+ * installation the room already knows about. This one authenticates as the
+ * person, so it can be pointed at every installation they belong to — the
+ * organisations' as much as their own.
+ */
+export async function listUserInstallationRepos(
+  token: string,
+  installationId: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  return listRepoPages(
+    token,
+    (page) =>
+      `https://api.github.com/user/installations/${encodeURIComponent(installationId)}/repositories?per_page=100&page=${page}`,
+    fetchImpl,
+  );
+}
+
+/**
+ * Every repository this person can reach through this App, across all of it.
+ *
+ * `/user/repos` is the obvious call and the wrong one here. A GitHub App
+ * user-to-server token — which is what a deployment with GITHUB_APP_ID
+ * configured mints, since githubAppAuthorizeUrl requests no OAuth scopes at
+ * all — is bounded by the App's installations, so that route answers with the
+ * repositories in whichever installations exist and quietly drops the rest.
+ * On an App installed only on someone's personal account, that reads back as
+ * "the repositories I own", no matter what `affiliation` asks for.
+ *
+ * Asking installation by installation is what widens it: /user/installations
+ * enumerates every installation the person belongs to, their organisations'
+ * included, and each one is then asked for the repositories that person can
+ * see inside it.
+ *
+ * One limit is not code's to fix. An organisation that has never installed
+ * this App has no installation to enumerate, so its repositories cannot
+ * appear here by any route. Somebody with rights on that organisation has to
+ * install the App on it first.
+ */
+export async function listAllAccessibleRepos(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  const installations = await listUserInstallations(token, fetchImpl);
+  if (!installations.ok) return installations;
+
+  const seen = new Set<string>();
+  const repos: UserRepo[] = [];
+  let lastError: string | null = null;
+
+  for (const installation of installations.installations) {
+    const res = await listUserInstallationRepos(token, installation.id, fetchImpl);
+    if (!res.ok) {
+      // One unreadable installation must not empty the whole picker: an
+      // organisation can suspend an installation, or revoke this person's
+      // access to it, while every other one still answers perfectly.
+      lastError = res.error;
+      continue;
+    }
+    for (const repo of res.repos) {
+      if (seen.has(repo.fullName)) continue;
+      seen.add(repo.fullName);
+      repos.push(repo);
+    }
+  }
+
+  // Nothing readable anywhere, and a reason for it, is a failure worth
+  // reporting rather than an empty list the person cannot explain.
+  if (repos.length === 0 && lastError !== null) return { ok: false, error: lastError };
+  return { ok: true, repos };
+}

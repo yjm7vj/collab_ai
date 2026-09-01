@@ -109,6 +109,7 @@ import {
   GithubProvider,
   installationToken,
   listAppInstallations,
+  listAllAccessibleRepos,
   listInstallationRepos,
   listUserInstallations,
   listUserRepos,
@@ -1995,9 +1996,23 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
-    const res = await listUserRepos(authorized.account.token);
+    // Every installation this person belongs to, not just the one this room
+    // happens to hold. See listAllAccessibleRepos for why /user/repos is the
+    // wrong question to ask an App user token: it answers with whatever the
+    // App's installations cover, which on a personal-only install is the
+    // repositories they own and nothing they merely contribute to.
+    const res = await listAllAccessibleRepos(authorized.account.token);
     if (!res.ok) {
-      this.#refuse(connection, res.error);
+      // A deployment whose credentials belong to a classic OAuth App cannot
+      // call /user/installations at all. There the plain listing is not a
+      // degraded answer but the correct one, because such a token carries
+      // `repo` scope and is bounded by the account rather than by an App.
+      const fallback = await listUserRepos(authorized.account.token);
+      if (!fallback.ok) {
+        this.#refuse(connection, res.error);
+        return;
+      }
+      connection.send(JSON.stringify({ t: "github.repos", repos: fallback.repos } satisfies ServerMsg));
       return;
     }
 

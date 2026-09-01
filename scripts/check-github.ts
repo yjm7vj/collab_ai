@@ -18,6 +18,7 @@ import {
   installationToken,
   openPullRequest,
   listAppInstallations,
+  listAllAccessibleRepos,
   listInstallationRepos,
   listUserInstallations,
   listUserRepos,
@@ -1362,6 +1363,107 @@ async function main() {
         seen,
       );
     }
+  }
+
+  console.log("\nevery installation a person belongs to, not just one");
+  {
+    // The bug this pins down: a GitHub App user token asked /user/repos comes
+    // back with only what the App's installations cover. Two installations —
+    // the person's own account and an organisation they contribute to — must
+    // both reach the picker.
+    const twoInstalls = makeStub((url) => {
+      if (url.includes("/user/installations?")) {
+        return new Response(
+          JSON.stringify({
+            installations: [
+              { id: 11, target_type: "User", account: { id: 1, login: "someone" } },
+              { id: 22, target_type: "Organization", account: { id: 2, login: "acme" } },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/user/installations/11/repositories")) {
+        return new Response(
+          JSON.stringify({ repositories: [{ full_name: "someone/mine", default_branch: "main" }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          repositories: [
+            { full_name: "acme/widgets", private: true, default_branch: "trunk" },
+            { full_name: "someone/mine", default_branch: "main" },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const bothRes = await listAllAccessibleRepos("user-token", twoInstalls.fetchImpl);
+    const names = bothRes.ok ? bothRes.repos.map((r) => r.fullName).sort() : [];
+    check(
+      "repositories from a second installation are included",
+      bothRes.ok === true && names.includes("acme/widgets"),
+      bothRes,
+    );
+    check(
+      "a repository visible in two installations appears once",
+      names.filter((n) => n === "someone/mine").length === 1,
+      names,
+    );
+    check(
+      "the organisation repository keeps its own default branch",
+      bothRes.ok === true &&
+        bothRes.repos.some((r) => r.fullName === "acme/widgets" && r.defaultBranch === "trunk"),
+      bothRes,
+    );
+
+    // One organisation revoking access must not empty the picker of
+    // everything else the person can still reach.
+    const onePartlyBroken = makeStub((url) => {
+      if (url.includes("/user/installations?")) {
+        return new Response(
+          JSON.stringify({
+            installations: [
+              { id: 11, target_type: "User", account: { id: 1, login: "someone" } },
+              { id: 22, target_type: "Organization", account: { id: 2, login: "acme" } },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/user/installations/11/repositories")) {
+        return new Response(
+          JSON.stringify({ repositories: [{ full_name: "someone/mine", default_branch: "main" }] }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ message: "Not Found" }), { status: 404 });
+    });
+    const partialRes = await listAllAccessibleRepos("user-token", onePartlyBroken.fetchImpl);
+    check(
+      "one unreadable installation does not lose the readable ones",
+      partialRes.ok === true && partialRes.repos.some((r) => r.fullName === "someone/mine"),
+      partialRes,
+    );
+
+    // A classic OAuth App token cannot call /user/installations at all. That
+    // has to surface as a failure so the caller can fall back, rather than as
+    // an empty picker the person cannot explain.
+    const noInstallationsRoute = makeStub(() =>
+      new Response(JSON.stringify({ message: "Resource not accessible by personal access token" }), { status: 403 }),
+    );
+    const refusedRes = await listAllAccessibleRepos("classic-token", noInstallationsRoute.fetchImpl);
+    check(
+      "a 403 from /user/installations yields ok:false, not an empty list",
+      refusedRes.ok === false,
+      refusedRes,
+    );
+
+    // Nothing installed anywhere is a legitimate empty answer, not an error.
+    const noneAtAll = makeStub(() => new Response(JSON.stringify({ installations: [] }), { status: 200 }));
+    const emptyRes = await listAllAccessibleRepos("user-token", noneAtAll.fetchImpl);
+    check("no installations yields ok:true with no repositories", emptyRes.ok === true && emptyRes.repos.length === 0, emptyRes);
   }
 
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
