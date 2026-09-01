@@ -68,6 +68,10 @@ every keystroke, so it is broadcast as explicit deltas instead.
 | `src/server/model.ts` | System prompt and the streaming Anthropic call. |
 | `src/server/workspace.ts` | The local-folder-relay side of the workspace protocol, run inside the Room. |
 | `src/server/github.ts` | The GitHub App client: JWT/installation tokens, the contents API, branches and pull requests. |
+| `src/server/oauth.ts` | Sign-in: authorize URLs, code exchange, the signed state parameter, derived uids. |
+| `src/server/userIndex.ts` | Maps a signed-in identity to the rooms it belongs to. |
+| `src/shared/models.ts` | The model capability table — which models accept `temperature`, which effort levels each supports. |
+| `src/shared/workflow.ts` | Workflow graph shape, `sanitizeGraph`'s caps and model-by-role rules. |
 | `src/shared/access.ts` | Roles, capabilities, permission modes and the path policy shape — read by both server and client. |
 | `src/shared/workspace.ts` | The path deny list, file-size limits, and the wire format for filesystem requests. |
 | `src/shared/protocol.ts` | Wire types shared by both sides. |
