@@ -20,6 +20,7 @@ import {
   parseRepoRef,
   pemToPkcs8,
   refHead,
+  repoAccess,
   type GithubConfig,
 } from "../src/server/github";
 
@@ -205,6 +206,76 @@ async function main() {
     const notFound = makeStub(() => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 }));
     const notFoundRes = await refHead("test-token", { owner: "acme", repo: "widgets", ref: "main" }, notFound.fetchImpl);
     check("refHead 404 yields ok:false", notFoundRes.ok === false, notFoundRes);
+  }
+
+  console.log("\nrepository access");
+  {
+    // The whole point of this call: a repository that reads perfectly but
+    // cannot be pushed to. Every field below is what GitHub actually returns
+    // for a read-only grant, and `canPush` is the one bit that separates it
+    // from a writable one.
+    const readOnly = makeStub(() =>
+      new Response(
+        JSON.stringify({ default_branch: "trunk", permissions: { admin: false, push: false, pull: true } }),
+        { status: 200 },
+      ),
+    );
+    const readOnlyRes = await repoAccess("test-token", { owner: "acme", repo: "widgets", ref: "HEAD" }, readOnly.fetchImpl);
+    check(
+      "a repository with permissions.push false reports canPush false",
+      readOnlyRes.ok === true && readOnlyRes.access.canPush === false,
+      readOnlyRes,
+    );
+    check(
+      "the default branch comes back alongside it",
+      readOnlyRes.ok === true && readOnlyRes.access.defaultBranch === "trunk",
+      readOnlyRes,
+    );
+
+    const writable = makeStub(() =>
+      new Response(
+        JSON.stringify({ default_branch: "main", permissions: { admin: false, push: true, pull: true } }),
+        { status: 200 },
+      ),
+    );
+    const writableRes = await repoAccess("test-token", { owner: "acme", repo: "widgets", ref: "HEAD" }, writable.fetchImpl);
+    check(
+      "a repository with permissions.push true reports canPush true",
+      writableRes.ok === true && writableRes.access.canPush === true,
+      writableRes,
+    );
+
+    // A response carrying no permissions block at all is the shape that
+    // matters most here: reading it as "may push" would put the room straight
+    // back to discovering the truth at commit time.
+    const noPermissions = makeStub(() =>
+      new Response(JSON.stringify({ default_branch: "main" }), { status: 200 }),
+    );
+    const noPermissionsRes = await repoAccess(
+      "test-token",
+      { owner: "acme", repo: "widgets", ref: "HEAD" },
+      noPermissions.fetchImpl,
+    );
+    check(
+      "an absent permissions block reports canPush false, never true",
+      noPermissionsRes.ok === true && noPermissionsRes.access.canPush === false,
+      noPermissionsRes,
+    );
+
+    // The exact 403 an App installation returns when it holds Contents:Read.
+    const forbidden = makeStub(() =>
+      new Response(JSON.stringify({ message: "Resource not accessible by integration" }), { status: 403 }),
+    );
+    const forbiddenRes = await repoAccess("test-token", { owner: "acme", repo: "widgets", ref: "HEAD" }, forbidden.fetchImpl);
+    check(
+      "a 403 yields ok:false carrying GitHub's own message",
+      forbiddenRes.ok === false && forbiddenRes.error.includes("not accessible by integration"),
+      forbiddenRes,
+    );
+
+    const missing = makeStub(() => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 }));
+    const missingRes = await repoAccess("test-token", { owner: "acme", repo: "widgets", ref: "HEAD" }, missing.fetchImpl);
+    check("a 404 yields ok:false", missingRes.ok === false, missingRes);
   }
 
   console.log("\nfile sha");

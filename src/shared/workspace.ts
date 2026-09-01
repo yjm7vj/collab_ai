@@ -354,8 +354,23 @@ export type WorkspaceInfo = {
   hostUid: string | null;
   /** Human label — a folder name or owner/repo. Never a full path. */
   label: string;
+  /**
+   * Whether the room may actually write here, as the provider reports it —
+   * and `null` when nobody has asked.
+   *
+   * The third state is the point. A repository connected before this check
+   * existed has never been asked, and reporting that as `false` would be the
+   * same failure as reporting it `true`: an answer the app invented rather
+   * than obtained. Unknown says so, and the panel offers to go and find out.
+   *
+   * Only meaningful for a GitHub workspace, where the server can ask GitHub.
+   * A local folder's write permission lives in the browser holding the
+   * directory handle and cannot be known here, so it stays null and the
+   * hosting tab reports its own.
+   */
+  canWrite: boolean | null;
 };
 
 export const NO_WORKSPACE: WorkspaceInfo = {
-  kind: "none", online: false, hostUid: null, label: "",
+  kind: "none", online: false, hostUid: null, label: "", canWrite: null,
 };

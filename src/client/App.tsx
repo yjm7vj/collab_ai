@@ -76,7 +76,9 @@ type SidebarRoom = {
   updatedAt: number;
 };
 
-const EMPTY_WORKSPACE: WorkspaceInfo = { kind: "none", online: false, hostUid: null, label: "" };
+const EMPTY_WORKSPACE: WorkspaceInfo = {
+  kind: "none", online: false, hostUid: null, label: "", canWrite: false,
+};
 
 /**
  * The part of a workspace that belongs to the project rather than to the one
@@ -89,7 +91,13 @@ const EMPTY_WORKSPACE: WorkspaceInfo = { kind: "none", online: false, hostUid: n
  */
 function inheritedWorkspace(workspace: WorkspaceInfo): WorkspaceInfo {
   if (workspace.kind === "none") return EMPTY_WORKSPACE;
-  return { kind: workspace.kind, label: workspace.label, online: false, hostUid: null };
+  return {
+    kind: workspace.kind,
+    label: workspace.label,
+    online: false,
+    hostUid: null,
+    canWrite: workspace.canWrite,
+  };
 }
 
 function safeWorkspace(value: unknown): WorkspaceInfo {
@@ -101,6 +109,10 @@ function safeWorkspace(value: unknown): WorkspaceInfo {
     online: kind !== "none" && rec.online === true,
     hostUid: typeof rec.hostUid === "string" ? rec.hostUid : null,
     label: typeof rec.label === "string" ? rec.label : "",
+    // Three states, and the absent one is not false: a sidebar written
+    // before this field existed knows nothing about write access and must
+    // not be read as having found none.
+    canWrite: rec.canWrite === true ? true : rec.canWrite === false ? false : null,
   };
 }
 

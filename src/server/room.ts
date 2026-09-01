@@ -104,6 +104,7 @@ import {
   parseRepoRef,
   pemToPkcs8,
   refHead,
+  repoAccess,
   type RepoRef,
 } from "./github";
 import { PendingRequests } from "./workspace";
@@ -736,9 +737,29 @@ export class Room extends Agent<Env, RoomState> {
                  auth = excluded.auth`;
       this.#kvDel("github:pending");
 
+      // Unlike the OAuth path, the install round trip is already over by the
+      // time this runs, so a repository the installation cannot write is
+      // recorded rather than refused — throwing the install away would leave
+      // the person who just did it with nothing. What it must not do is claim
+      // write access it does not have, so the installation is asked, and the
+      // room shows the answer. If the question cannot be put to GitHub at
+      // all, that stays null rather than becoming a "no" this code invented.
+      let canWrite: boolean | null = null;
+      const ref = parseRepoRef(pending.repo);
+      if (ref && this.env.GITHUB_APP_ID && this.env.GITHUB_APP_PRIVATE_KEY) {
+        const tokenRes = await installationToken(
+          { appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY },
+          installationId,
+        );
+        if (tokenRes.ok) {
+          const access = await repoAccess(tokenRes.token, ref);
+          if (access.ok) canWrite = access.access.canPush;
+        }
+      }
+
       this.setState({
         ...this.state,
-        workspace: { kind: "github", online: true, hostUid: uid, label: pending.repo },
+        workspace: { kind: "github", online: true, hostUid: uid, label: pending.repo, canWrite },
       });
       const connectedName = this.#memberName(uid) ?? "someone";
       this.#system(`${connectedName} connected ${pending.repo}`);
@@ -1290,9 +1311,13 @@ export class Room extends Agent<Env, RoomState> {
     const name = this.#memberName(uid);
     const label = String(rawLabel ?? "").trim().slice(0, 64);
 
+    // A local folder's write permission is the hosting browser's to know, not
+    // this server's: the directory handle and its grant live in that tab.
+    // Null is this server declining to claim anything either way, and the tab
+    // hosting the folder supplies the real answer for its own panel.
     this.setState({
       ...this.state,
-      workspace: { kind, online: true, hostUid: uid, label },
+      workspace: { kind, online: true, hostUid: uid, label, canWrite: null },
     });
     this.#system(`${name ?? "someone"} connected a workspace${label ? ` (${label})` : ""}`);
   }
@@ -1381,14 +1406,38 @@ export class Room extends Agent<Env, RoomState> {
     if (oauthRow) {
       // Parsing proves the shape of the name, never that GitHub has anything
       // behind it: a typo, a repository someone else's account can see, or a
-      // branch that was never pushed all parse perfectly. Resolving the ref
-      // here is what turns those into a refusal at the moment of connecting,
+      // branch that was never pushed all parse perfectly. Asking GitHub here
+      // is what turns those into a refusal at the moment of connecting,
       // instead of a workspace that publishes `online: true` and only fails
       // when the agent first tries to read it.
-      const head = await refHead(oauthRow.token, ref);
-      if (!head.ok) {
-        this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
+      const access = await repoAccess(oauthRow.token, ref);
+      if (!access.ok) {
+        this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${access.error}`);
         return;
+      }
+
+      // Reachable is not writable, and the difference is worth catching now:
+      // a read-only connection works perfectly until the room approves its
+      // first edit, which is the worst possible moment to discover it.
+      if (!access.access.canPush) {
+        this.#refuse(
+          connection,
+          `GitHub reports no write access to ${repo} for the connected account. ` +
+            `Connect an account that can push to it, or grant this one write access, then try again.`,
+        );
+        return;
+      }
+
+      // A branch named explicitly still has to exist. When none was named
+      // there is nothing further to check: the call above already proved the
+      // repository is there, and a repository with no commits yet is a
+      // legitimate thing to connect.
+      if (ref.ref !== "HEAD") {
+        const head = await refHead(oauthRow.token, ref);
+        if (!head.ok) {
+          this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
+          return;
+        }
       }
 
       const now = Date.now();
@@ -1402,7 +1451,7 @@ export class Room extends Agent<Env, RoomState> {
                  auth = excluded.auth`;
       this.setState({
         ...this.state,
-        workspace: { kind: "github", online: true, hostUid: uid, label: repo },
+        workspace: { kind: "github", online: true, hostUid: uid, label: repo, canWrite: true },
         github: this.#githubStatus(),
       });
       this.#system(`${this.#memberName(uid) ?? "someone"} connected ${repo}`);

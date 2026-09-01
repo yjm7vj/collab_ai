@@ -1884,14 +1884,6 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 .member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .member-row select { width: auto; flex: none; }
 
-.dot-online, .dot-offline {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  flex: none;
-}
-.dot-online { background: var(--ok); }
-.dot-offline { background: var(--ink-faint); }
-
 /* Viewers are read-only — mark their chip subtly rather than shouting it. */
 .chip-viewer { color: var(--ink-faint); border-style: dashed; }
 
@@ -2108,20 +2100,24 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   flex: none;
 }
 
-/* A small round dot carrying the same status colours as the border accent
-   on .tool-ok / .tool-error / .tool-denied / .tool-running, so the collapsed
-   row still reads status at a glance without repeating the border. */
-.tool-pip {
+/* The status dot, shared wherever this app reports the state of something in
+   one glyph: a collapsed tool row, a connected workspace. It carries the same
+   status colours as the border accent on .tool-ok / .tool-error /
+   .tool-denied / .tool-running, so a row reads its status without repeating
+   the border. Unmodified it is the faint dot, which is the honest default for
+   "nothing is happening here" — offline, idle, not yet run. It is never the
+   only carrier of a state: the text beside it always says the same thing. */
+.pip {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex: none;
   background: var(--ink-faint);
 }
-.tool-pip-ok { background: var(--ok); }
-.tool-pip-error { background: var(--bad); }
-.tool-pip-denied { background: var(--bad); opacity: 0.75; }
-.tool-pip-running { background: var(--accent); }
+.pip-ok { background: var(--ok); }
+.pip-error { background: var(--bad); }
+.pip-denied { background: var(--bad); opacity: 0.75; }
+.pip-running { background: var(--accent); }
 
 /* A whole run of tool calls and reasoning collapsed behind one click — the
    quietest thing in the transcript, so the agent's actual prose reads as the
@@ -2223,6 +2219,66 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 }
 .ws-manual summary:hover { color: var(--ink); }
 .ws-manual .field { margin-top: 10px; }
+
+/* The connected workspace, built like the repository row that was clicked to
+   reach it: name on the left, state on the right, detail underneath. The card
+   is quiet while the connection is healthy — only the two degraded access
+   states take colour — so the eye lands on the connection that needs
+   something rather than on the one that is fine. */
+.ws-connection {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.ws-connection-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+/* The name takes the room that is left and ellipsises when there isn't any,
+   with the full label on the title. The 12ch basis is the floor: below it the
+   chip wraps to its own line instead of crushing the name to three letters,
+   which is the difference between a narrow phone showing a short name and one
+   showing nothing useful at all. */
+.ws-connection-name {
+  flex: 1 1 12ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-connection-head .chip { flex: none; }
+/* Indented past the pip and its gap, so the detail line starts at the same
+   left edge as the name above it rather than under the dot. */
+.ws-connection-meta {
+  margin: 4px 0 0;
+  padding-left: 15px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+/* Two things can be wrong at once — a folder nobody is serving that was also
+   shared read-only. Consecutive notices share a tint, so without this they
+   run together into one block and read as a single problem. */
+.ws-connected .field-warn + .field-warn,
+.ws-connected .field-warn + .field-note,
+.ws-connected .field-note + .field-warn { margin-top: 8px; }
+
+/* Whatever explanations sat between the card and this button, the action
+   still needs air above it — it is the one thing here that changes state. */
+.ws-disconnect { margin-top: 12px; }
+
+/* Read-only is a limitation, not a failure: the warning colour, never the
+   danger one, and the chip keeps its transparent fill. */
+.chip-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
 
 /* An inline text link disguised as a button, for actions embedded in a
    sentence — no border, no background, just an underline. */

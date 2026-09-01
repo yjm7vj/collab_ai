@@ -899,7 +899,7 @@ export function RoomView({
           workspace={state.workspace}
           supported={isFileAccessSupported()}
           hosting={wsReady}
-          canWrite={state.workspace.kind === "github" || canWrite}
+          canWrite={state.workspace.kind === "github" ? state.workspace.canWrite : canWrite}
           github={state.github}
           repos={repos}
           reposLoading={reposLoading}
@@ -916,7 +916,13 @@ export function RoomView({
       {showIde && (
         <IdePanel
           workspace={state.workspace}
-          canEdit={canSeeFileContents(myRole) && (state.workspace.kind === "github" || canWrite)}
+          canEdit={
+            canSeeFileContents(myRole) &&
+            // Unknown is not denied: a repository connected before the write
+            // check existed has always been editable here, and turning that
+            // off on upgrade would break rooms that can write perfectly well.
+            (state.workspace.kind === "github" ? state.workspace.canWrite !== false : canWrite)
+          }
           onRequest={requestWorkspace}
           onClose={() => setShowIde(false)}
         />

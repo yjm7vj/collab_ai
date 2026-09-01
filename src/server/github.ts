@@ -358,6 +358,56 @@ async function resolveBranchName(
   }
 }
 
+/** What a token may actually do with a repository, as GitHub reports it. */
+export type RepoAccess = { defaultBranch: string; canPush: boolean };
+
+/**
+ * Ask GitHub what this token is allowed to do with a repository, rather than
+ * assuming it may do anything.
+ *
+ * The `permissions` block comes back on the repository object for any
+ * authenticated request, and it already accounts for whichever kind of
+ * credential is asking: a member's role for a user token, the installation's
+ * granted permissions for an app token. That matters because the two fail
+ * differently and look identical from here — an account with full write
+ * access still gets 403 on every commit if the App installation carrying the
+ * request only holds `Contents: Read`.
+ *
+ * Short of attempting a write, this is the only thing that separates a
+ * repository the room can propose changes to from one it can merely read.
+ */
+export async function repoAccess(
+  token: string,
+  ref: RepoRef,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; access: RepoAccess } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  try {
+    const res = await doFetch(repoUrl(ref, ""), { headers: ghHeaders(token) });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const body = (await res.json()) as {
+      default_branch?: unknown;
+      permissions?: { push?: unknown } | null;
+    };
+    return {
+      ok: true,
+      access: {
+        defaultBranch: typeof body.default_branch === "string" ? body.default_branch : "",
+        // Absent permissions means the token was not told it may push, which
+        // is treated as "may not" — the safe reading, and the one that stops
+        // the room promising an edit it cannot land.
+        canPush: body.permissions?.push === true,
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to read the repository.",
+    };
+  }
+}
+
 /** The commit a ref currently points at, and (implicitly) the tree it carries. */
 export async function refHead(
   token: string,

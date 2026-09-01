@@ -1181,7 +1181,7 @@ function ToolBlock({
         <span className="tool-disclosure">{open ? "▾" : "▸"}</span>
         <span className="tool-name">{toolLabel(block.name)}</span>
         {summary && <span className="tool-summary">{summary}</span>}
-        <span className={`tool-pip tool-pip-${block.status}`} aria-hidden="true" />
+        <span className={`pip pip-${block.status}`} aria-hidden="true" />
         <span className="tool-status">
           {block.status === "running"
             ? "Running"
@@ -1729,7 +1729,7 @@ export function MembersPanel({
                 return (
                   <div key={m.uid} className="member-row" title={title}>
                     <span
-                      className={m.online ? "dot-online" : "dot-offline"}
+                      className={m.online ? "pip pip-ok" : "pip"}
                       title={m.online ? "Online" : "Offline"}
                     />
                     <span className="member-name">
@@ -1962,7 +1962,7 @@ export function WorkspacePanel({
   workspace: WorkspaceInfo;
   supported: boolean;
   hosting: boolean;
-  canWrite: boolean;
+  canWrite: boolean | null;
   github: GithubStatus;
   repos: GithubRepo[] | null;
   reposLoading: boolean;
@@ -1996,6 +1996,19 @@ export function WorkspacePanel({
   useEffect(() => {
     if (!github.authorized) requestedRepos.current = false;
   }, [github.authorized]);
+
+  // Write access has three states, and the missing one is not a "no": a
+  // repository connected before the app started asking GitHub about it has
+  // never been checked, and the chip says exactly that rather than guessing
+  // in either direction. Only the two states worth acting on take colour —
+  // a healthy connection stays as quiet as every other chip in the app, so
+  // the eye lands on the connection that needs something.
+  const access =
+    canWrite === true
+      ? { label: "Can propose changes", chip: "chip" }
+      : canWrite === false
+        ? { label: "Read-only", chip: "chip chip-warn" }
+        : { label: "Write access unchecked", chip: "chip chip-empty" };
 
   return (
     <div className="modal-scrim" onClick={onClose}>
@@ -2228,27 +2241,53 @@ export function WorkspacePanel({
               </section>
             </div>
           ) : (
-            <section>
-              <p className="field-note">
-                Connected: <strong>{workspace.label}</strong> ·{" "}
-                {workspace.online ? "Online" : "Offline"}
-              </p>
-              <p className="field-note">
-                {canWrite ? "The agent can propose changes" : "Read-only"}
-              </p>
-              {!canWrite && workspace.kind === "local" && (
-                <p className="field-warn">
-                  Shared read-only. Disconnect and reconnect with edits
-                  allowed to change that.
+            <section className="ws-connected">
+              <div className="ws-connection">
+                <p className="ws-connection-head">
+                  <span
+                    className={workspace.online ? "pip pip-ok" : "pip"}
+                    aria-hidden="true"
+                  />
+                  <span className="ws-connection-name" title={workspace.label}>
+                    {workspace.label}
+                  </span>
+                  <span className={access.chip}>{access.label}</span>
                 </p>
-              )}
-              <button onClick={onDetach}>Disconnect</button>
+                <p className="ws-connection-meta">
+                  {workspace.kind === "github" ? "GitHub repository" : "Local folder"}
+                  {" · "}
+                  {workspace.online ? "Online" : "Offline"}
+                </p>
+              </div>
               {workspace.kind === "local" && !hosting && (
                 <p className="field-warn">
                   This tab isn't serving files. The member who connected
                   the folder has to have it open.
                 </p>
               )}
+              {canWrite === false && workspace.kind === "local" && (
+                <p className="field-warn">
+                  Shared read-only. Disconnect and reconnect with edits
+                  allowed to change that.
+                </p>
+              )}
+              {canWrite === false && workspace.kind === "github" && (
+                <p className="field-warn">
+                  GitHub reports no write access for this connection. The agent
+                  can read the repository, but its edits will be refused. Check
+                  that the connected account can push, and that a GitHub App
+                  installation grants Contents and Pull requests write access.
+                </p>
+              )}
+              {canWrite === null && workspace.kind === "github" && (
+                <p className="field-note">
+                  This repository was connected before the app started asking
+                  GitHub about write access, so nobody has checked. Disconnect
+                  and reconnect to find out rather than discovering it when an
+                  edit is refused.
+                </p>
+              )}
+              <button className="ws-disconnect" onClick={onDetach}>Disconnect</button>
             </section>
           )}
         </div>
