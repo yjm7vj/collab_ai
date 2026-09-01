@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 
 import {
@@ -30,7 +30,6 @@ import {
   WorkerStrip,
   WorkspacePanel,
   WorkspaceActions,
-  type WorkspaceView,
   ThemeToggle,
   type ThemeMode,
 } from "./components";
@@ -47,7 +46,10 @@ import {
   pickDirectory,
   saveHandle,
 } from "./workspace";
-import type { FsRequest, FsResponse } from "../shared/workspace";
+
+const TerminalPanel = lazy(() =>
+  import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })),
+);
 
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
@@ -110,14 +112,13 @@ export function RoomView({
   const [showRevisionHistory, setShowRevisionHistory] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   // The repository list for the GitHub picker. `null` means "not fetched
   // yet"; an array means fetched, possibly empty.
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
   const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("hidden");
   const [showDocument, setShowDocument] = useState(false);
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("connections");
-  const pendingClientFs = useRef(new Map<string, { resolve: (res: FsResponse) => void; timer: number }>());
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
   const rootRef = useRef<FileSystemDirectoryHandle | null>(null);
@@ -247,14 +248,6 @@ export function RoomView({
           send({ t: "fs.res", id: msg.id, res });
         })();
         break;
-      case "fs.client.res": {
-        const pending = pendingClientFs.current.get(msg.id);
-        if (!pending) break;
-        window.clearTimeout(pending.timer);
-        pendingClientFs.current.delete(msg.id);
-        pending.resolve(msg.res);
-        break;
-      }
       case "github.install":
         // Opened in a new tab rather than navigating away: the room is a live
         // socket and a full navigation would drop it, losing the transcript
@@ -528,21 +521,6 @@ export function RoomView({
     return () => window.removeEventListener("pagehide", announceApplicationExit);
   }, [announceApplicationExit]);
 
-  const requestWorkspace = useCallback((req: FsRequest): Promise<FsResponse> => {
-    if (state.workspace.kind === "local" && rootRef.current) {
-      return performFsRequest(rootRef.current, req);
-    }
-    const id = crypto.randomUUID();
-    return new Promise((resolve) => {
-      const timer = window.setTimeout(() => {
-        pendingClientFs.current.delete(id);
-        resolve({ ok: false, error: "The workspace request timed out." });
-      }, 6_000);
-      pendingClientFs.current.set(id, { resolve, timer });
-      send({ t: "fs.client.req", id, req });
-    });
-  }, [send, state.workspace.kind]);
-
   /**
    * After the GitHub round trip the browser lands back here with `?gh=connected`
    * or `?gh=installed`.
@@ -553,7 +531,6 @@ export function RoomView({
   useEffect(() => {
     const githubMarker = new URLSearchParams(location.search).get("gh");
     if (githubMarker !== "connected" && githubMarker !== "installed") return;
-    setWorkspaceView("connections");
     setShowWorkspace(true);
     // Wait for the socket. This effect runs on mount, which is before the
     // WebSocket has opened, and a frame sent then is simply dropped — the
@@ -824,7 +801,6 @@ export function RoomView({
                       role="menuitem"
                       onClick={() => {
                         setShowSettingsMenu(false);
-                        setWorkspaceView("connections");
                         setShowWorkspace(true);
                       }}
                     >
@@ -927,17 +903,18 @@ export function RoomView({
           onAuthGithub={authGithub}
           onListRepos={listRepos}
           onSignOutGithub={signOutGithub}
-          onRequest={requestWorkspace}
-          canEdit={
-            canSeeFileContents(myRole) &&
-            // Unknown is not denied: a repository connected before the write
-            // check existed has always been editable here, and turning that
-            // off on upgrade would break rooms that can write perfectly well.
-            (state.workspace.kind === "github" ? state.workspace.canWrite !== false : canWrite)
-          }
-          initialView={workspaceView}
           onClose={() => setShowWorkspace(false)}
         />
+      )}
+
+      {showTerminal && (
+        <Suspense fallback={null}>
+          <TerminalPanel
+            roomId={roomId}
+            token={token}
+            onClose={() => setShowTerminal(false)}
+          />
+        </Suspense>
       )}
 
       {showInvites && (
@@ -1040,10 +1017,8 @@ export function RoomView({
                 )}
                 <WorkspaceActions
                   visible={mayPolicy}
-                  onOpen={(view) => {
-                    setWorkspaceView(view);
-                    setShowWorkspace(true);
-                  }}
+                  onWorkspace={() => setShowWorkspace(true)}
+                  onTerminal={() => setShowTerminal(true)}
                 />
               </>
             }

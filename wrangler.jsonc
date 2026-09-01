@@ -57,14 +57,27 @@
   "durable_objects": {
     "bindings": [
       { "name": "Room", "class_name": "Room" },
-      { "name": "UserIndex", "class_name": "UserIndex" }
+      { "name": "UserIndex", "class_name": "UserIndex" },
+      { "name": "Sandbox", "class_name": "Sandbox" }
     ]
   },
+
+  // Interactive terminals run in room-isolated Linux containers. The image
+  // and npm package deliberately use the same Sandbox 1.0 preview line.
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "docker.io/cloudflare/sandbox:next",
+      "instance_type": "basic",
+      "max_instances": 5
+    }
+  ],
 
   // Never edit a migration that has shipped — add a new tag instead.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Room"] },
-    { "tag": "v2", "new_sqlite_classes": ["UserIndex"] }
+    { "tag": "v2", "new_sqlite_classes": ["UserIndex"] },
+    { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
   ],
 
   "observability": { "enabled": true }

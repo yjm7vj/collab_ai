@@ -24,8 +24,7 @@ import {
   type WorkerStatus,
 } from "../shared/protocol";
 import { inlineMarkdown } from "./markdown";
-import type { FsRequest, FsResponse, WorkspaceInfo } from "../shared/workspace";
-import { IdePanel } from "./IdePanel";
+import type { WorkspaceInfo } from "../shared/workspace";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { contextUsage } from "../shared/context";
 import { ROLES, outranks, type Role } from "../shared/access";
@@ -2080,9 +2079,6 @@ export function WorkspacePanel({
   onAuthGithub,
   onListRepos,
   onSignOutGithub,
-  onRequest,
-  canEdit,
-  initialView = "connections",
   onClose,
 }: {
   workspace: WorkspaceInfo;
@@ -2098,16 +2094,12 @@ export function WorkspacePanel({
   onAuthGithub: () => void;
   onListRepos: () => void;
   onSignOutGithub: () => void;
-  onRequest: (req: FsRequest) => Promise<FsResponse>;
-  canEdit: boolean;
-  initialView?: WorkspaceView;
   onClose: () => void;
 }) {
   const attached = workspace.kind !== "none";
   const [allowWrites, setAllowWrites] = useState(false);
   const [repo, setRepo] = useState("");
   const [filter, setFilter] = useState("");
-  const [view, setView] = useState<WorkspaceView>(initialView);
 
   // Fetch the repository list the moment the panel knows there is an
   // authorised account, rather than making someone click "load" to see the
@@ -2143,7 +2135,7 @@ export function WorkspacePanel({
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div
-        className={view === "ide" ? "modal workspace-modal workspace-modal-ide" : "modal workspace-modal"}
+        className="modal workspace-modal"
         role="dialog"
         aria-label="Workspace"
         onClick={(e) => e.stopPropagation()}
@@ -2151,31 +2143,14 @@ export function WorkspacePanel({
         <header className="modal-head">
           <div>
             <h2>Workspace</h2>
-            <p className="field-note">Connect files or edit code in the same workspace.</p>
+            <p className="field-note">Connect local files or a GitHub repository.</p>
           </div>
           <button className="icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </header>
 
-        <nav className="workspace-tabs" aria-label="Workspace views">
-          <button type="button" className={view === "connections" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("connections")}>
-            Connections
-          </button>
-          <button type="button" className={view === "ide" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("ide")}>
-            IDE
-          </button>
-        </nav>
-
-        {view === "ide" ? (
-          <IdePanel
-            embedded
-            workspace={workspace}
-            canEdit={canEdit}
-            onRequest={onRequest}
-            onClose={onClose}
-          />
-        ) : <div className="modal-body">
+        <div className="modal-body">
           {!attached ? (
             <div className="ws-options">
               {supported ? (
@@ -2465,30 +2440,30 @@ export function WorkspacePanel({
               <button className="ws-disconnect" onClick={onDetach}>Disconnect</button>
             </section>
           )}
-        </div>}
+        </div>
       </div>
     </div>
   );
 }
 
-export type WorkspaceView = "connections" | "ide";
-
-/** The two launchers share one panel and differ only in its initial view. */
+/** Workspace keeps its existing connection panel; Terminal opens separately. */
 export function WorkspaceActions({
   visible,
-  onOpen,
+  onWorkspace,
+  onTerminal,
 }: {
   visible: boolean;
-  onOpen: (view: WorkspaceView) => void;
+  onWorkspace: () => void;
+  onTerminal: () => void;
 }) {
   if (!visible) return null;
   return (
     <>
-      <button type="button" className="chat-action" onClick={() => onOpen("connections")}>
+      <button type="button" className="chat-action" onClick={onWorkspace}>
         Workspace
       </button>
-      <button type="button" className="chat-action" onClick={() => onOpen("ide")}>
-        IDE
+      <button type="button" className="chat-action" onClick={onTerminal}>
+        Terminal
       </button>
     </>
   );

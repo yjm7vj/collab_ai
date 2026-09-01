@@ -58,18 +58,20 @@ describe("context token accounting", () => {
   });
 });
 
-describe("unified workspace IDE", () => {
-  it("places IDE immediately after Workspace in the chat actions", () => {
+describe("workspace and terminal", () => {
+  it("places Terminal immediately after Workspace in the chat actions", () => {
     const html = renderToStaticMarkup(createElement(WorkspaceActions, {
       visible: true,
-      onOpen: () => undefined,
+      onWorkspace: () => undefined,
+      onTerminal: () => undefined,
     }));
     expect(html.indexOf(">Workspace<")).toBeGreaterThan(-1);
-    expect(html.indexOf(">IDE<")).toBeGreaterThan(html.indexOf(">Workspace<"));
+    expect(html.indexOf(">Terminal<")).toBeGreaterThan(html.indexOf(">Workspace<"));
+    expect(html).not.toContain(">IDE<");
     expect(html).not.toContain("Code workspace");
   });
 
-  it("keeps local and GitHub connections beside the IDE in one Workspace panel", () => {
+  it("keeps the Workspace panel focused on local and GitHub connections", () => {
     const html = renderToStaticMarkup(createElement(WorkspacePanel, {
       workspace: NO_WORKSPACE,
       supported: true,
@@ -84,15 +86,12 @@ describe("unified workspace IDE", () => {
       onAuthGithub: () => undefined,
       onListRepos: () => undefined,
       onSignOutGithub: () => undefined,
-      onRequest: async () => ({ ok: false, error: "not connected" }),
-      canEdit: false,
-      initialView: "connections",
       onClose: () => undefined,
     }));
 
     expect(html).toContain("A Folder On Your Computer");
     expect(html).toContain("A GitHub Repository");
-    expect(html).toContain(">Connections<");
-    expect(html).toContain(">IDE<");
+    expect(html).not.toContain(">Terminal<");
+    expect(html).not.toContain(">IDE<");
   });
 });

@@ -7,6 +7,7 @@
  */
 
 import { routeAgentRequest, getAgentByName } from "agents";
+import { getSandbox } from "@cloudflare/sandbox";
 
 import { mintToken, newId, verifyToken } from "./auth";
 import {
@@ -26,6 +27,12 @@ import { githubConfigured, githubRepositoryAuthorization } from "./github-config
 import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
 import { sanitizeLibraryPush, type LibrarySyncResponse } from "../shared/library";
 import {
+  TERMINAL_TICKET_TTL_SECONDS,
+  terminalSandboxId,
+  terminalTicketMatches,
+  terminalTicketRole,
+} from "./terminal";
+import {
   ROOM_ID_RE,
   UID_RE,
   IDENTITY_MARKER,
@@ -38,6 +45,7 @@ import {
 
 export { Room } from "./room";
 export { UserIndex } from "./userIndex";
+export { Sandbox } from "@cloudflare/sandbox";
 
 // A token is a session, not a membership — membership outlives it and is
 // re-checked against the room's own member table on every connect.
@@ -52,6 +60,19 @@ function json(body: unknown, status = 200): Response {
 
 async function roomStub(env: Env, roomId: string) {
   return await getAgentByName(env.Room, roomId);
+}
+
+/** Re-check live membership and role before every terminal operation. */
+async function terminalAuthorized(env: Env, roomId: string, uid: string): Promise<boolean> {
+  const response = await (await roomStub(env, roomId)).fetch("https://room/authorize-terminal", {
+    method: "POST",
+    body: JSON.stringify({ uid }),
+    headers: {
+      "content-type": "application/json",
+      "x-internal-auth": env.ROOM_SECRET,
+    },
+  });
+  return response.ok;
 }
 
 /**
@@ -197,6 +218,87 @@ export default {
           "it, nothing can verify who is allowed into a room.",
         { status: 500 },
       );
+    }
+
+    const terminalRoomMatch = url.pathname.match(/^\/api\/rooms\/([0-9A-Za-z]{22})\/terminal$/);
+    if (terminalRoomMatch) {
+      if (request.method !== "POST" && request.method !== "DELETE") {
+        return json({ error: "bad_request" }, 405);
+      }
+
+      let body: { token?: unknown; terminalId?: unknown };
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      const roomId = terminalRoomMatch[1]!;
+      const token = typeof body.token === "string" ? body.token : "";
+      const claims = token ? await verifyToken(env.ROOM_SECRET, token) : null;
+      if (!claims || claims.rid !== roomId || !UID_RE.test(claims.uid)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      if (!(await terminalAuthorized(env, roomId, claims.uid))) {
+        return json({ error: "forbidden" }, 403);
+      }
+
+      const sandbox = getSandbox(env.Sandbox, terminalSandboxId(roomId));
+      if (request.method === "DELETE") {
+        const terminalId = typeof body.terminalId === "string" ? body.terminalId : "";
+        if (!terminalId) return json({ error: "bad_request" }, 400);
+        const terminal = await sandbox.getTerminal(terminalId);
+        if (terminal) await terminal.terminate();
+        return new Response(null, { status: 204 });
+      }
+
+      try {
+        const terminal = await sandbox.createTerminal({
+          command: ["/bin/bash", "-l"],
+          cwd: "/workspace",
+          cols: 120,
+          rows: 36,
+          env: { TERM: "xterm-256color" },
+        });
+        const ticket = await mintToken(env.ROOM_SECRET, {
+          rid: roomId,
+          uid: claims.uid,
+          role: terminalTicketRole(terminal.id),
+          exp: Math.floor(Date.now() / 1000) + TERMINAL_TICKET_TTL_SECONDS,
+        });
+        return json({
+          sandboxId: terminalSandboxId(roomId),
+          terminalId: terminal.id,
+          ticket,
+        });
+      } catch {
+        return json({ error: "terminal_unavailable" }, 503);
+      }
+    }
+
+    if (url.pathname === "/api/terminal/connect") {
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return json({ error: "bad_request" }, 400);
+      }
+      const origin = request.headers.get("Origin");
+      if (origin && origin !== url.origin) return json({ error: "forbidden" }, 403);
+
+      const terminalId = url.searchParams.get("terminalId") ?? "";
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const claims = ticket ? await verifyToken(env.ROOM_SECRET, ticket) : null;
+      if (!terminalTicketMatches(claims, terminalId)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      if (!(await terminalAuthorized(env, claims.rid, claims.uid))) {
+        return json({ error: "forbidden" }, 403);
+      }
+
+      const sandbox = getSandbox(env.Sandbox, terminalSandboxId(claims.rid));
+      const terminal = await sandbox.getTerminal(terminalId);
+      if (!terminal) return json({ error: "not_found" }, 404);
+      return terminal.connect(request, {
+        cursor: url.searchParams.get("cursor") ?? undefined,
+      });
     }
 
     if (url.pathname === "/api/rooms") {
