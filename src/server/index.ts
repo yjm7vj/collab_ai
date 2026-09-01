@@ -26,6 +26,7 @@ import { appSlug, listUserInstallations } from "./github";
 import { githubConfigured, githubRepositoryAuthorization } from "./github-config";
 import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
 import { sanitizeLibraryPush, type LibrarySyncResponse } from "../shared/library";
+import { sanitizeSkillsPush, type SkillsSyncResponse } from "../shared/skills";
 import {
   ROOM_ID_RE,
   UID_RE,
