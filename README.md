@@ -85,7 +85,7 @@ every keystroke, so it is broadcast as explicit deltas instead.
 npm install
 ```
 
-Copy `.dev.vars.example` to `.dev.vars` (gitignored) and fill it in. At minimum
+Create `.dev.vars` in the project root (gitignored) and fill it in. At minimum
 you need:
 
 ```
