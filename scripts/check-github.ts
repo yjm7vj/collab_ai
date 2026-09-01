@@ -1287,6 +1287,52 @@ async function main() {
     }
 
     {
+      // Ordering is the whole point. Once reads follow the working branch, a
+      // branch that is behind has to be moved up BEFORE the read: catching
+      // it up afterwards means the edit matched stale text and then commits
+      // that stale text over whatever had been merged in between, silently
+      // reverting the file.
+      const { calls, fetchImpl } = branchStub({ comparison: "behind", fileText: "one two three" });
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", fetchImpl, true);
+      const res = await provider.perform(editReq);
+      check("an edit that reads the working branch still succeeds", res.ok === true, res);
+
+      const patchAt = calls.findIndex((c) => c.method === "PATCH");
+      const readAt = calls.findIndex((c) => c.method === "GET" && c.url.includes("/contents"));
+      check(
+        "the branch is caught up before the file is read, not after",
+        patchAt !== -1 && readAt !== -1 && patchAt < readAt,
+        { patchAt, readAt, calls: calls.map((c) => `${c.method} ${c.url}`) },
+      );
+      check(
+        "the read then asks for the working branch",
+        calls.some((c) => c.method === "GET" && c.url.includes("/contents") && c.url.includes("collab-ai")),
+        calls.map((c) => `${c.method} ${c.url}`),
+      );
+      // Three calls answer "is this branch behind". Asking twice in one edit
+      // would waste a fifth of a fifty-subrequest budget for nothing.
+      check(
+        "the branch is compared once per edit, not once per caller",
+        calls.filter((c) => c.url.includes("/compare/")).length === 1,
+        calls.map((c) => `${c.method} ${c.url}`),
+      );
+    }
+
+    {
+      // A room that has never written must not reach for a branch that may
+      // not exist — the flag is what says one does.
+      const { calls, fetchImpl } = branchStub({ comparison: "behind", fileText: "one two three" });
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", fetchImpl, false);
+      await provider.perform(editReq);
+      const readAt = calls.findIndex((c) => c.method === "GET" && c.url.includes("/contents"));
+      check(
+        "without the flag nothing is compared before the read",
+        !calls.slice(0, readAt).some((c) => c.url.includes("/compare/")),
+        calls.map((c) => `${c.method} ${c.url}`),
+      );
+    }
+
+    {
       // A freshly created branch is already at the base head, so asking
       // GitHub to compare it would be a wasted request on every first write.
       const created = (async (input: unknown, init?: RequestInit) => {

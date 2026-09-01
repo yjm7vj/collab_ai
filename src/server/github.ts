@@ -745,6 +745,7 @@ export class GithubProvider implements WorkspaceProvider {
    * has accumulated.
    */
   #readWorking: boolean;
+  #synced = false;
 
   constructor(
     token: string,
@@ -1097,37 +1098,52 @@ export class GithubProvider implements WorkspaceProvider {
    * straight to the default branch, only to `#branch`, which later becomes
    * a pull request a human reviews.
    */
+  /**
+   * Catch the working branch up to its base. Never creates one.
+   *
+   * Split out from #ensureWorkingBranch so it can run BEFORE a read. Once
+   * #readWorking is set, reads resolve against the working branch, so a
+   * branch left behind by an earlier round has to be moved up before the
+   * read rather than after it — otherwise an edit matches against stale
+   * text, the branch is caught up underneath it, and the commit writes that
+   * stale text over whatever had been merged in the meantime. That reverts
+   * the file silently, which is worse than the stale pull request it
+   * replaced.
+   *
+   * Idempotent within one operation: the provider is constructed per
+   * request, so the flag just stops #ensureWorkingBranch repeating the three
+   * calls this already made.
+   */
+  async #syncWorkingBranch(): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.#synced) return { ok: true };
+    this.#synced = true;
+
+    const head = await refHead(this.#token, this.#ref, this.#fetchImpl);
+    if (!head.ok) return head;
+    const base = await resolveBranchName(this.#token, this.#ref, this.#fetchImpl);
+    if (!base.ok) return base;
+
+    // Only "behind" is safe: every commit on the branch is already in the
+    // base, so nothing is lost. Ahead or diverged means work waiting on a
+    // pull request, which is left exactly where it is. A comparison that
+    // cannot be made leaves the branch alone too — that is what happened
+    // before any of this existed, and a stale edit beats a room that cannot
+    // write at all.
+    const comparison = await compareBranches(this.#token, this.#ref, base.branch, this.#branch, this.#fetchImpl);
+    if (!comparison.ok || comparison.status !== "behind") return { ok: true };
+
+    return await fastForwardBranch(this.#token, this.#ref, this.#branch, head.sha, this.#fetchImpl);
+  }
+
   async #ensureWorkingBranch(): Promise<{ ok: true } | { ok: false; error: string }> {
     const head = await refHead(this.#token, this.#ref, this.#fetchImpl);
     if (!head.ok) return head;
     const branch = await ensureBranch(this.#token, this.#ref, this.#branch, head.sha, this.#fetchImpl);
     if (!branch.ok) return branch;
+    // A branch this call just created is already at the base head; only one
+    // that survived from an earlier round can be behind.
     if (branch.created) return { ok: true };
-
-    // The branch already existed, which used to be the end of it — and that
-    // is how it went stale. ensureBranch never moves a branch it did not
-    // create, so a working branch left behind by an earlier round stayed
-    // pinned at whatever commit it was abandoned on while the base moved on.
-    // Every later edit was then built on that old tree: the room reads a
-    // file, writes it back, and the resulting pull request reads as though
-    // it reverts everything merged in between.
-    //
-    // Catching up is only safe when the branch carries no work of its own,
-    // so the comparison decides. "behind" means every commit on it is
-    // already in the base — nothing to lose. Anything else is pending work
-    // and is left exactly where it is.
-    const base = await resolveBranchName(this.#token, this.#ref, this.#fetchImpl);
-    if (!base.ok) return base;
-    const comparison = await compareBranches(this.#token, this.#ref, base.branch, this.#branch, this.#fetchImpl);
-    // A comparison that cannot be made is not a reason to refuse the write.
-    // Using the branch as-is is exactly what happened before any of this
-    // existed, so it stays the fallback: a stale edit beats a room that
-    // cannot write at all.
-    if (!comparison.ok || comparison.status !== "behind") return { ok: true };
-
-    const moved = await fastForwardBranch(this.#token, this.#ref, this.#branch, head.sha, this.#fetchImpl);
-    if (!moved.ok) return moved;
-    return { ok: true };
+    return await this.#syncWorkingBranch();
   }
 
   async #write(path: string, content: string): Promise<FsResponse> {
@@ -1163,6 +1179,15 @@ export class GithubProvider implements WorkspaceProvider {
     // a prior write succeeded, #readRef() follows the working branch instead.
     // Reading the working branch unconditionally here made a freshly-read
     // base-branch span look missing to edit_file.
+    // Before reading, not after matching: #readRef() follows the working
+    // branch once one exists, and a stale branch would otherwise hand this
+    // edit an old copy of the file. #readWorking is only ever set after a
+    // write succeeded, so the branch is known to exist here.
+    if (this.#readWorking) {
+      const synced = await this.#syncWorkingBranch();
+      if (!synced.ok) return synced;
+    }
+
     const current = await this.#readOnBranch(path, this.#readRef().ref);
     if (!current.ok) return current;
 
