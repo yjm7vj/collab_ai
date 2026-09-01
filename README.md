@@ -68,6 +68,10 @@ every keystroke, so it is broadcast as explicit deltas instead.
 | `src/server/model.ts` | System prompt and the streaming Anthropic call. |
 | `src/server/workspace.ts` | The local-folder-relay side of the workspace protocol, run inside the Room. |
 | `src/server/github.ts` | The GitHub App client: JWT/installation tokens, the contents API, branches and pull requests. |
+| `src/server/oauth.ts` | Sign-in: authorize URLs, code exchange, the signed state parameter, derived uids. |
+| `src/server/userIndex.ts` | Maps a signed-in identity to the rooms it belongs to. |
+| `src/shared/models.ts` | The model capability table — which models accept `temperature`, which effort levels each supports. |
+| `src/shared/workflow.ts` | Workflow graph shape, `sanitizeGraph`'s caps and model-by-role rules. |
 | `src/shared/access.ts` | Roles, capabilities, permission modes and the path policy shape — read by both server and client. |
 | `src/shared/workspace.ts` | The path deny list, file-size limits, and the wire format for filesystem requests. |
 | `src/shared/protocol.ts` | Wire types shared by both sides. |
@@ -81,7 +85,7 @@ every keystroke, so it is broadcast as explicit deltas instead.
 npm install
 ```
 
-Copy `.dev.vars.example` to `.dev.vars` (gitignored) and fill it in. At minimum
+Create `.dev.vars` in the project root (gitignored) and fill it in. At minimum
 you need:
 
 ```
@@ -554,11 +558,29 @@ credentials.
 
 The check suites above are unit-level guards on the security-sensitive
 primitives: token verification, path policy, role capabilities, settings
-sanitisation. `test/access.test.ts` and `test/config.test.ts` (`npm run
-test:integration`) go one level up, through the real Worker `fetch()` entry
-point: room creation, invite admission, role assignment, and the WebSocket
-token gate, plus a check that `wrangler.jsonc`'s actual on-disk routing config
-is what the tests assumed it was.
+sanitisation. The `test/` suite (`npm run test:integration`) goes one level up,
+through the real Worker `fetch()` entry point:
+
+- `access.test.ts` — room creation, invite admission, role assignment, and the
+  WebSocket token gate.
+- `config.test.ts` — that `wrangler.jsonc`'s actual on-disk routing config is
+  what the other tests assumed it was.
+- `github-oauth.test.ts` — one registered callback URL serves both sign-in and
+  repository authorisation, told apart by nothing but the signed `state`
+  parameter, so most of the file asks whether one flow's state can be replayed
+  as the other's. Nothing reaches the network; every case is arranged so the
+  Worker refuses before it would call GitHub.
+- `sidebar-sync.test.ts` and `library-sync.test.ts` — the `UserIndex` Durable
+  Object behind `/api/sidebar` and `/api/workflows`, which exists so a sidebar
+  and a workflow library belong to an account rather than to one browser's
+  `localStorage`. The interesting part is what happens when two signed-in
+  browsers disagree, and — for the library, whose rows are agent graphs that
+  decide which models get called — that a graph a room must never run comes
+  back sanitised into one it can.
+- `presence-exit.test.ts` — leaving a room, and what the transcript and
+  presence list say afterwards.
+- `turn-resume.test.ts` — eviction mid-round; see the note below for what it
+  does and doesn't reach.
 
 Driven in a real browser: presence, message attribution, streaming, the approval
 pause, live vote tallies, approve-then-resume, deny-then-resume, API-error
