@@ -137,6 +137,16 @@ export function repoAuthorizeUrl(clientId: string, redirectUri: string, state: s
   return `https://github.com/login/oauth/authorize?${params.toString()}`;
 }
 
+/** Begin GitHub App user authorization without requesting OAuth App scopes. */
+export function githubAppAuthorizeUrl(clientId: string, redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    state,
+  });
+  return `https://github.com/login/oauth/authorize?${params.toString()}`;
+}
+
 /** Pull a human-readable error out of a provider's token/error response body. */
 function extractError(body: Record<string, unknown> | null): string | null {
   if (!body) return null;

@@ -468,7 +468,7 @@ Two secrets are required; the Worker refuses every request without them:
 - `ROOM_SECRET` — signs and verifies the HMAC session tokens; without it nothing
   can prove who is allowed into a room.
 
-Three more are optional, and only affect the GitHub provider — without them,
+Five more are optional, and only affect the GitHub provider — without them,
 GitHub workspaces are simply unavailable and everything else in the app still
 works:
 
@@ -476,6 +476,9 @@ works:
 - `GITHUB_APP_PRIVATE_KEY` — the GitHub App's PEM private key
 - `GITHUB_APP_SLUG` — the app's URL slug (public; it appears in the app's own
   URL), used only to send a room owner straight to the install page
+- `GITHUB_APP_CLIENT_ID` — authorizes a user to this GitHub App so HuddleAI can
+  discover installations they may access
+- `GITHUB_APP_CLIENT_SECRET` — the secret paired with that GitHub App client id
 
 Locally, put all of these in `.dev.vars`. Deployed:
 
@@ -485,9 +488,13 @@ npx wrangler secret put ROOM_SECRET
 npx wrangler secret put GITHUB_APP_ID
 npx wrangler secret put GITHUB_APP_PRIVATE_KEY
 npx wrangler secret put GITHUB_APP_SLUG
+npx wrangler secret put GITHUB_APP_CLIENT_ID
+npx wrangler secret put GITHUB_APP_CLIENT_SECRET
 ```
 
-Sign-in uses separate OAuth credentials. Put the provider client id and
+Sign-in uses separate OAuth App credentials. They cannot replace the GitHub App
+client credentials above: OAuth App tokens are not authorized to list GitHub
+App installations. Put the provider client id and
 secret in local `.dev.vars` (never in the client bundle), and register these
 exact callback URLs with the providers when running locally:
 

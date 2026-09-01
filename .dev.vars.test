@@ -1,0 +1,2 @@
+# Intentionally empty. Integration tests provide their two required fake
+# secrets through vitest.config.ts and must not inherit local OAuth settings.

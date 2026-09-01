@@ -29,10 +29,11 @@ import {
   Transcript,
   WorkerStrip,
   WorkspacePanel,
+  WorkspaceActions,
+  type WorkspaceView,
   ThemeToggle,
   type ThemeMode,
 } from "./components";
-import { IdePanel } from "./IdePanel";
 import { SettingsPanel } from "./Settings";
 import { WorkflowPanel } from "./Workflow";
 import {
@@ -115,7 +116,7 @@ export function RoomView({
   const [reposLoading, setReposLoading] = useState(false);
   const [toolDisplay, setToolDisplay] = useState<"hidden" | "compact" | "full">("hidden");
   const [showDocument, setShowDocument] = useState(false);
-  const [showIde, setShowIde] = useState(false);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("connections");
   const pendingClientFs = useRef(new Map<string, { resolve: (res: FsResponse) => void; timer: number }>());
   // The picked directory handle isn't rendered, so it lives in a ref rather
   // than state — putting it in state would just cause re-renders nothing reads.
@@ -552,6 +553,7 @@ export function RoomView({
   useEffect(() => {
     const githubMarker = new URLSearchParams(location.search).get("gh");
     if (githubMarker !== "connected" && githubMarker !== "installed") return;
+    setWorkspaceView("connections");
     setShowWorkspace(true);
     // Wait for the socket. This effect runs on mount, which is before the
     // WebSocket has opened, and a frame sent then is simply dropped — the
@@ -822,22 +824,11 @@ export function RoomView({
                       role="menuitem"
                       onClick={() => {
                         setShowSettingsMenu(false);
+                        setWorkspaceView("connections");
                         setShowWorkspace(true);
                       }}
                     >
                     Workspace
-                  </button>
-                )}
-                {mayPolicy && (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setShowSettingsMenu(false);
-                      setShowIde(true);
-                    }}
-                  >
-                    Code workspace
                   </button>
                 )}
               </section>
@@ -936,13 +927,7 @@ export function RoomView({
           onAuthGithub={authGithub}
           onListRepos={listRepos}
           onSignOutGithub={signOutGithub}
-          onClose={() => setShowWorkspace(false)}
-        />
-      )}
-
-      {showIde && (
-        <IdePanel
-          workspace={state.workspace}
+          onRequest={requestWorkspace}
           canEdit={
             canSeeFileContents(myRole) &&
             // Unknown is not denied: a repository connected before the write
@@ -950,8 +935,8 @@ export function RoomView({
             // off on upgrade would break rooms that can write perfectly well.
             (state.workspace.kind === "github" ? state.workspace.canWrite !== false : canWrite)
           }
-          onRequest={requestWorkspace}
-          onClose={() => setShowIde(false)}
+          initialView={workspaceView}
+          onClose={() => setShowWorkspace(false)}
         />
       )}
 
@@ -1053,24 +1038,13 @@ export function RoomView({
                     Permissions
                   </button>
                 )}
-                {mayPolicy && (
-                  <button
-                    type="button"
-                    className="chat-action"
-                    onClick={() => setShowWorkspace(true)}
-                  >
-                    Workspace
-                  </button>
-                )}
-                {mayPolicy && (
-                  <button
-                    type="button"
-                    className="chat-action"
-                    onClick={() => setShowIde(true)}
-                  >
-                    Code workspace
-                  </button>
-                )}
+                <WorkspaceActions
+                  visible={mayPolicy}
+                  onOpen={(view) => {
+                    setWorkspaceView(view);
+                    setShowWorkspace(true);
+                  }}
+                />
               </>
             }
             onSend={say}

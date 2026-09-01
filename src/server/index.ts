@@ -22,6 +22,7 @@ import {
   type OAuthProvider,
 } from "./oauth";
 import { appSlug, listUserInstallations } from "./github";
+import { githubConfigured, githubRepositoryAuthorization } from "./github-config";
 import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
 import { sanitizeLibraryPush, type LibrarySyncResponse } from "../shared/library";
 import {
@@ -86,25 +87,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
 const EMAIL_MAX = 254;
 const WAITLIST_NAME_MAX = 64;
 
-/**
- * Whether this Worker has both GitHub App secrets configured. GitHub
- * workspaces are an optional feature: absent these, everything else in the
- * app still works, so callers use this to degrade cleanly rather than error.
- */
-function githubConfigured(env: Env): boolean {
-  return Boolean(env.GITHUB_APP_ID) && Boolean(env.GITHUB_APP_PRIVATE_KEY);
-}
-
-/**
- * Whether repository access over plain OAuth is available. This reuses the
- * sign-in OAuth App, so a deployment that has configured sign-in with GitHub
- * gets repository connection for free — no GitHub App, no private key, no
- * PKCS#8 conversion.
- */
-function githubOAuthConfigured(env: Env): boolean {
-  return isConfigured(providerConfig(env, "github"));
-}
-
 /** Pull the client id/secret pair for an OAuth sign-in provider off env. */
 function providerConfig(env: Env, provider: "github" | "google"): { clientId?: string; clientSecret?: string } {
   if (provider === "github") {
@@ -118,20 +100,9 @@ function providerConfig(env: Env, provider: "github" | "google"): { clientId?: s
  * becomes a button on the sign-in screen, so configuring two offers a
  * choice rather than a single mandatory account type.
  *
- * A room voted once to drop GitHub from this list, on the reasoning that
- * `GITHUB_OAUTH_CLIENT_ID`/`SECRET` do double duty — they also power the
- * in-room "Connect GitHub" repository flow — so their presence was forcing
- * a login on everyone as a side effect of some room wanting repository
- * access. The reasoning was sound; the conclusion has since been reversed
- * deliberately. Requiring sign-in is now the intent, not an accident of
- * which secrets happen to be set, and GitHub is offered alongside Google
- * rather than being the only way in.
- *
- * The dual-duty point still stands where it matters, and is enforced
- * elsewhere: signing in asks only for `read:user`, and the repository scope
- * is requested separately, at the moment someone connects a repository. See
- * authorizeUrl and repoAuthorizeUrl in ./oauth. Signing in here never grants
- * this app access to anyone's code.
+ * GitHub sign-in uses a standalone OAuth App and remains independent from the
+ * GitHub App user authorization used for repository installations. Signing in
+ * asks only for `read:user`; it never grants repository access.
  */
 function configuredProviders(env: Env): ("github" | "google")[] {
   return (["github", "google"] as const).filter((provider) => isConfigured(providerConfig(env, provider)));
@@ -489,7 +460,6 @@ export default {
     if (authCallbackMatch) {
       const provider = authCallbackMatch[1] as OAuthProvider;
       const cfg = providerConfig(env, provider);
-      if (!isConfigured(cfg)) return json({ error: "not_found" }, 404);
 
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
@@ -514,12 +484,13 @@ export default {
               { status: 400 },
             );
           }
-          if (!githubOAuthConfigured(env)) return json({ error: "not_found" }, 404);
+          const repositoryAuth = githubRepositoryAuthorization(env);
+          if (!repositoryAuth) return json({ error: "not_found" }, 404);
 
           const redirectUri = `${url.origin}/api/auth/github/callback`;
           const exchanged = await exchangeCode(
             "github",
-            cfg as { clientId: string; clientSecret: string },
+            repositoryAuth.config,
             code,
             redirectUri,
           );
@@ -613,6 +584,8 @@ export default {
         // fall through to the ordinary sign-in verification below, which
         // rejects it on its own terms if it isn't valid sign-in state either.
       }
+
+      if (!isConfigured(cfg)) return json({ error: "not_found" }, 404);
 
       // This is what stops a forged callback: verifyState only accepts a
       // token this server minted via signState. It also rejects a room

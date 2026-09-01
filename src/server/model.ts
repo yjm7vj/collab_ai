@@ -319,6 +319,16 @@ export type Usage = {
 
 export type ModelResult = { message: Message; usage: Usage };
 
+/** Auxiliary model calls add cost but must not replace the main room prompt size. */
+export function contextTokensAfterUsage(
+  currentTokens: number,
+  usage: Usage | null | undefined,
+  mainPrompt: boolean,
+): number {
+  if (!usage || !mainPrompt || !Number.isFinite(usage.promptTokens)) return currentTokens;
+  return Math.max(0, Math.round(usage.promptTokens));
+}
+
 /** Default and maximum output budgets for the room's lead agent. */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_000;
 export const MAX_MAIN_OUTPUT_TOKENS = 128_000;
@@ -466,6 +476,30 @@ function readUsage(message: Message, model: string): Usage {
     // The true prompt size: uncached remainder plus everything served from cache.
     promptTokens: input + created + read,
   };
+}
+
+/** Count the exact main-agent prompt after a context-changing operation. */
+export async function countMainPromptTokens(
+  cfg: ModelConfig,
+  settings: RoomSettings,
+  graph: WorkflowGraph | null,
+  messages: MessageParam[],
+  tools: unknown[],
+): Promise<number> {
+  if (cfg.apiKey === "mock") return 0;
+  const plan = leadPlanFor(settings, graph);
+  const params = buildParams(
+    plan.model,
+    settings.effort,
+    settings.temperature,
+    plan.system,
+    tools,
+    messages,
+    "long",
+  );
+  const { max_tokens: _maxTokens, temperature: _temperature, ...countParams } = params;
+  const result = await client(cfg).messages.countTokens(countParams as never);
+  return Math.max(0, Math.round(result.input_tokens));
 }
 
 /* --------------------------------------------------------- the main agent */

@@ -22,6 +22,10 @@ interface SecretBindings {
    * src/server/github.ts for the openssl conversion GitHub's PKCS#1 key needs.
    */
   GITHUB_APP_PRIVATE_KEY: string;
+  /** Optional. Client id used to authorize a user to this GitHub App. */
+  GITHUB_APP_CLIENT_ID?: string;
+  /** Optional. Client secret paired with GITHUB_APP_CLIENT_ID. */
+  GITHUB_APP_CLIENT_SECRET?: string;
   /**
    * Optional. The GitHub App's URL slug (public — it appears in the app's own
    * URL), used only to send a room owner straight to the install page instead

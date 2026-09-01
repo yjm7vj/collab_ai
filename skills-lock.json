@@ -7,6 +7,18 @@
       "skillPath": "SKILL.md",
       "computedHash": "1ecc71d212ca31e9cec683649adeff193ad1326f3d4eca24f618cb1a1c8457ee"
     },
+    "supabase": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase/SKILL.md",
+      "computedHash": "a6260582f48df8ba53380bb9b9e870ed2ae5fe147799e90ed783b8aa25167d50"
+    },
+    "supabase-postgres-best-practices": {
+      "source": "supabase/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/supabase-postgres-best-practices/SKILL.md",
+      "computedHash": "128fac78002d916c8ca908245d398e634f540d8bcf20915b2b2359aeb18eba59"
+    },
     "unlazy": {
       "source": "Leonxlnx/unlazy",
       "sourceType": "github",

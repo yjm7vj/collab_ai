@@ -16,11 +16,13 @@ export function IdePanel({
   canEdit,
   onRequest,
   onClose,
+  embedded = false,
 }: {
   workspace: WorkspaceInfo;
   canEdit: boolean;
   onRequest: (req: FsRequest) => Promise<FsResponse>;
   onClose: () => void;
+  embedded?: boolean;
 }) {
   const [files, setFiles] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
@@ -32,13 +34,21 @@ export function IdePanel({
   const [newPath, setNewPath] = useState("");
 
   const loadFiles = useCallback(async () => {
+    if (workspace.kind === "none" || !workspace.online) {
+      setFiles([]);
+      setSelected("");
+      setContent("");
+      setDirty(false);
+      setError(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     const response = await onRequest({ op: "list", path: "", depth: 4, deny: [] });
     if (!response.ok) setError(response.error);
     else setFiles(filesFromListing(response.data));
     setLoading(false);
-  }, [onRequest]);
+  }, [onRequest, workspace.kind, workspace.online]);
 
   useEffect(() => { void loadFiles(); }, [loadFiles]);
 
@@ -85,12 +95,19 @@ export function IdePanel({
   }, [canEdit, workspace.kind, workspace.online]);
 
   return (
-    <div className="modal-scrim" onClick={onClose}>
-      <div className="modal ide-modal" role="dialog" aria-label="Code workspace" onClick={(e) => e.stopPropagation()}>
-        <header className="modal-head">
-          <div><h2>Code workspace</h2><p className="ide-status">{status}</p></div>
-          <button className="icon" onClick={onClose} aria-label="Close code workspace">✕</button>
-        </header>
+    <div className={embedded ? "ide-embedded" : "modal-scrim"} onClick={embedded ? undefined : onClose}>
+      <div className={embedded ? "ide-shell" : "modal ide-modal"} role="dialog" aria-label="IDE" onClick={(e) => e.stopPropagation()}>
+        {embedded ? (
+          <div className="ide-context-bar">
+            <strong>IDE</strong>
+            <span className="ide-status">{status}</span>
+          </div>
+        ) : (
+          <header className="modal-head">
+            <div><h2>IDE</h2><p className="ide-status">{status}</p></div>
+            <button className="icon" onClick={onClose} aria-label="Close IDE">✕</button>
+          </header>
+        )}
         <div className="ide-toolbar">
           <button type="button" onClick={() => void loadFiles()} disabled={loading}>Refresh</button>
           {canEdit && (

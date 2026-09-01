@@ -13,6 +13,7 @@ import {
   deriveUid,
   exchangeCode,
   fetchProfile,
+  githubAppAuthorizeUrl,
   GITHUB_REPO_SCOPE,
   GITHUB_REPO_STATE_ROLE,
   isConfigured,
@@ -21,6 +22,7 @@ import {
   signState,
   verifyState,
 } from "../src/server/oauth";
+import { githubRepositoryAuthorization } from "../src/server/github-config";
 import { UID_RE } from "../src/shared/protocol";
 
 let failures = 0;
@@ -296,11 +298,58 @@ async function main() {
     );
     check("repoAuthorizeUrl leaks no client secret", !url.href.includes("client_secret"), url.href);
 
+    const appUrl = new URL(
+      githubAppAuthorizeUrl("app-client", "https://app.example/api/auth/github/callback", "app-state"),
+    );
+    check("githubAppAuthorizeUrl carries the GitHub App client id", appUrl.searchParams.get("client_id") === "app-client");
+    check("githubAppAuthorizeUrl carries no OAuth App repository scope", appUrl.searchParams.get("scope") === null, appUrl.href);
+
     // The whole reason the two builders are kept apart. If this ever fails,
     // merely signing in would hand this app read and write access to every
     // repository the person can reach, which is not what sign-in is for.
     const signIn = new URL(authorizeUrl("github", "client-123", "https://app.example/cb", "s"));
     check("sign-in never asks for the repo scope", signIn.searchParams.get("scope") === "read:user", signIn.href);
+  }
+
+  console.log("\nrepository credential routing");
+  {
+    const split = githubRepositoryAuthorization({
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_PRIVATE_KEY: "private-key",
+      GITHUB_APP_CLIENT_ID: "github-app-client",
+      GITHUB_APP_CLIENT_SECRET: "github-app-secret",
+      GITHUB_OAUTH_CLIENT_ID: "oauth-app-client",
+      GITHUB_OAUTH_CLIENT_SECRET: "oauth-app-secret",
+    });
+    check(
+      "a GitHub App deployment uses the GitHub App client pair",
+      split?.kind === "app" &&
+        split.config.clientId === "github-app-client" &&
+        split.config.clientSecret === "github-app-secret",
+      split,
+    );
+
+    const missingAppPair = githubRepositoryAuthorization({
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_PRIVATE_KEY: "private-key",
+      GITHUB_OAUTH_CLIENT_ID: "oauth-app-client",
+      GITHUB_OAUTH_CLIENT_SECRET: "oauth-app-secret",
+    });
+    check(
+      "a GitHub App deployment never falls back to an OAuth App token",
+      missingAppPair === null,
+      missingAppPair,
+    );
+
+    const oauthOnly = githubRepositoryAuthorization({
+      GITHUB_OAUTH_CLIENT_ID: "oauth-app-client",
+      GITHUB_OAUTH_CLIENT_SECRET: "oauth-app-secret",
+    });
+    check(
+      "an OAuth-only deployment keeps the repository fallback",
+      oauthOnly?.kind === "oauth" && oauthOnly.config.clientId === "oauth-app-client",
+      oauthOnly,
+    );
   }
 
   console.log("\nrepository-connect state is its own namespace");

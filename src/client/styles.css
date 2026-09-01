@@ -387,10 +387,17 @@ input:focus, textarea:focus {
 .settings-menu .gauge {
   width: auto;
   margin: 0 9px;
-  justify-content: space-between;
+  height: auto;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
 }
 .settings-menu .gauge-track {
-  flex: 1;
+  width: 100%;
+}
+.settings-menu .gauge-text {
+  justify-content: space-between;
 }
 .room-title-block {
   display: grid;
@@ -1198,6 +1205,11 @@ input:focus, textarea:focus {
 .diff-row pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .diff-old { background: var(--diff-old-bg); color: var(--diff-old-ink); }
 .diff-new { background: var(--diff-new-bg); color: var(--diff-new-ink); }
+.change-details { display: grid; gap: 6px; }
+.change-path, .change-label, .change-delete { font-size: 12px; color: var(--ink-dim); }
+.change-path code, .change-delete code { font-family: var(--mono); color: var(--accent); overflow-wrap: anywhere; }
+.change-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); }
+.change-delete { padding: 8px 10px; border: 1px solid var(--danger-line); border-radius: 6px; background: var(--danger-bg); color: var(--bad); }
 
 .proposed {
   margin: 0;
@@ -1427,6 +1439,7 @@ input:focus, textarea:focus {
   color: var(--ink-dim);
   font-family: var(--sans);
 }
+.gauge-token-count { white-space: nowrap; }
 
 .icon {
   border: none;
@@ -1546,6 +1559,44 @@ input:focus, textarea:focus {
 /* --------------------------------------------------------------- code IDE */
 
 .ide-modal { width: min(1040px, 100%); height: min(760px, 88vh); }
+.workspace-modal { width: min(760px, 100%); }
+.workspace-modal-ide { width: min(1040px, 100%); height: min(820px, 88vh); }
+.workspace-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.workspace-tab {
+  min-height: 32px;
+  padding: 5px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+.workspace-tab:hover:not(:disabled), .workspace-tab.active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--ink);
+}
+.ide-embedded {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ide-shell {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ide-context-bar { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.ide-context-bar .ide-status { margin: 0; }
 .ide-status { margin: 4px 0 0; color: var(--ink-faint); font-size: 11px; font-weight: 400; }
 .ide-toolbar { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .ide-new-file { display: flex; gap: 6px; margin-left: auto; }

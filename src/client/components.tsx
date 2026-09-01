@@ -24,8 +24,10 @@ import {
   type WorkerStatus,
 } from "../shared/protocol";
 import { inlineMarkdown } from "./markdown";
-import type { WorkspaceInfo } from "../shared/workspace";
+import type { FsRequest, FsResponse, WorkspaceInfo } from "../shared/workspace";
+import { IdePanel } from "./IdePanel";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
+import { contextUsage } from "../shared/context";
 import { ROLES, outranks, type Role } from "../shared/access";
 import {
   MODE_PRESETS,
@@ -111,8 +113,8 @@ function ArchiveIcon() {
 }
 
 /**
- * Live context usage against the room's configured limit, plus running spend.
- * Both are read from real `usage` on every response, not estimated.
+ * Live main-prompt usage against the room's configured limit, plus running spend.
+ * The count comes from API usage and is recounted after compaction.
  */
 export function ContextGauge({
   context,
@@ -123,13 +125,14 @@ export function ContextGauge({
   settings: RoomSettings;
   cost: CostLedger;
 }) {
-  const limit = settings.context.maxContextTokens;
-  const pct = limit > 0 ? Math.min(100, (context.tokens / limit) * 100) : 0;
-  const near = pct >= 80;
+  const usage = contextUsage(context.tokens, settings.context.maxContextTokens);
+  const near = usage.percent >= 80;
 
   const title =
-    `${context.tokens.toLocaleString()} tokens across ${context.messages} messages` +
-    (limit > 0 ? ` · compacts at ${limit.toLocaleString()}` : " · no token limit") +
+    `${usage.used.toLocaleString()} tokens used across ${context.messages} messages` +
+    (usage.available !== null
+      ? ` · ${usage.available.toLocaleString()} available before compaction`
+      : " · no token limit") +
     (settings.context.compactAfterMessages > 0
       ? ` or ${settings.context.compactAfterMessages} messages`
       : "");
@@ -139,11 +142,15 @@ export function ContextGauge({
       <div className="gauge-track" aria-hidden>
         <div
           className={`gauge-fill ${near ? "gauge-hot" : ""}`}
-          style={{ transform: `translateX(-${100 - pct}%)` }}
+          style={{ transform: `translateX(-${100 - usage.percent}%)` }}
         />
       </div>
       <span className="gauge-text">
-        {limit > 0 ? `${Math.round(pct)}%` : `${context.messages}m`}
+        <span className="gauge-token-count">
+          {usage.limit > 0
+            ? `${usage.used.toLocaleString()} / ${usage.limit.toLocaleString()} tokens`
+            : `${usage.used.toLocaleString()} tokens`}
+        </span>
         <span className="gauge-cost">${cost.usd.toFixed(3)}</span>
       </span>
     </div>
@@ -1303,6 +1310,47 @@ function truncate(s: string, n: number) {
 
 /* --------------------------------------------------------------- voting */
 
+function ChangeDetails({ name, input }: { name: string; input: Record<string, unknown> }) {
+  const path = typeof input.path === "string" ? input.path : "";
+  const hasPath = name === "write_file" || name === "edit_file" || name === "delete_file";
+  const oldText = String(input.old_text ?? "");
+  const newText = String(input.new_text ?? "");
+
+  if (name === "edit_doc" || name === "edit_file") {
+    return (
+      <div className="change-details">
+        {hasPath && <div className="change-path">File: <code>{path}</code></div>}
+        <div className="diff">
+          <div className="diff-row diff-old">
+            <span>−</span>
+            <pre>{truncate(oldText, 900)}</pre>
+          </div>
+          <div className="diff-row diff-new">
+            <span>+</span>
+            <pre>{truncate(newText, 900)}</pre>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (name === "write_doc" || name === "write_file") {
+    return (
+      <div className="change-details">
+        {hasPath && <div className="change-path">File: <code>{path}</code></div>}
+        <div className="change-label">Complete replacement</div>
+        <pre className="proposed">{truncate(String(input.content ?? ""), 1400)}</pre>
+      </div>
+    );
+  }
+
+  if (name === "delete_file") {
+    return <div className="change-details change-delete">File to permanently delete: <code>{path}</code></div>;
+  }
+
+  return null;
+}
+
 export function ApprovalCard({
   pending,
   me,
@@ -1325,21 +1373,7 @@ export function ApprovalCard({
         <span className="approval-summary">{pending.summary}</span>
       </div>
 
-      {pending.name === "edit_doc" && input && (
-        <div className="diff">
-          <div className="diff-row diff-old">
-            <span>−</span>
-            <pre>{truncate(String(input.old_text ?? ""), 500)}</pre>
-          </div>
-          <div className="diff-row diff-new">
-            <span>+</span>
-            <pre>{truncate(String(input.new_text ?? ""), 500)}</pre>
-          </div>
-        </div>
-      )}
-      {pending.name === "write_doc" && input && (
-        <pre className="proposed">{truncate(String(input.content ?? ""), 900)}</pre>
-      )}
+      {input && <ChangeDetails name={pending.name} input={input} />}
 
       <div className="approval-actions">
         <button
@@ -2030,9 +2064,7 @@ export function PermissionsPanel({
 
 /**
  * Connect or disconnect this browser as the room's file server, and see the
- * room's current workspace status. Read-only for now: this panel never
- * offers write, edit or remove, because `performFsRequest` doesn't implement
- * them yet.
+ * room's current workspace status and the code editor for that workspace.
  */
 export function WorkspacePanel({
   workspace,
@@ -2048,6 +2080,9 @@ export function WorkspacePanel({
   onAuthGithub,
   onListRepos,
   onSignOutGithub,
+  onRequest,
+  canEdit,
+  initialView = "connections",
   onClose,
 }: {
   workspace: WorkspaceInfo;
@@ -2063,12 +2098,16 @@ export function WorkspacePanel({
   onAuthGithub: () => void;
   onListRepos: () => void;
   onSignOutGithub: () => void;
+  onRequest: (req: FsRequest) => Promise<FsResponse>;
+  canEdit: boolean;
+  initialView?: WorkspaceView;
   onClose: () => void;
 }) {
   const attached = workspace.kind !== "none";
   const [allowWrites, setAllowWrites] = useState(false);
   const [repo, setRepo] = useState("");
   const [filter, setFilter] = useState("");
+  const [view, setView] = useState<WorkspaceView>(initialView);
 
   // Fetch the repository list the moment the panel knows there is an
   // authorised account, rather than making someone click "load" to see the
@@ -2104,19 +2143,39 @@ export function WorkspacePanel({
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div
-        className="modal"
+        className={view === "ide" ? "modal workspace-modal workspace-modal-ide" : "modal workspace-modal"}
         role="dialog"
         aria-label="Workspace"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="modal-head">
-          <h2>Workspace</h2>
+          <div>
+            <h2>Workspace</h2>
+            <p className="field-note">Connect files or edit code in the same workspace.</p>
+          </div>
           <button className="icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </header>
 
-        <div className="modal-body">
+        <nav className="workspace-tabs" aria-label="Workspace views">
+          <button type="button" className={view === "connections" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("connections")}>
+            Connections
+          </button>
+          <button type="button" className={view === "ide" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("ide")}>
+            IDE
+          </button>
+        </nav>
+
+        {view === "ide" ? (
+          <IdePanel
+            embedded
+            workspace={workspace}
+            canEdit={canEdit}
+            onRequest={onRequest}
+            onClose={onClose}
+          />
+        ) : <div className="modal-body">
           {!attached ? (
             <div className="ws-options">
               {supported ? (
@@ -2406,8 +2465,31 @@ export function WorkspacePanel({
               <button className="ws-disconnect" onClick={onDetach}>Disconnect</button>
             </section>
           )}
-        </div>
+        </div>}
       </div>
     </div>
+  );
+}
+
+export type WorkspaceView = "connections" | "ide";
+
+/** The two launchers share one panel and differ only in its initial view. */
+export function WorkspaceActions({
+  visible,
+  onOpen,
+}: {
+  visible: boolean;
+  onOpen: (view: WorkspaceView) => void;
+}) {
+  if (!visible) return null;
+  return (
+    <>
+      <button type="button" className="chat-action" onClick={() => onOpen("connections")}>
+        Workspace
+      </button>
+      <button type="button" className="chat-action" onClick={() => onOpen("ide")}>
+        IDE
+      </button>
+    </>
   );
 }

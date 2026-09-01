@@ -13,13 +13,14 @@
     "check:auth": "esbuild scripts/check-auth.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-auth.mjs --log-level=warning && node node_modules/.cache/check-auth.mjs",
     "check:workflow": "esbuild scripts/check-workflow.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-workflow.mjs --log-level=warning && node node_modules/.cache/check-workflow.mjs",
     "check:workspace": "esbuild scripts/check-workspace.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-workspace.mjs --log-level=warning && node node_modules/.cache/check-workspace.mjs",
-    "test": "npm run check && npm run check:auth && npm run check:workflow && npm run check:workspace && npm run check:fs && npm run check:github && npm run check:oauth && npm run check:docx && npm run check:markdown",
+    "test": "npm run check && npm run check:auth && npm run check:workflow && npm run check:workspace && npm run check:fs && npm run check:github && npm run check:oauth && npm run check:docx && npm run check:markdown && npm run check:backend",
     "test:integration": "vitest run",
     "check:fs": "esbuild scripts/check-fs-provider.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-fs.mjs --log-level=warning --external:node:fs --external:node:path --external:node:os && node node_modules/.cache/check-fs.mjs",
     "check:github": "esbuild scripts/check-github.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-github.mjs --log-level=warning --external:node:fs --external:node:path --external:node:os && node node_modules/.cache/check-github.mjs",
     "check:oauth": "esbuild scripts/check-oauth.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-oauth.mjs --log-level=warning && node node_modules/.cache/check-oauth.mjs",
     "check:markdown": "esbuild scripts/check-markdown.ts --bundle --format=esm --platform=node --jsx=automatic --outfile=node_modules/.cache/check-markdown.mjs --log-level=warning && node node_modules/.cache/check-markdown.mjs",
-    "check:docx": "esbuild scripts/check-docx.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-docx.mjs --log-level=warning && node node_modules/.cache/check-docx.mjs"
+    "check:docx": "esbuild scripts/check-docx.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-docx.mjs --log-level=warning && node node_modules/.cache/check-docx.mjs",
+    "check:backend": "esbuild scripts/check-backend-schema.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-backend.mjs --log-level=warning && node node_modules/.cache/check-backend.mjs"
   },
   "repository": {
     "type": "git",

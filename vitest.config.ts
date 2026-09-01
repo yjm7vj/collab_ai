@@ -4,7 +4,12 @@ import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      wrangler: { configPath: "./wrangler.jsonc" },
+      wrangler: {
+        configPath: "./wrangler.jsonc",
+        // A named environment makes Wrangler prefer .dev.vars.test, keeping
+        // ignored production OAuth credentials out of integration tests.
+        environment: "test",
+      },
       miniflare: {
         // These two secrets are fake on purpose. The Worker refuses every
         // request unless both ANTHROPIC_API_KEY and ROOM_SECRET are present

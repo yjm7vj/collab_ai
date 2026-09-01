@@ -77,8 +77,10 @@ import {
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   MAX_OUTPUT_CONTINUATIONS,
-  outputLimitRecovery,
+  contextTokensAfterUsage,
+  countMainPromptTokens,
   repairToolConversation,
+  outputLimitRecovery,
   runModel,
   runStage,
   runWorker,
@@ -100,7 +102,8 @@ import {
   type ToolOutcome,
 } from "./tools";
 import { constantTimeEqual, mintToken, newInviteCode } from "./auth";
-import { GITHUB_REPO_STATE_ROLE, repoAuthorizeUrl } from "./oauth";
+import { GITHUB_REPO_STATE_ROLE, githubAppAuthorizeUrl, repoAuthorizeUrl } from "./oauth";
+import { githubConfigured, githubRepositoryAuthorization } from "./github-config";
 import {
   GithubProvider,
   installationToken,
@@ -535,8 +538,8 @@ export class Room extends Agent<Env, RoomState> {
     const row = this.sql<{ uid: string; login: string }>`SELECT uid, login FROM github_oauth WHERE k = 'current'`[0];
     const installation = this.sql<{ uid: string }>`SELECT uid FROM github_installations WHERE k = 'current'`[0];
     return {
-      oauth: Boolean(this.env.GITHUB_OAUTH_CLIENT_ID) && Boolean(this.env.GITHUB_OAUTH_CLIENT_SECRET),
-      app: Boolean(this.env.GITHUB_APP_ID) && Boolean(this.env.GITHUB_APP_PRIVATE_KEY),
+      oauth: githubRepositoryAuthorization(this.env) !== null,
+      app: githubConfigured(this.env),
       installed: Boolean(installation),
       authorized: Boolean(row || installation),
       login: row?.login ?? "",
@@ -1670,10 +1673,11 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
-    if (this.env.GITHUB_APP_ID && this.env.GITHUB_APP_PRIVATE_KEY) {
+    if (githubConfigured(this.env)) {
       this.#kvSet("github:pending", { repo, uid });
-      if (!this.env.GITHUB_OAUTH_CLIENT_ID || !this.env.GITHUB_OAUTH_CLIENT_SECRET) {
-        this.#refuse(connection, "GitHub user authorization is required before installing the GitHub App.");
+      const repositoryAuth = githubRepositoryAuthorization(this.env);
+      if (!repositoryAuth) {
+        this.#refuse(connection, "GitHub App user authorization is not configured on this server.");
         return;
       }
 
@@ -1688,11 +1692,10 @@ export class Room extends Agent<Env, RoomState> {
         this.#refuse(connection, "Couldn't work out this server's address. Reload the page and try again.");
         return;
       }
-      const url = repoAuthorizeUrl(
-        this.env.GITHUB_OAUTH_CLIENT_ID,
-        `${origin}/api/auth/github/callback`,
-        token,
-      );
+      const redirectUri = `${origin}/api/auth/github/callback`;
+      const url = repositoryAuth.kind === "app"
+        ? githubAppAuthorizeUrl(repositoryAuth.config.clientId, redirectUri, token)
+        : repoAuthorizeUrl(repositoryAuth.config.clientId, redirectUri, token);
 
       connection.send(JSON.stringify({ t: "github.install", url } satisfies ServerMsg));
       return;
@@ -1722,10 +1725,13 @@ export class Room extends Agent<Env, RoomState> {
     const uid = this.#uidOf(connection);
     if (!uid) return;
 
-    if (!this.env.GITHUB_OAUTH_CLIENT_ID || !this.env.GITHUB_OAUTH_CLIENT_SECRET) {
+    const repositoryAuth = githubRepositoryAuthorization(this.env);
+    if (!repositoryAuth) {
       this.#refuse(
         connection,
-        "GitHub sign-in isn't set up on this server, so a repository can't be connected. Ask whoever deployed it to add the GitHub OAuth credentials.",
+        githubConfigured(this.env)
+          ? "GitHub App user authorization isn't set up on this server. Ask whoever deployed it to add the GitHub App client credentials."
+          : "GitHub authorization isn't set up on this server. Ask whoever deployed it to add the GitHub OAuth credentials.",
       );
       return;
     }
@@ -1742,11 +1748,10 @@ export class Room extends Agent<Env, RoomState> {
       exp: Math.floor(Date.now() / 1000) + 600,
     });
 
-    const url = repoAuthorizeUrl(
-      this.env.GITHUB_OAUTH_CLIENT_ID,
-      `${origin}/api/auth/github/callback`,
-      token,
-    );
+    const redirectUri = `${origin}/api/auth/github/callback`;
+    const url = repositoryAuth.kind === "app"
+      ? githubAppAuthorizeUrl(repositoryAuth.config.clientId, redirectUri, token)
+      : repoAuthorizeUrl(repositoryAuth.config.clientId, redirectUri, token);
 
     connection.send(JSON.stringify({ t: "github.install", url } satisfies ServerMsg));
   }
@@ -2188,15 +2193,15 @@ export class Room extends Agent<Env, RoomState> {
     return this.#settings().workflow === "custom" ? this.#graph() : null;
   }
 
-  /** Fold one response's token counts into the room's running ledger. */
-  #recordUsage(usage: Usage | null | undefined) {
+  /** Fold one response into cost, and update context only for the main prompt. */
+  #recordUsage(usage: Usage | null | undefined, mainPrompt = false) {
     if (!usage) return;
     this.setState({
       ...this.state,
       cost: addUsage(this.state.cost, usage.model, usage),
       context: {
         messages: this.#convo().length,
-        tokens: usage.promptTokens || this.state.context.tokens,
+        tokens: contextTokensAfterUsage(this.state.context.tokens, usage, mainPrompt),
       },
     });
   }
@@ -2303,9 +2308,31 @@ export class Room extends Agent<Env, RoomState> {
       ...convo.slice(cut),
     ]);
 
+    let promptTokens = 0;
+    try {
+      const graph = this.#activeGraph();
+      promptTokens = await countMainPromptTokens(
+        this.#config(),
+        settings,
+        graph,
+        this.#convo(),
+        toolsForRoom(
+          this.#policy(),
+          settings.workflow,
+          workspaceGrantsFileTools(this.state.workspace),
+          graph ? leadOf(graph).model : settings.agentModel,
+          graph ?? undefined,
+        ),
+      );
+    } catch (err) {
+      // The compaction itself is still valid. Zero is safer than retaining the
+      // pre-compaction count, and the next main response replaces it with API usage.
+      console.error("post-compaction token count failed", err);
+    }
+
     this.setState({
       ...this.state,
-      context: { messages: this.#convo().length, tokens: 0 },
+      context: { messages: this.#convo().length, tokens: promptTokens },
     });
     this.#system(
       `Compacted ${older.length} earlier messages — ${reason}. ` +
@@ -2623,7 +2650,7 @@ export class Room extends Agent<Env, RoomState> {
           maxOutputTokens,
         );
 
-        this.#recordUsage(usage);
+        this.#recordUsage(usage, true);
 
         const outputRecovery = outputLimitRecovery(
           message,
