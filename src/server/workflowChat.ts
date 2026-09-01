@@ -155,6 +155,28 @@ function client(cfg: ModelConfig) {
   return new Anthropic({ apiKey: cfg.apiKey });
 }
 
+/**
+ * Merge consecutive same-role turns into one message.
+ *
+ * The API requires strict user/assistant alternation. The client's turn list
+ * does not guarantee that on its own — a turn that errored leaves no assistant
+ * reply in between, so a retry lands as two "user" turns in a row — and a
+ * violation here is a 400 that would otherwise read as "could not reach the
+ * model" no matter how good the conversation looks. Merging is the fix that
+ * holds regardless of what shape the client's turns arrive in.
+ */
+export function coalesceTurns(turns: WorkflowChatTurn[]): { role: "user" | "assistant"; content: string }[] {
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  for (const t of turns) {
+    const last = out[out.length - 1];
+    if (last && last.role === t.role) last.content += `\n\n${t.text}`;
+    else out.push({ role: t.role, content: t.text });
+  }
+  // The API requires the first message to be from the user.
+  while (out.length && out[0]!.role !== "user") out.shift();
+  return out;
+}
+
 export type ProposeResult = { reply: WorkflowChatReply };
 
 /**
@@ -173,11 +195,6 @@ export async function proposeWorkflow(
 
   if (cfg.apiKey === "mock") return mockPropose(turns);
 
-  const messages = turns.map((t) => ({
-    role: t.role,
-    content: t.text,
-  }));
-
   let message: Message;
   try {
     message = (await client(cfg).messages.create({
@@ -186,9 +203,13 @@ export async function proposeWorkflow(
       system: SYSTEM_PROMPT,
       tools: [TOOL],
       tool_choice: { type: "tool", name: TOOL.name },
-      messages: messages as never,
+      messages: coalesceTurns(turns) as never,
     } as never)) as Message;
-  } catch {
+  } catch (err) {
+    // Logged rather than surfaced: the message the user sees must never carry
+    // API error detail, but a silent catch here would leave every failure
+    // indistinguishable from a network blip.
+    console.error("workflowChat: model call failed", err);
     return { reply: { kind: "error", message: "Could not reach the model. Try again." } };
   }
 

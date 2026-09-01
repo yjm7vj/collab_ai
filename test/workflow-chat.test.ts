@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { finish, proposeWorkflow, sanitizeChatTurns } from "../src/server/workflowChat";
+import { coalesceTurns, finish, proposeWorkflow, sanitizeChatTurns } from "../src/server/workflowChat";
 import { GRAPH_LIMITS, MAX_POS } from "../src/shared/workflow";
 import { MODELS } from "../src/shared/models";
 
@@ -55,6 +55,41 @@ describe("sanitizeChatTurns", () => {
     expect(sanitizeChatTurns(null)).toEqual([]);
     expect(sanitizeChatTurns("hello")).toEqual([]);
     expect(sanitizeChatTurns(undefined)).toEqual([]);
+  });
+});
+
+describe("coalesceTurns", () => {
+  it("leaves a clean alternating conversation untouched", () => {
+    expect(
+      coalesceTurns([
+        { role: "user", text: "build me a team" },
+        { role: "assistant", text: "what should it do?" },
+        { role: "user", text: "write blog posts" },
+      ]),
+    ).toEqual([
+      { role: "user", content: "build me a team" },
+      { role: "assistant", content: "what should it do?" },
+      { role: "user", content: "write blog posts" },
+    ]);
+  });
+
+  it("merges a retry left with no assistant turn in between into one message", () => {
+    // This is the shape a failed turn leaves behind on the client: a user
+    // message, then another user message with no reply in between. The
+    // Anthropic API rejects two user turns in a row outright, so this is the
+    // difference between the feature working after an error and it staying
+    // broken for the rest of the conversation.
+    const out = coalesceTurns([
+      { role: "user", text: "first attempt" },
+      { role: "user", text: "second attempt" },
+    ]);
+    expect(out).toEqual([{ role: "user", content: "first attempt\n\nsecond attempt" }]);
+  });
+
+  it("drops a leading assistant turn so the conversation starts with the user", () => {
+    expect(coalesceTurns([{ role: "assistant", text: "stray" }, { role: "user", text: "hi" }])).toEqual([
+      { role: "user", content: "hi" },
+    ]);
   });
 });
 

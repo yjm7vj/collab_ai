@@ -2781,20 +2781,28 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 
 .wf-chat-open { margin-bottom: 4px; }
 
+/* A sidebar, not a takeover: it sits over the inspector's edge of the canvas
+   rather than covering it, so the graph stays visible while someone chats. */
 .wfc-overlay {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 100%);
   z-index: 5;
   display: grid;
   grid-template-rows: auto auto 1fr;
-  background: var(--bg);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow);
 }
 
 .wfc-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
+  flex-wrap: wrap;
   padding: 14px 18px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
@@ -2806,9 +2814,7 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
   min-height: 0;
-  max-width: 640px;
   width: 100%;
-  margin: 0 auto;
   padding: 16px 18px;
   gap: 12px;
 }
@@ -2830,10 +2836,8 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 }
 
 .wfc-proposal {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 10px;
   padding: 12px;
   border: 1px solid var(--accent);
   border-radius: var(--radius);
@@ -2841,6 +2845,7 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 }
 .wfc-proposal b { font-size: 13px; }
 .wfc-proposal .wf-warnings { margin-top: 8px; }
+.wfc-proposal button { width: 100%; }
 
 .wfc-composer { display: flex; gap: 8px; align-items: flex-end; }
 .wfc-composer textarea { flex: 1 1 auto; width: 100%; resize: vertical; font: inherit; font-size: 13px; line-height: 1.5; }
