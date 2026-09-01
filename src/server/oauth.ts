@@ -166,7 +166,7 @@ export async function exchangeCode(
   code: string,
   redirectUri: string,
   fetchImpl?: typeof fetch,
-): Promise<{ ok: true; accessToken: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; accessToken: string; scope: string } | { ok: false; error: string }> {
   const doFetch = fetchImpl ?? fetch;
   try {
     const url =
@@ -216,7 +216,12 @@ export async function exchangeCode(
     if (!accessToken) {
       return { ok: false, error: `${provider} did not return an access token.` };
     }
-    return { ok: true, accessToken };
+    // GitHub reports what it actually granted, which is not always what was
+    // asked for: a GitHub App's OAuth client ignores the `scope` parameter
+    // entirely and returns an empty string here. That difference is the only
+    // way to tell the two kinds of credential apart after the fact.
+    const scope = body && typeof body.scope === "string" ? body.scope : "";
+    return { ok: true, accessToken, scope };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Failed to exchange the authorization code." };
   }

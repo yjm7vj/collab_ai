@@ -393,6 +393,82 @@ async function main() {
     check("a repo-connect state passed to verifyState returns null", asSignIn === null, asSignIn);
   }
 
+  console.log("\nGITHUB_REPO_AUTH overrides the routing");
+  {
+    const bothConfigured = {
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_PRIVATE_KEY: "private-key",
+      GITHUB_APP_CLIENT_ID: "github-app-client",
+      GITHUB_APP_CLIENT_SECRET: "github-app-secret",
+      GITHUB_OAUTH_CLIENT_ID: "oauth-app-client",
+      GITHUB_OAUTH_CLIENT_SECRET: "oauth-app-secret",
+    };
+
+    // Why the override exists: a GitHub App cannot reach a private repository
+    // on an account where it is not installed, so a deployment needing that
+    // reach has to ask for a classic OAuth App token instead.
+    const forcedOauth = githubRepositoryAuthorization({ ...bothConfigured, GITHUB_REPO_AUTH: "oauth" });
+    check(
+      "oauth wins over a fully configured App",
+      forcedOauth?.kind === "oauth" && forcedOauth.config.clientId === "oauth-app-client",
+      forcedOauth,
+    );
+
+    const forcedApp = githubRepositoryAuthorization({ ...bothConfigured, GITHUB_REPO_AUTH: "app" });
+    check(
+      "app keeps the App credentials",
+      forcedApp?.kind === "app" && forcedApp.config.clientId === "github-app-client",
+      forcedApp,
+    );
+
+    // A typo must not silently reroute a deployment's credentials.
+    const nonsense = githubRepositoryAuthorization({ ...bothConfigured, GITHUB_REPO_AUTH: "OAuth App please" });
+    check("an unrecognised value falls back to the default, not to oauth", nonsense?.kind === "app", nonsense);
+
+    const unset = githubRepositoryAuthorization(bothConfigured);
+    check("absent leaves the historical app-when-configured behaviour", unset?.kind === "app", unset);
+
+    // Forcing oauth without OAuth credentials must refuse rather than quietly
+    // hand back the App's.
+    const forcedWithoutCreds = githubRepositoryAuthorization({
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_PRIVATE_KEY: "private-key",
+      GITHUB_APP_CLIENT_ID: "github-app-client",
+      GITHUB_APP_CLIENT_SECRET: "github-app-secret",
+      GITHUB_REPO_AUTH: "oauth",
+    });
+    check(
+      "forcing oauth with no OAuth credentials yields null, never the App's",
+      forcedWithoutCreds === null,
+      forcedWithoutCreds,
+    );
+  }
+
+  console.log("\nthe exchange reports what GitHub actually granted");
+  {
+    const cfg = { clientId: "id", clientSecret: "secret" };
+
+    const scoped = makeStub(() =>
+      new Response(JSON.stringify({ access_token: "gho_abc", scope: "repo" }), { status: 200 }),
+    );
+    const scopedRes = await exchangeCode("github", cfg, "code", "https://example.com/cb", scoped.fetchImpl);
+    check("a classic OAuth App token reports its scope", scopedRes.ok === true && scopedRes.scope === "repo", scopedRes);
+
+    // A GitHub App's OAuth client ignores the requested scope and says so by
+    // returning none. That empty string is what the callback refuses on, and
+    // it is the whole reason the check is worth having: without it the
+    // misconfiguration is silent.
+    const appUserToken = makeStub(() =>
+      new Response(JSON.stringify({ access_token: "ghu_abc" }), { status: 200 }),
+    );
+    const appUserRes = await exchangeCode("github", cfg, "code", "https://example.com/cb", appUserToken.fetchImpl);
+    check(
+      "an App user-to-server token reports no scope at all",
+      appUserRes.ok === true && appUserRes.scope === "",
+      appUserRes,
+    );
+  }
+
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
   process.exit(failures === 0 ? 0 : 1);
 }

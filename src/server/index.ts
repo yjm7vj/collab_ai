@@ -16,6 +16,7 @@ import {
   exchangeCode,
   fetchProfile,
   isConfigured,
+  GITHUB_REPO_SCOPE,
   isRepoConnectState,
   signState,
   verifyState,
@@ -597,6 +598,26 @@ export default {
             redirectUri,
           );
           if (!exchanged.ok) return new Response(exchanged.error, { status: 502 });
+
+          // A deployment that asked for the OAuth route must actually have
+          // got an OAuth App token. If GITHUB_OAUTH_CLIENT_ID in fact names a
+          // GitHub App's OAuth client, the `repo` scope requested at the
+          // authorize step is ignored without complaint and what comes back
+          // is another user-to-server token — same installation limits, no
+          // error, nothing on screen. Refusing here is the difference between
+          // a misconfiguration that is reported and one that is only noticed
+          // weeks later as "some repositories are missing".
+          if (repositoryAuth.kind === "oauth") {
+            const granted = exchanged.scope.split(",").map((entry) => entry.trim());
+            if (!granted.includes(GITHUB_REPO_SCOPE)) {
+              return new Response(
+                `GitHub granted "${exchanged.scope || "no scopes"}" rather than the "${GITHUB_REPO_SCOPE}" scope this ` +
+                  `deployment asked for. GITHUB_OAUTH_CLIENT_ID must name a classic OAuth App: a GitHub App's OAuth ` +
+                  `client silently ignores scopes and cannot reach repositories outside its installations.`,
+                { status: 502 },
+              );
+            }
+          }
 
           // OAuth-only deployments can proceed without a display label. A
           // GitHub App deployment requires the immutable provider id below to
