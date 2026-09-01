@@ -248,6 +248,61 @@ export type StreamHooks = {
   onDelta(index: number, kind: "text" | "thinking", text: string): void;
 };
 
+/** Repair an interrupted client-tool exchange before it reaches Anthropic. */
+export function repairToolConversation(messages: MessageParam[]): {
+  messages: MessageParam[];
+  repaired: boolean;
+} {
+  const repaired: MessageParam[] = [];
+  let changed = false;
+  const clientToolIds = (message: MessageParam): string[] => {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) return [];
+    return message.content
+      .filter((block) => block.type === "tool_use" && typeof block.id === "string")
+      .map((block) => (block as { id: string }).id);
+  };
+  const resultIds = (message: MessageParam): string[] => {
+    if (message.role !== "user" || !Array.isArray(message.content)) return [];
+    return message.content
+      .filter((block) => block.type === "tool_result" && typeof block.tool_use_id === "string")
+      .map((block) => (block as { tool_use_id: string }).tool_use_id);
+  };
+  const sameIds = (left: string[], right: string[]) =>
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    left.every((id) => right.includes(id));
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]!;
+    const toolIds = clientToolIds(message);
+    if (toolIds.length > 0) {
+      const next = messages[i + 1];
+      const ids = next ? resultIds(next) : [];
+      if (next && sameIds(toolIds, ids)) {
+        repaired.push(message, next);
+        i++;
+        continue;
+      }
+      changed = true;
+      if (next && ids.length > 0) i++;
+      repaired.push({
+        role: "user",
+        content:
+          "The previous tool call was interrupted before its result was recorded. " +
+          "Continue from the latest confirmed state and repeat the tool call only if needed.",
+      });
+      continue;
+    }
+    // Do not leave a result without its corresponding assistant tool request.
+    if (resultIds(message).length > 0) {
+      changed = true;
+      continue;
+    }
+    repaired.push(message);
+  }
+  return { messages: repaired, repaired: changed };
+}
+
 /** Token counts from one response, for the cost ledger and the context gauge. */
 export type Usage = {
   model: string;

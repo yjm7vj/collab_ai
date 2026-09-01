@@ -75,6 +75,7 @@ import {
   type WorkflowGraph,
 } from "../shared/workflow";
 import {
+  repairToolConversation,
   runModel,
   runStage,
   runWorker,
@@ -241,6 +242,7 @@ export class Room extends Agent<Env, RoomState> {
    * why this lives in memory rather than storage.
    */
   #pending = new PendingRequests();
+  #settling = false;
 
   // ---------------------------------------------------------------- storage
 
@@ -2574,12 +2576,15 @@ export class Room extends Agent<Env, RoomState> {
         // Map API content-block index -> index in the entry we render.
         const slots = new Map<number, number>();
 
+        const conversation = repairToolConversation(this.#convo());
+        if (conversation.repaired) this.#setConvo(conversation.messages);
+
         const graph = this.#activeGraph();
         const { message, usage } = await runModel(
           this.#config(),
           this.#settings(),
           graph,
-          this.#convo(),
+          conversation.messages,
           toolsForRoom(
             this.#policy(),
             this.#settings().workflow,
@@ -2827,6 +2832,7 @@ export class Room extends Agent<Env, RoomState> {
    * resume the turn. Called after any vote and after presence changes.
    */
   async #settleIfDecided() {
+    if (this.#settling) return;
     const turn = this.#turn();
     if (!turn || this.state.pending.length === 0) return;
 
@@ -2841,50 +2847,55 @@ export class Room extends Agent<Env, RoomState> {
     const entry = this.#getEntry(turn.entryId);
     if (!entry || entry.kind !== "agent") return;
 
-    const results: ToolResultBlockParam[] = uniqueToolResults([...turn.carried]);
-    const docs = this.#docBuffer(turn.authorUid, turn.authorName);
-    for (const { p, approved } of verdicts) {
-      let outcome: ToolOutcome;
-      if (!approved) {
-        outcome = {
-          ok: false,
-          text:
-            "The room voted against this action, so it did not run. Do not " +
-            "retry the same call — ask the room what they would prefer.",
-        };
-      } else if (p.name === "write_file" || p.name === "edit_file" || p.name === "delete_file") {
-        // These are workspace tools, not document tools: they have no
-        // synchronous form, so approval resolves them with a round trip to
-        // #fs (and, through it, the workspace host) rather than execute().
-        const res = await this.#fs(this.#fsRequestFor(p.name, p.input));
-        outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
-      } else {
-        outcome = execute(p.name, p.input, docs);
-      }
+    this.#settling = true;
+    try {
+      const results: ToolResultBlockParam[] = uniqueToolResults([...turn.carried]);
+      const docs = this.#docBuffer(turn.authorUid, turn.authorName);
+      for (const { p, approved } of verdicts) {
+        let outcome: ToolOutcome;
+        if (!approved) {
+          outcome = {
+            ok: false,
+            text:
+              "The room voted against this action, so it did not run. Do not " +
+              "retry the same call — ask the room what they would prefer.",
+          };
+        } else if (p.name === "write_file" || p.name === "edit_file" || p.name === "delete_file") {
+          // These are workspace tools, not document tools: they have no
+          // synchronous form, so approval resolves them with a round trip to
+          // #fs (and, through it, the workspace host) rather than execute().
+          const res = await this.#fs(this.#fsRequestFor(p.name, p.input));
+          outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
+        } else {
+          outcome = execute(p.name, p.input, docs);
+        }
 
-      results.push({
-        type: "tool_result",
-        tool_use_id: p.toolUseId,
-        content: outcome.text,
-        is_error: !outcome.ok,
-      });
+        results.push({
+          type: "tool_result",
+          tool_use_id: p.toolUseId,
+          content: outcome.text,
+          is_error: !outcome.ok,
+        });
 
-      const block = entry.blocks.find(
-        (b) => b.type === "tool" && b.toolUseId === p.toolUseId,
-      );
-      if (block && block.type === "tool") {
-        block.status = approved ? (outcome.ok ? "ok" : "error") : "denied";
-        block.result = outcome.text;
-        block.sensitive = isFileContentTool(p.name);
+        const block = entry.blocks.find(
+          (b) => b.type === "tool" && b.toolUseId === p.toolUseId,
+        );
+        if (block && block.type === "tool") {
+          block.status = approved ? (outcome.ok ? "ok" : "error") : "denied";
+          block.result = outcome.text;
+          block.sensitive = isFileContentTool(p.name);
+        }
       }
+      docs.flush();
+      this.#patch(entry);
+
+      this.#setConvo([...this.#convo(), { role: "user", content: uniqueToolResults(results) }]);
+      this.#setTurn({ ...turn, carried: [] });
+      this.setState({ ...this.state, status: "thinking", pending: [] });
+
+      await this.#advance();
+    } finally {
+      this.#settling = false;
     }
-    docs.flush();
-    this.#patch(entry);
-
-    this.#setConvo([...this.#convo(), { role: "user", content: uniqueToolResults(results) }]);
-    this.#setTurn({ ...turn, carried: [] });
-    this.setState({ ...this.state, status: "thinking", pending: [] });
-
-    await this.#advance();
   }
 }
