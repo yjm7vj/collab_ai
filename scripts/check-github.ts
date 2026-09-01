@@ -8,6 +8,7 @@
  * Run: npm run check:github
  */
 import {
+  appSlug,
   appJwt,
   commitFile,
   deleteFile,
@@ -132,6 +133,18 @@ async function main() {
     // trusting the installationToken tests that depend on it.
     const jwt = await appJwt(cfg);
     check("appJwt produces a three-part JWT", jwt.split(".").length === 3, jwt);
+
+    const appInfo = makeStub(() =>
+      new Response(JSON.stringify({ slug: "huddle-ai" }), { status: 200 }),
+    );
+    const slugRes = await appSlug(cfg, appInfo.fetchImpl);
+    check("appSlug reads the authenticated App slug", slugRes.ok === true && slugRes.slug === "huddle-ai", slugRes);
+
+    const malformedAppInfo = makeStub(() =>
+      new Response(JSON.stringify({ slug: "../../not-a-slug" }), { status: 200 }),
+    );
+    const malformedSlugRes = await appSlug(cfg, malformedAppInfo.fetchImpl);
+    check("appSlug rejects malformed slugs", malformedSlugRes.ok === false, malformedSlugRes);
 
     const created = makeStub(() =>
       new Response(JSON.stringify({ token: "ghs_abc123", expires_at: "2026-01-01T00:00:00Z" }), { status: 201 }),

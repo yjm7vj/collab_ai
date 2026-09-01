@@ -216,6 +216,33 @@ export async function appJwt(cfg: GithubConfig, nowSeconds?: number): Promise<st
   return `${signingInput}.${signature}`;
 }
 
+/** Resolve the authenticated GitHub App's public URL slug. */
+export async function appSlug(
+  cfg: GithubConfig,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  try {
+    const jwt = await appJwt(cfg);
+    const res = await doFetch("https://api.github.com/app", {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "collab-ai-github-app",
+      },
+    });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const data = (await res.json()) as { slug?: unknown };
+    if (typeof data.slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(data.slug)) {
+      return { ok: false, error: "GitHub's response was missing a valid App slug." };
+    }
+    return { ok: true, slug: data.slug };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to identify the GitHub App." };
+  }
+}
+
 /** Exchange the App JWT for an installation token. Short-lived; never store it. */
 export async function installationToken(
   cfg: GithubConfig,

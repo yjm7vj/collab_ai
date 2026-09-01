@@ -98,6 +98,7 @@ import {
 import { constantTimeEqual, mintToken, newInviteCode } from "./auth";
 import { GITHUB_REPO_STATE_ROLE, repoAuthorizeUrl } from "./oauth";
 import {
+  appSlug,
   GithubProvider,
   installationToken,
   listInstallationRepos,
@@ -1474,13 +1475,14 @@ export class Room extends Agent<Env, RoomState> {
 
       this.#kvSet("github:pending", { repo, uid });
 
-      // The app slug is public — it appears in the app's own URL — and is only
-      // needed to send the user straight to the install page.
-      if (!this.env.GITHUB_APP_SLUG) {
-        this.#refuse(connection, "GitHub App configuration is incomplete. Set GITHUB_APP_SLUG before installing it.");
+      const slug = this.env.GITHUB_APP_SLUG?.trim()
+        ? { ok: true as const, slug: this.env.GITHUB_APP_SLUG.trim() }
+        : await appSlug({ appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY });
+      if (!slug.ok) {
+        this.#refuse(connection, `Couldn't identify the GitHub App. ${slug.error}`);
         return;
       }
-      const url = `https://github.com/apps/${this.env.GITHUB_APP_SLUG}/installations/new?state=${token}`;
+      const url = `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${token}`;
 
       connection.send(JSON.stringify({ t: "github.install", url } satisfies ServerMsg));
       return;
@@ -1517,13 +1519,16 @@ export class Room extends Agent<Env, RoomState> {
         role: GITHUB_REPO_STATE_ROLE,
         exp: Math.floor(Date.now() / 1000) + 600,
       });
-      if (!this.env.GITHUB_APP_SLUG) {
-        this.#refuse(connection, "GitHub App configuration is incomplete. Set GITHUB_APP_SLUG before installing it.");
+      const slug = this.env.GITHUB_APP_SLUG?.trim()
+        ? { ok: true as const, slug: this.env.GITHUB_APP_SLUG.trim() }
+        : await appSlug({ appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY });
+      if (!slug.ok) {
+        this.#refuse(connection, `Couldn't identify the GitHub App. ${slug.error}`);
         return;
       }
       connection.send(JSON.stringify({
         t: "github.install",
-        url: `https://github.com/apps/${this.env.GITHUB_APP_SLUG}/installations/new?state=${token}`,
+        url: `https://github.com/apps/${encodeURIComponent(slug.slug)}/installations/new?state=${token}`,
       } satisfies ServerMsg));
       return;
     }
