@@ -701,9 +701,15 @@ export class UserIndex extends DurableObject<Env> {
     this.#sql(`DELETE FROM skills WHERE deleted = 1 AND updated_at < ?`, cutoff);
     // Bodies are keyed by content and shared between refs, so one cannot be
     // dropped with the row that removed it — another ref may still point at the
-    // same hash. Sweeping by "nothing live references this" is the only correct
-    // rule, and it runs here rather than on delete so a body outlives a
-    // tombstone that might still be reversed by a merge.
+    // same hash. "Nothing live references this" is the only correct rule, which
+    // means a body goes as soon as its last live row does, without waiting out
+    // the tombstone TTL that the row itself does.
+    //
+    // The consequence, stated rather than hidden: if a delete is later reversed
+    // — a merge resurrects the row, or the person re-installs the same skill —
+    // the text is gone and has to be fetched from source again. That is a
+    // re-fetch, not a loss, and it is the right trade against keeping the text
+    // of every skill anyone ever removed.
     this.#sql(
       `DELETE FROM skill_bodies
         WHERE hash NOT IN (SELECT hash FROM skills WHERE deleted = 0)`,
