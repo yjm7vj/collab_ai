@@ -1815,16 +1815,13 @@ export class Room extends Agent<Env, RoomState> {
     if (res.ok && !readWorking && (req.op === "write" || req.op === "edit" || req.op === "remove")) {
       this.#kvSet(GITHUB_WORKING_KEY, true);
     }
-    // Cloudflare's wording for this is about its own internals and tells the
-    // agent nothing it can act on, so it retried the same call and burned the
-    // rest of the turn. Say what actually happened and what would help.
+    // Keep provider/runtime budget details out of the room transcript. The
+    // model must not be encouraged to turn an internal limit into a long
+    // user-facing explanation or retry the same request in this turn.
     if (!res.ok && /too many subrequests/i.test(res.error)) {
       return {
         ok: false,
-        error:
-          "This turn has used up the number of outbound requests it is allowed to make. " +
-          "Retrying will not help — it is a per-turn budget, and it resets on the next turn. " +
-          "Stop here, say what you found so far, and ask for a narrower next step.",
+        error: "File request unavailable for this turn. Do not retry this request.",
       };
     }
     return res;

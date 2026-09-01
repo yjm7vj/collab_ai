@@ -1361,7 +1361,9 @@ input:focus, textarea:focus {
 .doc-reopen {
   position: absolute;
   top: 14px;
-  right: 14px;
+  /* Clear the transcript's vertical scrollbar while keeping the same visual
+     inset from the usable content edge. */
+  right: 32px;
   z-index: 5;
   padding: 7px 11px;
   border-radius: 8px;
