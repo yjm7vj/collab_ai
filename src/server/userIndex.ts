@@ -41,6 +41,13 @@ import {
   type SyncRoom,
 } from "../shared/sidebar";
 import type { LibraryPush, LibrarySnapshot } from "../shared/library";
+import {
+  SKILL_LIMITS,
+  sanitizeSkill,
+  type SkillRef,
+  type SkillsPush,
+  type SkillsSnapshot,
+} from "../shared/skills";
 import { SAVED_LIMITS, sanitizeGraph, type SavedWorkflow } from "../shared/workflow";
 
 type RoomRow = {
