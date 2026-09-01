@@ -76,6 +76,25 @@ type WorkflowRow = {
   updated_at: number;
 };
 
+/**
+ * One installed skill as stored.
+ *
+ * `source`, `allowed_tools` and `enabled_in` are JSON text, re-parsed and
+ * re-sanitized on the way out rather than trusted — see #skillRows for why
+ * that check runs twice.
+ */
+type SkillStorageRow = {
+  id: string;
+  name: string;
+  description: string;
+  allowed_tools: string;
+  source: string;
+  hash: string;
+  enabled_in: string;
+  deleted: number;
+  updated_at: number;
+};
+
 type GithubRow = {
   token: string;
   login: string;
