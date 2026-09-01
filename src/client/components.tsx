@@ -2104,9 +2104,24 @@ export function WorkspacePanel({
                       no private key, no app installation.
                     </p>
                   </>
-                ) : github.oauth && !github.authorized ? (
+                ) : github.app && !github.installed ? (
+                  // GitHub App installation is preferred whenever the app is
+                  // configured, even if this room still has an older OAuth
+                  // authorization stored.
+                  <>
+                    <p className="field-note">
+                      Connect the HuddleAI GitHub App to choose from your private and public repositories.
+                      If it is already installed, HuddleAI will detect it automatically. Otherwise, GitHub will ask
+                      you to select an account or organization and choose All repositories or specific ones.
+                    </p>
+                    <button className="primary" onClick={onAuthGithub}>Connect GitHub App</button>
+                    <p className="field-note">
+                      The app uses the installation only for repositories you grant it, and changes still require room approval.
+                    </p>
+                  </>
+                ) : !github.app && github.oauth && !github.authorized ? (
                   // OAuth is configured but nobody here has authorised yet —
-                  // one button starts the round trip.
+                  // one button starts the fallback round trip.
                   <>
                     <p className="field-note">
                       Connect your GitHub account, then pick a repository from the list. Works in any

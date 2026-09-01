@@ -8,6 +8,7 @@
  * Run: npm run check:github
  */
 import {
+  appSlug,
   appJwt,
   commitFile,
   deleteFile,
@@ -16,6 +17,8 @@ import {
   GithubProvider,
   installationToken,
   openPullRequest,
+  listInstallationRepos,
+  listUserInstallations,
   listUserRepos,
   parseRepoRef,
   pemToPkcs8,
@@ -132,6 +135,35 @@ async function main() {
     // trusting the installationToken tests that depend on it.
     const jwt = await appJwt(cfg);
     check("appJwt produces a three-part JWT", jwt.split(".").length === 3, jwt);
+
+    const appInfo = makeStub(() =>
+      new Response(JSON.stringify({ slug: "huddle-ai" }), { status: 200 }),
+    );
+    const slugRes = await appSlug(cfg, appInfo.fetchImpl);
+    check("appSlug reads the authenticated App slug", slugRes.ok === true && slugRes.slug === "huddle-ai", slugRes);
+
+    const malformedAppInfo = makeStub(() =>
+      new Response(JSON.stringify({ slug: "../../not-a-slug" }), { status: 200 }),
+    );
+    const malformedSlugRes = await appSlug(cfg, malformedAppInfo.fetchImpl);
+    check("appSlug rejects malformed slugs", malformedSlugRes.ok === false, malformedSlugRes);
+
+    const userInstallations = makeStub(() => new Response(JSON.stringify({
+      total_count: 1,
+      installations: [{
+        id: 158090581,
+        target_type: "User",
+        account: { id: 42, login: "octocat" },
+      }],
+    }), { status: 200 }));
+    const userInstallationsRes = await listUserInstallations("user-token", userInstallations.fetchImpl);
+    check(
+      "listUserInstallations maps installations accessible to the user",
+      userInstallationsRes.ok === true
+        && userInstallationsRes.installations[0]?.id === "158090581"
+        && userInstallationsRes.installations[0]?.accountId === "42",
+      userInstallationsRes,
+    );
 
     const created = makeStub(() =>
       new Response(JSON.stringify({ token: "ghs_abc123", expires_at: "2026-01-01T00:00:00Z" }), { status: 201 }),
@@ -688,6 +720,20 @@ async function main() {
     await listUserRepos("super-secret-token", recording);
     check("the token never appears in the request URL", !seenUrl.includes("super-secret-token"), seenUrl);
     check("the token is sent as a bearer credential", seenAuth.includes("super-secret-token"), seenAuth);
+
+    let installationUrls: string[] = [];
+    const installationPages = (async (input: unknown, init?: RequestInit) => {
+      installationUrls.push(String(input));
+      const page = new URL(String(input)).searchParams.get("page");
+      const body = page === "1"
+        ? { total_count: 101, repositories: Array.from({ length: 100 }, (_, i) => ({ full_name: `private/repo-${i}`, private: true, default_branch: "main" })) }
+        : { total_count: 101, repositories: [{ full_name: "private/repo-100", private: true, default_branch: "main" }] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const installed = await listInstallationRepos("installation-token", installationPages);
+    check("listInstallationRepos reads the installation repository response", installed.ok === true && installed.repos.length === 101, installed);
+    check("listInstallationRepos paginates beyond 100 repositories", installationUrls.length === 2 && installationUrls[1]!.includes("page=2"), installationUrls);
+    check("listInstallationRepos preserves private repository markers", installed.ok === true && installed.repos.every((repo) => repo.private), installed);
   }
 
   console.log("\nreceiver safety (the workerd Illegal-invocation class of bug)");

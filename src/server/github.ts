@@ -216,6 +216,33 @@ export async function appJwt(cfg: GithubConfig, nowSeconds?: number): Promise<st
   return `${signingInput}.${signature}`;
 }
 
+/** Resolve the authenticated GitHub App's public URL slug. */
+export async function appSlug(
+  cfg: GithubConfig,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  try {
+    const jwt = await appJwt(cfg);
+    const res = await doFetch("https://api.github.com/app", {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "collab-ai-github-app",
+      },
+    });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+
+    const data = (await res.json()) as { slug?: unknown };
+    if (typeof data.slug !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(data.slug)) {
+      return { ok: false, error: "GitHub's response was missing a valid App slug." };
+    }
+    return { ok: true, slug: data.slug };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to identify the GitHub App." };
+  }
+}
+
 /** Exchange the App JWT for an installation token. Short-lived; never store it. */
 export async function installationToken(
   cfg: GithubConfig,
@@ -1149,6 +1176,97 @@ export class GithubProvider implements WorkspaceProvider {
 
 export type UserRepo = { fullName: string; private: boolean; defaultBranch: string };
 
+export type UserInstallation = {
+  id: string;
+  accountId: string;
+  accountLogin: string;
+  targetType: "User" | "Organization";
+};
+
+/** List this GitHub App's installations that the authenticated user may access. */
+export async function listUserInstallations(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; installations: UserInstallation[] } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  const installations: UserInstallation[] = [];
+  try {
+    for (let page = 1; page <= 100; page++) {
+      const res = await doFetch(`https://api.github.com/user/installations?per_page=100&page=${page}`, {
+        headers: ghHeaders(token),
+      });
+      if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+      const body = (await res.json()) as { installations?: unknown };
+      const items = Array.isArray(body.installations) ? body.installations : [];
+      for (const item of items) {
+        if (typeof item !== "object" || item === null) continue;
+        const entry = item as {
+          id?: unknown;
+          target_type?: unknown;
+          account?: { id?: unknown; login?: unknown } | null;
+        };
+        if (typeof entry.id !== "number" || !Number.isSafeInteger(entry.id) || entry.id <= 0) continue;
+        if (entry.target_type !== "User" && entry.target_type !== "Organization") continue;
+        if (typeof entry.account?.id !== "number" || !Number.isSafeInteger(entry.account.id)) continue;
+        if (typeof entry.account.login !== "string" || entry.account.login.length === 0) continue;
+        installations.push({
+          id: String(entry.id),
+          accountId: String(entry.account.id),
+          accountLogin: entry.account.login,
+          targetType: entry.target_type,
+        });
+      }
+      if (items.length < 100) break;
+    }
+    return { ok: true, installations };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to list GitHub App installations." };
+  }
+}
+
+function mapUserRepos(body: unknown): UserRepo[] {
+  const items = Array.isArray(body)
+    ? body
+    : typeof body === "object" && body !== null && Array.isArray((body as { repositories?: unknown }).repositories)
+      ? (body as { repositories: unknown[] }).repositories
+      : [];
+  const repos: UserRepo[] = [];
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as { full_name?: unknown; private?: unknown; default_branch?: unknown };
+    if (typeof entry.full_name !== "string" || entry.full_name.length === 0) continue;
+    repos.push({
+      fullName: entry.full_name,
+      private: entry.private === true,
+      defaultBranch: typeof entry.default_branch === "string" && entry.default_branch.length > 0
+        ? entry.default_branch
+        : "",
+    });
+  }
+  return repos;
+}
+
+async function listRepoPages(
+  token: string,
+  endpoint: (page: number) => string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  const repos: UserRepo[] = [];
+  try {
+    for (let page = 1; page <= 100; page++) {
+      const res = await doFetch(endpoint(page), { headers: ghHeaders(token) });
+      if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+      const pageRepos = mapUserRepos(await res.json());
+      repos.push(...pageRepos);
+      if (pageRepos.length < 100) break;
+    }
+    return { ok: true, repos };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to list repositories." };
+  }
+}
+
 /**
  * List repositories the OAuth-connecting person can see, to populate a
  * picker on the client.
@@ -1164,32 +1282,21 @@ export async function listUserRepos(
   token: string,
   fetchImpl?: typeof fetch,
 ): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
-  const doFetch = fetchImpl ?? runtimeFetch;
-  try {
-    const res = await doFetch(
-      "https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member",
-      { headers: ghHeaders(token) },
-    );
-    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+  return listRepoPages(
+    token,
+    (page) => `https://api.github.com/user/repos?sort=updated&per_page=100&page=${page}&affiliation=owner,collaborator,organization_member`,
+    fetchImpl,
+  );
+}
 
-    const body = await res.json();
-    const items = Array.isArray(body) ? body : [];
-
-    const repos: UserRepo[] = [];
-    for (const item of items) {
-      if (typeof item !== "object" || item === null) continue;
-      const entry = item as { full_name?: unknown; private?: unknown; default_branch?: unknown };
-      if (typeof entry.full_name !== "string" || entry.full_name.length === 0) continue;
-      repos.push({
-        fullName: entry.full_name,
-        private: entry.private === true,
-        defaultBranch: typeof entry.default_branch === "string" && entry.default_branch.length > 0
-          ? entry.default_branch
-          : "",
-      });
-    }
-    return { ok: true, repos };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Failed to list repositories." };
-  }
+/** List repositories granted to a GitHub App installation, including private repositories. */
+export async function listInstallationRepos(
+  token: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; repos: UserRepo[] } | { ok: false; error: string }> {
+  return listRepoPages(
+    token,
+    (page) => `https://api.github.com/installation/repositories?per_page=100&page=${page}`,
+    fetchImpl,
+  );
 }

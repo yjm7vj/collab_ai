@@ -100,6 +100,8 @@ import { GITHUB_REPO_STATE_ROLE, repoAuthorizeUrl } from "./oauth";
 import {
   GithubProvider,
   installationToken,
+  listInstallationRepos,
+  listUserInstallations,
   listUserRepos,
   parseRepoRef,
   pemToPkcs8,
@@ -273,7 +275,7 @@ export class Room extends Agent<Env, RoomState> {
     } catch {
       /* column already present */
     }
-    // The one place in this app where a long-lived credential is stored. It is
+    // The one place in this app where a long-lived OAuth credential is stored. It is
     // here and not in RoomState because RoomState is synced to every connected
     // client; this table is not on the wire at all. Only the member who
     // authorised can cause it to be used, only to list their own repositories
@@ -284,6 +286,12 @@ export class Room extends Agent<Env, RoomState> {
       uid TEXT NOT NULL,
       token TEXT NOT NULL,
       login TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`;
+    this.sql`CREATE TABLE IF NOT EXISTS github_installations (
+      k TEXT PRIMARY KEY,
+      uid TEXT NOT NULL,
+      installation_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )`;
     this.#schemaReady = true;
@@ -456,16 +464,18 @@ export class Room extends Agent<Env, RoomState> {
   /**
    * What this deployment can do with GitHub, and how far this room has got.
    *
-   * Booleans and a public login only — never the token. This is safe to put
-   * straight into RoomState because it is the one summary of github_oauth
-   * that has had everything secret stripped out of it.
+   * Booleans and a public login only — never a token. This is safe to put
+   * straight into RoomState because it summarizes the stored GitHub
+   * authorization state with every secret stripped out of it.
    */
   #githubStatus(): GithubStatus {
     const row = this.sql<{ uid: string; login: string }>`SELECT uid, login FROM github_oauth WHERE k = 'current'`[0];
+    const installation = this.sql<{ uid: string }>`SELECT uid FROM github_installations WHERE k = 'current'`[0];
     return {
       oauth: Boolean(this.env.GITHUB_OAUTH_CLIENT_ID) && Boolean(this.env.GITHUB_OAUTH_CLIENT_SECRET),
       app: Boolean(this.env.GITHUB_APP_ID) && Boolean(this.env.GITHUB_APP_PRIVATE_KEY),
-      authorized: Boolean(row),
+      installed: Boolean(installation),
+      authorized: Boolean(row || installation),
       login: row?.login ?? "",
     };
   }
@@ -722,10 +732,31 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     if (url.pathname === "/github-installed") {
+      const role = this.#memberRole(uid);
+      if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
       const pending = this.#kvGet<{ repo: string; uid: string } | null>("github:pending", null);
-      if (!pending) return json({ error: "bad_request" }, 409);
-
       const installationId = String(body.installationId ?? "");
+      if (!/^[0-9]+$/.test(installationId)) return json({ error: "bad_request" }, 400);
+
+      const oauth = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
+      if (!oauth || oauth.uid !== uid) return json({ error: "github_authorization_required" }, 403);
+      const verified = await listUserInstallations(oauth.token);
+      if (!verified.ok) return json({ error: verified.error }, 502);
+      if (!verified.installations.some((installation) => installation.id === installationId)) {
+        return json({ error: "installation_not_accessible" }, 403);
+      }
+
+      this.sql`INSERT INTO github_installations (k, uid, installation_id, created_at)
+               VALUES ('current', ${uid}, ${installationId}, ${now})
+               ON CONFLICT(k) DO UPDATE SET
+                 uid = excluded.uid,
+                 installation_id = excluded.installation_id,
+                 created_at = excluded.created_at`;
+
+      if (!pending) {
+        this.setState({ ...this.state, github: this.#githubStatus() });
+        return json({ ok: true });
+      }
 
       this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at, auth)
                VALUES ('current', ${installationId}, ${pending.repo}, ${uid}, ${now}, 'app')
@@ -760,6 +791,7 @@ export class Room extends Agent<Env, RoomState> {
       this.setState({
         ...this.state,
         workspace: { kind: "github", online: true, hostUid: uid, label: pending.repo, canWrite },
+        github: this.#githubStatus(),
       });
       const connectedName = this.#memberName(uid) ?? "someone";
       this.#system(`${connectedName} connected ${pending.repo}`);
@@ -774,6 +806,8 @@ export class Room extends Agent<Env, RoomState> {
     // this app — it is written straight to github_oauth and never touches
     // RoomState, a broadcast, or a log line.
     if (url.pathname === "/github-oauth") {
+      const role = this.#memberRole(uid);
+      if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
       const token = body.token;
       if (typeof token !== "string" || token.length === 0) {
         return json({ error: "bad_request" }, 400);
@@ -844,6 +878,7 @@ export class Room extends Agent<Env, RoomState> {
     if (
       githubStatus.oauth !== this.state.github.oauth ||
       githubStatus.app !== this.state.github.app ||
+      githubStatus.installed !== this.state.github.installed ||
       githubStatus.authorized !== this.state.github.authorized ||
       githubStatus.login !== this.state.github.login
     ) {
@@ -1372,19 +1407,15 @@ export class Room extends Agent<Env, RoomState> {
 
   /**
    * Connect a GitHub repository to the room, preferring the simpler of the
-   * two paths this deployment supports.
+   * two paths this deployment supports, preferring an installation belonging
+   * to the current member.
    *
    * A malformed repo name is refused first, before either configuration
    * check, because it is wrong regardless of what this server has set up.
-   * After that: if someone here has already authorised GitHub via OAuth
-   * (github_oauth has a row), the repository is connected directly — that
-   * member already proved, in a separate round trip through #onGithubAuth,
-   * that they may reach it, so there is nothing left to redirect for. The
-   * repository itself is still checked against GitHub before the connection
-   * is recorded, because authorising an account says nothing about whether
-   * the name typed into the box exists.
-   * Otherwise, if the GitHub App is configured, this falls back to the
-   * original install-redirect flow. If neither is configured, there is
+   * After that: if the current member has already installed the GitHub App,
+   * the repository is validated with its short-lived installation token and
+   * connected directly. The OAuth path remains as a fallback for deployments
+   * that have not configured an App. If neither is configured, there is
    * simply nothing this server can do yet.
    */
   async #onGithubConnect(connection: Connection, repo: string) {
@@ -1402,8 +1433,67 @@ export class Room extends Agent<Env, RoomState> {
     const uid = this.#uidOf(connection);
     if (!uid) return;
 
+    const installationRow = this.sql<{ uid: string; installation_id: string }>`SELECT uid, installation_id FROM github_installations WHERE k = 'current'`[0];
+    if (installationRow && installationRow.uid === uid) {
+      const tokenRes = await installationToken(
+        { appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY },
+        installationRow.installation_id,
+      );
+      if (!tokenRes.ok) {
+        this.#refuse(connection, `Couldn't reach GitHub. ${tokenRes.error}`);
+        return;
+      }
+      // Same question the OAuth path below asks, for the same reason: parsing
+      // proves the shape of the name, never that GitHub has anything behind
+      // it, and reachable is not writable. An installation makes that second
+      // half easy to get wrong — the member connecting may have full write
+      // access to the repository while the installation carrying the request
+      // holds only `Contents: Read`, and every commit would 403 long after
+      // the room approved it.
+      const access = await repoAccess(tokenRes.token, ref);
+      if (!access.ok) {
+        this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${access.error}`);
+        return;
+      }
+      if (!access.access.canPush) {
+        this.#refuse(
+          connection,
+          `The GitHub App installation has no write access to ${repo}. ` +
+            `On GitHub, grant it Contents and Pull requests write access for this repository, then try again.`,
+        );
+        return;
+      }
+
+      // A branch named explicitly still has to exist. When none was named the
+      // call above already proved the repository is there.
+      if (ref.ref !== "HEAD") {
+        const head = await refHead(tokenRes.token, ref);
+        if (!head.ok) {
+          this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
+          return;
+        }
+      }
+
+      const now = Date.now();
+      this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at, auth)
+               VALUES ('current', ${installationRow.installation_id}, ${repo}, ${uid}, ${now}, 'app')
+               ON CONFLICT(k) DO UPDATE SET
+                 installation_id = excluded.installation_id,
+                 repo = excluded.repo,
+                 connected_by = excluded.connected_by,
+                 connected_at = excluded.connected_at,
+                 auth = excluded.auth`;
+      this.setState({
+        ...this.state,
+        workspace: { kind: "github", online: true, hostUid: uid, label: repo, canWrite: true },
+        github: this.#githubStatus(),
+      });
+      this.#system(`${this.#memberName(uid) ?? "someone"} connected ${repo}`);
+      return;
+    }
+
     const oauthRow = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
-    if (oauthRow) {
+    if (oauthRow && oauthRow.uid === uid) {
       // Parsing proves the shape of the name, never that GitHub has anything
       // behind it: a typo, a repository someone else's account can see, or a
       // branch that was never pushed all parse perfectly. Asking GitHub here
@@ -1459,25 +1549,28 @@ export class Room extends Agent<Env, RoomState> {
     }
 
     if (this.env.GITHUB_APP_ID && this.env.GITHUB_APP_PRIVATE_KEY) {
-      const role = this.#roleOf(connection);
+      this.#kvSet("github:pending", { repo, uid });
+      if (!this.env.GITHUB_OAUTH_CLIENT_ID || !this.env.GITHUB_OAUTH_CLIENT_SECRET) {
+        this.#refuse(connection, "GitHub user authorization is required before installing the GitHub App.");
+        return;
+      }
 
-      // Ten minutes is plenty for an install round trip and keeps the replay
-      // window on this state token small.
       const token = await mintToken(this.env.ROOM_SECRET, {
         rid: this.name,
         uid,
-        role,
+        role: GITHUB_REPO_STATE_ROLE,
         exp: Math.floor(Date.now() / 1000) + 600,
       });
-
-      this.#kvSet("github:pending", { repo, uid });
-
-      // The app slug is public — it appears in the app's own URL — and is only
-      // needed to send the user straight to the install page instead of a
-      // generic settings page they'd have to search from.
-      const url = this.env.GITHUB_APP_SLUG
-        ? `https://github.com/apps/${this.env.GITHUB_APP_SLUG}/installations/new?state=${token}`
-        : `https://github.com/settings/installations`;
+      const origin = this.#origin();
+      if (!origin) {
+        this.#refuse(connection, "Couldn't work out this server's address. Reload the page and try again.");
+        return;
+      }
+      const url = repoAuthorizeUrl(
+        this.env.GITHUB_OAUTH_CLIENT_ID,
+        `${origin}/api/auth/github/callback`,
+        token,
+      );
 
       connection.send(JSON.stringify({ t: "github.install", url } satisfies ServerMsg));
       return;
@@ -1490,11 +1583,11 @@ export class Room extends Agent<Env, RoomState> {
   }
 
   /**
-   * Begin the OAuth round trip for repository access, reusing the same
-   * OAuth App used for sign-in but asking this time for the `repo` scope.
+   * Authorize the current GitHub user so the callback can securely discover
+   * an existing App installation or send them to install it when none exists.
    *
    * The state token minted here deliberately does NOT carry the member's own
-   * role, unlike the GitHub App install token above — it only says "this is
+   * role — it only says "this is
    * a repository connect for this room, begun by this member". Authority is
    * re-checked from membership when the repository is actually connected
    * (in #onGithubConnect and, before that, in #onGithubRepos), so a stale or
@@ -1503,6 +1596,9 @@ export class Room extends Agent<Env, RoomState> {
    */
   async #onGithubAuth(connection: Connection) {
     if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
+
+    const uid = this.#uidOf(connection);
+    if (!uid) return;
 
     if (!this.env.GITHUB_OAUTH_CLIENT_ID || !this.env.GITHUB_OAUTH_CLIENT_SECRET) {
       this.#refuse(
@@ -1516,9 +1612,6 @@ export class Room extends Agent<Env, RoomState> {
       this.#refuse(connection, "Couldn't work out this server's address. Reload the page and try again.");
       return;
     }
-
-    const uid = this.#uidOf(connection);
-    if (!uid) return;
 
     const token = await mintToken(this.env.ROOM_SECRET, {
       rid: this.name,
@@ -1543,6 +1636,31 @@ export class Room extends Agent<Env, RoomState> {
   async #onGithubRepos(connection: Connection) {
     if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
 
+    const uid = this.#uidOf(connection);
+    const installation = this.sql<{ uid: string; installation_id: string }>`SELECT uid, installation_id FROM github_installations WHERE k = 'current'`[0];
+    if (installation && installation.uid === uid) {
+      const pkcs8 = pemToPkcs8(this.env.GITHUB_APP_PRIVATE_KEY);
+      if (!pkcs8.ok) {
+        this.#refuse(connection, pkcs8.error);
+        return;
+      }
+      const tokenRes = await installationToken(
+        { appId: this.env.GITHUB_APP_ID, privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY },
+        installation.installation_id,
+      );
+      if (!tokenRes.ok) {
+        this.#refuse(connection, tokenRes.error);
+        return;
+      }
+      const res = await listInstallationRepos(tokenRes.token);
+      if (!res.ok) {
+        this.#refuse(connection, res.error);
+        return;
+      }
+      connection.send(JSON.stringify({ t: "github.repos", repos: res.repos } satisfies ServerMsg));
+      return;
+    }
+
     const row = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
     if (!row) {
       this.#refuse(connection, "Connect a GitHub account first.");
@@ -1552,7 +1670,6 @@ export class Room extends Agent<Env, RoomState> {
     // Which repositories a person can see is their own business, so even
     // another admin in the room may not enumerate them through someone
     // else's stored token — only the member who actually authorised may.
-    const uid = this.#uidOf(connection);
     if (!uid || uid !== row.uid) {
       this.#refuse(connection, "Only the member who connected GitHub can list their repositories.");
       return;
@@ -1583,10 +1700,11 @@ export class Room extends Agent<Env, RoomState> {
     if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
 
     this.sql`DELETE FROM github_oauth WHERE k = 'current'`;
+    this.sql`DELETE FROM github_installations WHERE k = 'current'`;
 
     const connected = this.sql<{ auth: string }>`SELECT auth FROM github WHERE k = 'current'`[0];
-    const workspace = connected?.auth === "oauth" ? NO_WORKSPACE : this.state.workspace;
-    if (connected?.auth === "oauth") {
+    const workspace = connected ? NO_WORKSPACE : this.state.workspace;
+    if (connected) {
       this.sql`DELETE FROM github WHERE k = 'current'`;
       this.#kvDel(GITHUB_WORKING_KEY);
       this.#pending.failAll("The GitHub connection was signed out.");

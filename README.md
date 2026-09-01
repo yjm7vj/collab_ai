@@ -521,11 +521,15 @@ apparently the single most likely thing to go wrong when setting this up.
 ```bash
 npm run check           # sanitizeSettings: temperature/effort/model/worker-count clamping
 npm run check:auth      # HMAC token mint/verify, invite code generation
+npm run check:workflow  # sanitizeGraph's caps, model-by-role rules and cycle bounds, and the briefing builders
 npm run check:workspace # the path deny list and pathDecision matching
 npm run check:fs        # the real client-side local-folder provider, against a throwaway folder on disk
 npm run check:github    # GitHub App JWT/token minting, PEM handling, repo-ref parsing, the read-only provider
+npm run check:oauth     # derived uids, authorize URLs, code exchange, and the signed state parameter
+npm run check:docx      # the Markdown-to-DOCX export, checked as a real ZIP package
+npm run check:markdown  # inline Markdown rendered to React nodes
 npm run typecheck
-npm test                # runs check, check:auth, check:workspace, check:fs and check:github in sequence
+npm test                # runs all nine checks above in sequence
 npm run test:integration # vitest — SELF.fetch through the real Worker, plus wrangler.jsonc's actual routing config
 ```
 
