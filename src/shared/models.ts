@@ -54,7 +54,7 @@ export const MODELS: ModelInfo[] = [
     adaptiveThinking: true,
     dynamicServerTools: true,
     canManage: true,
-    canWork: false,
+    canWork: true,
     contextWindow: 1000000,
   },
   {

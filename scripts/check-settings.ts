@@ -81,7 +81,7 @@ const m2 = sanitizeSettings({ ...DEFAULT_SETTINGS, agentModel: "claude-haiku-4-5
 check("rejects Haiku as manager", m2.agentModel !== "claude-haiku-4-5", m2.agentModel);
 
 const m3 = sanitizeSettings({ ...DEFAULT_SETTINGS, workerModel: "claude-opus-5" });
-check("rejects Opus 5 as worker", m3.workerModel !== "claude-opus-5", m3.workerModel);
+check("allows Opus 5 as worker", m3.workerModel === "claude-opus-5", m3.workerModel);
 
 // Worker cap is bounded no matter what arrives.
 const w1 = sanitizeSettings({
