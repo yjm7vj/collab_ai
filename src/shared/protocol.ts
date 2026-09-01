@@ -355,7 +355,7 @@ export type ClientMsg =
    * message — the room holds none of it, so the client is the one source of
    * truth for a conversation that never touches `RoomState`.
    */
-  | { t: "workflow.chat"; turns: WorkflowChatTurn[] };
+  | { t: "workflow.chat"; turns: WorkflowChatTurn[]; graph: WorkflowGraph };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

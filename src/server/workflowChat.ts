@@ -23,8 +23,10 @@ import {
   MAX_POS,
   RELATIONS,
   graphWarnings,
+  leadOf,
   sanitizeGraph,
   summarizeGraph,
+  type WorkflowGraph,
 } from "../shared/workflow";
 import type { WorkflowChatReply, WorkflowChatTurn } from "../shared/protocol";
 
@@ -66,7 +68,8 @@ ${roster}
 Rules:
 - If the description is workable, call propose_workflow with kind "graph": a lead node, however many teammates the task genuinely needs (favor fewer, focused teammates over many), and the links between them. Give every node a short "prompt" (its brief) written in the second person ("You research...", "You check..."). Node ids must be short lowercase slugs, unique. leadId must match one node's id.
 - If the description is too vague to draft anything reasonable (e.g. "make me a workflow" with no subject), call propose_workflow with kind "question" and ask exactly one short, concrete question — never more than one, and never when you could instead make a reasonable default choice.
-- When refining a graph you already proposed (the conversation will summarize it), change only what the new message asks for and keep the rest.
+- The current graph on the canvas is given below. Treat a request as an edit to it, not a fresh start: keep every node, link, and brief the message did not ask to change, and reuse the same node ids for anything you keep. Only replace the whole thing if the message clearly describes a different, unrelated team.
+- kind "graph" must always report the complete graph you want on the canvas afterward — the full node and edge list, not just what changed.
 - Do not invent positions — none are asked for.`;
 
 type ProposeInput = {
@@ -156,6 +159,33 @@ function client(cfg: ModelConfig) {
 }
 
 /**
+ * Compact recap of the graph currently on the canvas, appended to the system
+ * prompt so a chat turn can edit it instead of only ever drafting from
+ * nothing. Bounded by `GRAPH_LIMITS` regardless of what is passed in, so this
+ * never grows the prompt by more than a handful of short lines — positions
+ * are left out, same as everywhere else in this module, since they mean
+ * nothing to the model.
+ */
+export function describeCurrentGraph(graph: WorkflowGraph): string {
+  const lead = leadOf(graph);
+  const lines = graph.nodes.map(
+    (n) => `- ${n.id}: "${n.name}"${n.id === lead.id ? " (lead)" : ""}, ${n.model}, brief: ${n.prompt.trim() || "(none)"}`,
+  );
+  const links = graph.edges.map((e) => `- ${e.from} -${e.kind}-> ${e.to}`);
+  return [
+    `Current graph on the canvas — ${summarizeGraph(graph)}:`,
+    "Nodes:",
+    ...lines,
+    links.length ? "Links:" : "Links: none",
+    ...links,
+  ].join("\n");
+}
+
+function systemPromptFor(current: WorkflowGraph): string {
+  return `${SYSTEM_PROMPT}\n\n${describeCurrentGraph(current)}`;
+}
+
+/**
  * Merge consecutive same-role turns into one message.
  *
  * The API requires strict user/assistant alternation. The client's turn list
@@ -188,19 +218,20 @@ export async function proposeWorkflow(
   cfg: ModelConfig,
   model: string,
   turns: WorkflowChatTurn[],
+  current: WorkflowGraph,
 ): Promise<ProposeResult> {
   if (turns.length === 0) {
     return { reply: { kind: "error", message: "Describe what you want the team to do first." } };
   }
 
-  if (cfg.apiKey === "mock") return mockPropose(turns);
+  if (cfg.apiKey === "mock") return mockPropose(turns, current);
 
   let message: Message;
   try {
     message = (await client(cfg).messages.create({
       model,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: systemPromptFor(current),
       tools: [TOOL],
       tool_choice: { type: "tool", name: TOOL.name },
       messages: coalesceTurns(turns) as never,
@@ -265,7 +296,7 @@ export function finish(input: unknown): ProposeResult {
 }
 
 /** Deterministic stand-in for tests and offline dev, mirroring model.ts's own mock branches. */
-function mockPropose(turns: WorkflowChatTurn[]): ProposeResult {
+function mockPropose(turns: WorkflowChatTurn[], current: WorkflowGraph): ProposeResult {
   const last = turns[turns.length - 1]!.text.toLowerCase();
   if (last.length < 8) {
     return finish({
@@ -273,6 +304,26 @@ function mockPropose(turns: WorkflowChatTurn[]): ProposeResult {
       question: "What should this team actually work on?",
     });
   }
+
+  // Editing behavior: with more than a bare lead already on the canvas and an
+  // "add" instruction, keep the existing team and append one node, rather
+  // than replacing it — the same thing a real edit should do.
+  if (current.nodes.length > 1 && last.includes("add")) {
+    return finish({
+      kind: "graph",
+      note: "(mock) Added a teammate to the existing team.",
+      leadId: current.leadId,
+      nodes: [
+        ...current.nodes.map((n) => ({ id: n.id, name: n.name, model: n.model, prompt: n.prompt })),
+        { id: "extra", name: "Extra", model: "claude-haiku-4-5", prompt: "You help with the new task." },
+      ],
+      edges: [
+        ...current.edges,
+        { id: "extra-e", from: current.leadId, to: "extra", kind: "delegates" },
+      ],
+    });
+  }
+
   return finish({
     kind: "graph",
     note: "(mock) A lead and one researcher.",

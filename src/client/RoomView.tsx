@@ -355,12 +355,15 @@ export function RoomView({
     [send],
   );
   const sendWorkflowChat = useCallback(
-    (text: string) => {
+    (text: string, graph: WorkflowGraph) => {
       const trimmed = text.trim();
       if (!trimmed) return;
       setWorkflowChat((prev) => {
         const turns = [...prev.turns, { role: "user" as const, text: trimmed }];
-        send({ t: "workflow.chat", turns });
+        // The graph sent along is whatever is currently on the asker's
+        // canvas — the in-progress draft, not necessarily the room's applied
+        // graph — so "add a critic" edits what they are looking at.
+        send({ t: "workflow.chat", turns, graph });
         return { ...prev, turns, pending: true, error: null };
       });
     },

@@ -12,8 +12,14 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { coalesceTurns, finish, proposeWorkflow, sanitizeChatTurns } from "../src/server/workflowChat";
-import { GRAPH_LIMITS, MAX_POS } from "../src/shared/workflow";
+import {
+  coalesceTurns,
+  describeCurrentGraph,
+  finish,
+  proposeWorkflow,
+  sanitizeChatTurns,
+} from "../src/server/workflowChat";
+import { DEFAULT_GRAPH, GRAPH_LIMITS, GRAPH_PRESETS, MAX_POS } from "../src/shared/workflow";
 import { MODELS } from "../src/shared/models";
 
 const MOCK = { apiKey: "mock" };
@@ -95,9 +101,12 @@ describe("coalesceTurns", () => {
 
 describe("proposeWorkflow (mock path)", () => {
   it("asks a clarifying question for a near-empty description", async () => {
-    const result = await proposeWorkflow(MOCK, "claude-opus-5", [
-      { role: "user", text: "hi" },
-    ]);
+    const result = await proposeWorkflow(
+      MOCK,
+      "claude-opus-5",
+      [{ role: "user", text: "hi" }],
+      DEFAULT_GRAPH,
+    );
     expect(result.reply.kind).toBe("question");
     if (result.reply.kind === "question") {
       expect(result.reply.text.length).toBeGreaterThan(0);
@@ -105,9 +114,12 @@ describe("proposeWorkflow (mock path)", () => {
   });
 
   it("drafts a sanitized, runnable graph for a real description", async () => {
-    const result = await proposeWorkflow(MOCK, "claude-opus-5", [
-      { role: "user", text: "A lead and a researcher who finds sources for it." },
-    ]);
+    const result = await proposeWorkflow(
+      MOCK,
+      "claude-opus-5",
+      [{ role: "user", text: "A lead and a researcher who finds sources for it." }],
+      DEFAULT_GRAPH,
+    );
     expect(result.reply.kind).toBe("graph");
     if (result.reply.kind !== "graph") return;
     const { graph, note, warnings } = result.reply;
@@ -123,11 +135,50 @@ describe("proposeWorkflow (mock path)", () => {
   });
 
   it("refuses an empty conversation without touching the model", async () => {
-    const result = await proposeWorkflow(MOCK, "claude-opus-5", []);
+    const result = await proposeWorkflow(MOCK, "claude-opus-5", [], DEFAULT_GRAPH);
     expect(result.reply).toEqual({
       kind: "error",
       message: "Describe what you want the team to do first.",
     });
+  });
+
+  it("edits the graph already on the canvas instead of replacing it", async () => {
+    // The mock's "add" branch stands in for what a real edit should do: the
+    // existing team survives, and something new joins it — this is the
+    // behavior "add a critic" is supposed to produce against a real model too.
+    const current = GRAPH_PRESETS.find((p) => p.id === "researcher-critic")!.graph;
+    const result = await proposeWorkflow(
+      MOCK,
+      "claude-opus-5",
+      [{ role: "user", text: "please add one more teammate" }],
+      current,
+    );
+    expect(result.reply.kind).toBe("graph");
+    if (result.reply.kind !== "graph") return;
+    const { graph } = result.reply;
+
+    expect(graph.leadId).toBe(current.leadId);
+    for (const n of current.nodes) {
+      expect(graph.nodes.some((g) => g.id === n.id && g.name === n.name)).toBe(true);
+    }
+    expect(graph.nodes.length).toBe(current.nodes.length + 1);
+  });
+});
+
+describe("describeCurrentGraph", () => {
+  it("lists every node and link, marking the lead", () => {
+    const text = describeCurrentGraph(
+      GRAPH_PRESETS.find((p) => p.id === "researcher-critic")!.graph,
+    );
+    expect(text).toContain("(lead)");
+    expect(text).toContain("Researcher");
+    expect(text).toContain("Critic");
+    expect(text).toContain("-reviews->");
+  });
+
+  it("says there are no links rather than an empty list", () => {
+    const text = describeCurrentGraph(GRAPH_PRESETS.find((p) => p.id === "lead-only")!.graph);
+    expect(text).toContain("Links: none");
   });
 });
 

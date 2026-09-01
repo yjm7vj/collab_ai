@@ -1302,7 +1302,7 @@ export class Room extends Agent<Env, RoomState> {
       case "workflow":
         return this.#onWorkflow(connection, msg.graph, msg.useCustom);
       case "workflow.chat":
-        return this.#onWorkflowChat(connection, msg.turns);
+        return this.#onWorkflowChat(connection, msg.turns, msg.graph);
       case "compact":
         return this.#onCompact(connection);
       case "invite.create":
@@ -1441,7 +1441,7 @@ export class Room extends Agent<Env, RoomState> {
    * `workflow` capability as drawing the graph by hand, since that is exactly
    * what this does on someone's behalf.
    */
-  async #onWorkflowChat(connection: Connection, incoming: unknown) {
+  async #onWorkflowChat(connection: Connection, incoming: unknown, incomingGraph: unknown) {
     if (
       !this.#allow(
         connection,
@@ -1462,8 +1462,15 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
+    // Whatever is currently on the asker's canvas — never trusted further than
+    // any other client frame, so it goes through the same sanitizer a real
+    // Apply would. Editing on top of it, rather than only ever drafting from
+    // nothing, is the point: "add a critic" should not have to redescribe the
+    // team that is already there.
+    const current = sanitizeGraph(incomingGraph);
+
     const model = this.#settings().agentModel;
-    const { reply } = await proposeWorkflow(this.#config(), model, turns);
+    const { reply } = await proposeWorkflow(this.#config(), model, turns, current);
     connection.send(JSON.stringify({ t: "workflow.chat", reply } satisfies ServerMsg));
   }
 

@@ -89,7 +89,7 @@ export function WorkflowPanel({
   /** State of the "describe your workflow" chat, lived above this panel — a
    *  reply arrives over the room's socket, which this panel does not own. */
   chat: WorkflowChatState;
-  onChatSend: (text: string) => void;
+  onChatSend: (text: string, graph: WorkflowGraph) => void;
   onChatReset: () => void;
 }) {
   const [draft, setDraft] = useState<WorkflowGraph>(graph);
@@ -445,7 +445,8 @@ export function WorkflowPanel({
               </button>
               <p className="wf-note">
                 Tell an assistant what you want the team to do, and it drafts a graph here for
-                you to check and adjust.
+                you to check and adjust. It can also edit whatever is already on the canvas —
+                "add a critic" works too.
               </p>
             </section>
           )}
@@ -770,6 +771,7 @@ export function WorkflowPanel({
       {showChat && (
         <WorkflowChatPanel
           chat={chat}
+          currentGraph={draft}
           busy={busy}
           onSend={onChatSend}
           onUseDraft={(g) => {
@@ -787,16 +789,20 @@ export function WorkflowPanel({
 /* ---------------------------------------------------------- describe chat */
 
 /**
- * "Describe your workflow" — a chat overlay that drafts a graph, and hands it
- * to the canvas underneath rather than applying anything itself.
+ * "Describe your workflow" — a chat overlay that drafts or edits a graph, and
+ * hands the result to the canvas underneath rather than applying anything
+ * itself.
  *
- * Nothing here writes to the room. `onUseDraft` puts the proposal on the same
- * `draft` the manual editor uses, so Apply, Revert, and every warning in
- * `graphWarnings` behave exactly as if the graph had been drawn by hand — this
- * screen only ever proposes a starting point to react to.
+ * Every send carries `currentGraph` — the canvas's own `draft` — so "add a
+ * critic" edits the team already there instead of starting over; the model
+ * decides how much of it to keep. Nothing here writes to the room. `onUseDraft`
+ * puts the proposal on the same `draft` the manual editor uses, so Apply,
+ * Revert, and every warning in `graphWarnings` behave exactly as if the graph
+ * had been drawn by hand — this screen only ever proposes what to react to.
  */
 function WorkflowChatPanel({
   chat,
+  currentGraph,
   busy,
   onSend,
   onUseDraft,
@@ -804,8 +810,9 @@ function WorkflowChatPanel({
   onClose,
 }: {
   chat: WorkflowChatState;
+  currentGraph: WorkflowGraph;
   busy: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, graph: WorkflowGraph) => void;
   onUseDraft: (graph: WorkflowGraph) => void;
   onReset: () => void;
   onClose: () => void;
@@ -820,7 +827,7 @@ function WorkflowChatPanel({
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed || chat.pending || busy) return;
-    onSend(trimmed);
+    onSend(trimmed, currentGraph);
     setText("");
   };
 
@@ -830,8 +837,8 @@ function WorkflowChatPanel({
         <div>
           <h3>Describe your workflow</h3>
           <p className="wf-sub">
-            Say what the team should do. Answer if it asks one question back, then check the
-            draft it puts on the canvas.
+            Say what the team should do, or how to change the team already on the canvas.
+            Answer if it asks one question back, then check the draft it puts there.
           </p>
         </div>
         <div className="wfc-head-acts">
@@ -856,8 +863,11 @@ function WorkflowChatPanel({
         <div className="wfc-turns" ref={listRef}>
           {chat.turns.length === 0 && !chat.pending && (
             <p className="wf-note">
-              For example: “A lead that plans posts, a researcher that gathers sources, and an
-              editor that polishes the final copy.”
+              {currentGraph.nodes.length > 1
+                ? `For example: "add a critic that reviews the researcher's work" — this edits the ` +
+                  `team already on the canvas.`
+                : `For example: "A lead that plans posts, a researcher that gathers sources, and ` +
+                  `an editor that polishes the final copy."`}
             </p>
           )}
           {chat.turns.map((t, i) => (
