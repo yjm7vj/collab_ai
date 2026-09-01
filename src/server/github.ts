@@ -1183,7 +1183,44 @@ export type UserInstallation = {
   targetType: "User" | "Organization";
 };
 
-/** List this GitHub App's installations that the authenticated user may access. */
+/**
+ * Narrow GitHub's installation entries, dropping anything malformed.
+ *
+ * Shared by the two listings below because they return the same objects
+ * through different envelopes — an installation is an installation whether
+ * the App or a person asked for it.
+ */
+function mapInstallations(items: unknown[]): UserInstallation[] {
+  const installations: UserInstallation[] = [];
+  for (const item of items) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as {
+      id?: unknown;
+      target_type?: unknown;
+      account?: { id?: unknown; login?: unknown } | null;
+    };
+    if (typeof entry.id !== "number" || !Number.isSafeInteger(entry.id) || entry.id <= 0) continue;
+    if (entry.target_type !== "User" && entry.target_type !== "Organization") continue;
+    if (typeof entry.account?.id !== "number" || !Number.isSafeInteger(entry.account.id)) continue;
+    if (typeof entry.account.login !== "string" || entry.account.login.length === 0) continue;
+    installations.push({
+      id: String(entry.id),
+      accountId: String(entry.account.id),
+      accountLogin: entry.account.login,
+      targetType: entry.target_type,
+    });
+  }
+  return installations;
+}
+
+/**
+ * List this GitHub App's installations that the authenticated user may access.
+ *
+ * Only a GitHub App user-to-server token may call this. A deployment whose
+ * OAuth credentials belong to a classic OAuth App cannot mint one and gets a
+ * 403 here whoever is signed in — see listAppInstallations for the route that
+ * still answers in that case.
+ */
 export async function listUserInstallations(
   token: string,
   fetchImpl?: typeof fetch,
@@ -1198,24 +1235,51 @@ export async function listUserInstallations(
       if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
       const body = (await res.json()) as { installations?: unknown };
       const items = Array.isArray(body.installations) ? body.installations : [];
-      for (const item of items) {
-        if (typeof item !== "object" || item === null) continue;
-        const entry = item as {
-          id?: unknown;
-          target_type?: unknown;
-          account?: { id?: unknown; login?: unknown } | null;
-        };
-        if (typeof entry.id !== "number" || !Number.isSafeInteger(entry.id) || entry.id <= 0) continue;
-        if (entry.target_type !== "User" && entry.target_type !== "Organization") continue;
-        if (typeof entry.account?.id !== "number" || !Number.isSafeInteger(entry.account.id)) continue;
-        if (typeof entry.account.login !== "string" || entry.account.login.length === 0) continue;
-        installations.push({
-          id: String(entry.id),
-          accountId: String(entry.account.id),
-          accountLogin: entry.account.login,
-          targetType: entry.target_type,
-        });
-      }
+      installations.push(...mapInstallations(items));
+      if (items.length < 100) break;
+    }
+    return { ok: true, installations };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to list GitHub App installations." };
+  }
+}
+
+/**
+ * List every installation of this GitHub App, authenticated as the App itself.
+ *
+ * Asks what listUserInstallations asks, but with the App's own JWT — which
+ * always works, because an App may always enumerate its own installations
+ * whatever kind of credential the connecting person happens to hold.
+ *
+ * It answers a weaker question, and the difference is the whole reason this
+ * needs a warning: "does this installation exist", not "may this person use
+ * it". Every installation of the App is in this list, including other
+ * people's. A caller has to supply the missing half by checking the
+ * installation's account against whoever authorised — see the caller in
+ * room.ts, the only place entitled to read this as an authorization answer.
+ */
+export async function listAppInstallations(
+  cfg: GithubConfig,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; installations: UserInstallation[] } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  const installations: UserInstallation[] = [];
+  try {
+    const jwt = await appJwt(cfg);
+    for (let page = 1; page <= 100; page++) {
+      const res = await doFetch(`https://api.github.com/app/installations?per_page=100&page=${page}`, {
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          Accept: "application/vnd.github+json",
+          // GitHub rejects requests sent with no User-Agent header.
+          "User-Agent": "collab-ai-github-app",
+        },
+      });
+      if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+      // Unlike /user/installations, this route returns a bare array.
+      const body = (await res.json()) as unknown;
+      const items = Array.isArray(body) ? body : [];
+      installations.push(...mapInstallations(items));
       if (items.length < 100) break;
     }
     return { ok: true, installations };

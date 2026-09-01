@@ -17,6 +17,7 @@ import {
   GithubProvider,
   installationToken,
   openPullRequest,
+  listAppInstallations,
   listInstallationRepos,
   listUserInstallations,
   listUserRepos,
@@ -163,6 +164,71 @@ async function main() {
         && userInstallationsRes.installations[0]?.id === "158090581"
         && userInstallationsRes.installations[0]?.accountId === "42",
       userInstallationsRes,
+    );
+
+    // The App-authenticated twin. It exists because /user/installations is
+    // answerable only with a GitHub App user-to-server token, which a
+    // deployment holding classic OAuth App credentials can never mint — so
+    // these cases pin the two things that differ: the route, and the bare
+    // array it returns instead of an { installations } envelope.
+    let appInstallationsUrl = "";
+    let appInstallationsAuth = "";
+    const appInstallations = makeStub((url, init) => {
+      appInstallationsUrl = url;
+      appInstallationsAuth = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? "");
+      return new Response(JSON.stringify([{
+        id: 158090581,
+        target_type: "User",
+        account: { id: 42, login: "octocat" },
+      }]), { status: 200 });
+    });
+    const appInstallationsRes = await listAppInstallations(cfg, appInstallations.fetchImpl);
+    check(
+      "listAppInstallations maps the bare array /app/installations returns",
+      appInstallationsRes.ok === true
+        && appInstallationsRes.installations.length === 1
+        && appInstallationsRes.installations[0]?.id === "158090581"
+        && appInstallationsRes.installations[0]?.accountId === "42",
+      appInstallationsRes,
+    );
+    check(
+      "listAppInstallations asks /app/installations, not /user/installations",
+      appInstallationsUrl.startsWith("https://api.github.com/app/installations?"),
+      appInstallationsUrl,
+    );
+    // A user token here would 403 for exactly the reason this function
+    // exists, so the App JWT is the whole point of it.
+    check(
+      "listAppInstallations authenticates as the App, with a JWT bearer",
+      appInstallationsAuth.startsWith("Bearer ") && appInstallationsAuth.split(".").length === 3,
+      appInstallationsAuth.slice(0, 16),
+    );
+
+    // Malformed entries are dropped rather than surfaced half-built: the
+    // caller in room.ts compares accountId to decide whether someone may
+    // claim an installation, and an entry with no account id must never
+    // reach that comparison.
+    const messyInstallations = makeStub(() => new Response(JSON.stringify([
+      { id: 1, target_type: "User", account: { id: 7, login: "octocat" } },
+      { id: 2, target_type: "User", account: { login: "no-id" } },
+      { id: 3, target_type: "Bot", account: { id: 9, login: "botty" } },
+      { target_type: "User", account: { id: 11, login: "no-installation-id" } },
+    ]), { status: 200 }));
+    const messyRes = await listAppInstallations(cfg, messyInstallations.fetchImpl);
+    check(
+      "listAppInstallations drops entries missing an id, an account id, or a known target type",
+      messyRes.ok === true && messyRes.installations.length === 1 && messyRes.installations[0]?.id === "1",
+      messyRes,
+    );
+
+    const forbiddenInstallations = makeStub(() =>
+      new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 }),
+    );
+    const forbiddenInstallationsRes = await listAppInstallations(cfg, forbiddenInstallations.fetchImpl);
+    check(
+      "listAppInstallations reports a rejected JWT rather than an empty list",
+      forbiddenInstallationsRes.ok === false && forbiddenInstallationsRes.error.includes("Bad credentials"),
+      forbiddenInstallationsRes,
     );
 
     const created = makeStub(() =>

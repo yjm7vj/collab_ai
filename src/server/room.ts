@@ -100,6 +100,7 @@ import { GITHUB_REPO_STATE_ROLE, repoAuthorizeUrl } from "./oauth";
 import {
   GithubProvider,
   installationToken,
+  listAppInstallations,
   listInstallationRepos,
   listUserInstallations,
   listUserRepos,
@@ -288,6 +289,19 @@ export class Room extends Agent<Env, RoomState> {
       login TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     )`;
+    // Added after github_oauth shipped, so — same as github.auth above — the
+    // ALTER has to be tolerated as a no-op on a room that already has it.
+    // This is GitHub's own numeric account id for whoever authorised, kept
+    // because `uid` cannot stand in for it: a member who signed in with
+    // Google has a uid derived from their Google id, and matching that
+    // against a GitHub account would never succeed. Rooms that authorised
+    // before this column existed hold '', which #onGithubInstalled treats as
+    // "cannot prove ownership" rather than as a match.
+    try {
+      this.sql`ALTER TABLE github_oauth ADD COLUMN github_id TEXT NOT NULL DEFAULT ''`;
+    } catch {
+      /* column already present */
+    }
     this.sql`CREATE TABLE IF NOT EXISTS github_installations (
       k TEXT PRIMARY KEY,
       uid TEXT NOT NULL,
@@ -666,6 +680,7 @@ export class Room extends Agent<Env, RoomState> {
       installationId?: string;
       token?: string;
       login?: string;
+      githubId?: string;
     };
     try {
       body = (await request.json()) as typeof body;
@@ -738,12 +753,46 @@ export class Room extends Agent<Env, RoomState> {
       const installationId = String(body.installationId ?? "");
       if (!/^[0-9]+$/.test(installationId)) return json({ error: "bad_request" }, 400);
 
-      const oauth = this.sql<{ uid: string; token: string }>`SELECT uid, token FROM github_oauth WHERE k = 'current'`[0];
+      const oauth = this.sql<{ uid: string; token: string; github_id: string }>`SELECT uid, token, github_id FROM github_oauth WHERE k = 'current'`[0];
       if (!oauth || oauth.uid !== uid) return json({ error: "github_authorization_required" }, 403);
-      const verified = await listUserInstallations(oauth.token);
-      if (!verified.ok) return json({ error: verified.error }, 502);
-      if (!verified.installations.some((installation) => installation.id === installationId)) {
-        return json({ error: "installation_not_accessible" }, 403);
+
+      // Claiming an installation has to be proved, not taken on the word of
+      // whoever posted the id. There are two ways to prove it and the right
+      // one depends on what kind of credential this deployment holds.
+      //
+      // The direct question — "which installations may this person use" —
+      // can only be put with a GitHub App user-to-server token. Where the
+      // OAuth credentials belong to a classic OAuth App that question cannot
+      // be asked at all: /user/installations answers 403 regardless of who
+      // is signed in, which used to fail the whole flow.
+      //
+      // So it is asked first and, when it cannot be answered, the App's own
+      // JWT answers a weaker one — "does this installation exist" — and the
+      // account id stored at authorisation supplies the missing half. That
+      // fallback is deliberately stricter: listAppInstallations returns
+      // *every* installation of this App, so a bare existence check would
+      // let any member claim any of them.
+      const viaUser = await listUserInstallations(oauth.token);
+      if (viaUser.ok) {
+        if (!viaUser.installations.some((installation) => installation.id === installationId)) {
+          return json({ error: "installation_not_accessible" }, 403);
+        }
+      } else {
+        if (!this.env.GITHUB_APP_ID || !this.env.GITHUB_APP_PRIVATE_KEY) {
+          return json({ error: viaUser.error }, 502);
+        }
+        const viaApp = await listAppInstallations({
+          appId: this.env.GITHUB_APP_ID,
+          privateKeyPem: this.env.GITHUB_APP_PRIVATE_KEY,
+        });
+        if (!viaApp.ok) return json({ error: viaApp.error }, 502);
+
+        // An empty stored id proves nothing and must never match an empty
+        // accountId, which is why both sides are required to be non-empty.
+        const claimed = viaApp.installations.find((installation) => installation.id === installationId);
+        if (!claimed || oauth.github_id.length === 0 || claimed.accountId !== oauth.github_id) {
+          return json({ error: "installation_not_accessible" }, 403);
+        }
       }
 
       this.sql`INSERT INTO github_installations (k, uid, installation_id, created_at)
@@ -813,13 +862,21 @@ export class Room extends Agent<Env, RoomState> {
         return json({ error: "bad_request" }, 400);
       }
       const login = String(body.login ?? "");
+      // GitHub's numeric account id for the authorising user. Public, not a
+      // secret, and stored because it is the only thing that can later prove
+      // a GitHub App installation belongs to this person — see the ALTER on
+      // this table and #onGithubInstalled. Absent on an OAuth-only
+      // deployment that never fetched a profile, which is why it is
+      // tolerated as '' rather than required here.
+      const githubId = String(body.githubId ?? "");
 
-      this.sql`INSERT INTO github_oauth (k, uid, token, login, created_at)
-               VALUES ('current', ${uid}, ${token}, ${login}, ${now})
+      this.sql`INSERT INTO github_oauth (k, uid, token, login, github_id, created_at)
+               VALUES ('current', ${uid}, ${token}, ${login}, ${githubId}, ${now})
                ON CONFLICT(k) DO UPDATE SET
                  uid = excluded.uid,
                  token = excluded.token,
                  login = excluded.login,
+                 github_id = excluded.github_id,
                  created_at = excluded.created_at`;
 
       this.setState({ ...this.state, github: this.#githubStatus() });

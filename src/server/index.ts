@@ -495,11 +495,16 @@ export default {
           // match a personal installation to the person who authorized it.
           const fetched = await fetchProfile("github", exchanged.accessToken);
           const login = fetched.ok ? fetched.profile.name : "";
+          // Carried alongside the label because it is the durable half: a
+          // display name changes and is not unique, while this id is
+          // GitHub's own and is what later proves an App installation
+          // belongs to this person. See github_oauth.github_id in room.ts.
+          const githubId = fetched.ok ? fetched.profile.providerId : "";
 
           const stub = await roomStub(env, claims.rid);
           const stored = await stub.fetch("https://room/github-oauth", {
             method: "POST",
-            body: JSON.stringify({ uid: claims.uid, token: exchanged.accessToken, login }),
+            body: JSON.stringify({ uid: claims.uid, token: exchanged.accessToken, login, githubId }),
             headers: {
               "content-type": "application/json",
               "x-internal-auth": env.ROOM_SECRET,
