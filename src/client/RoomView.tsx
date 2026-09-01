@@ -164,6 +164,7 @@ export function RoomView({
   const maySpeak = can(myRole, "speak");
   const maySettings = can(myRole, "settings");
   const mayPolicy = can(myRole, "policy");
+  const mayVote = can(myRole, "vote");
   const mayInvite = can(myRole, "invite");
   const mayWorkflow = can(myRole, "workflow");
   const mayManage = can(myRole, "manage_members");
@@ -1012,7 +1013,7 @@ export function RoomView({
                   pending={p}
                   me={me}
                   onVote={vote}
-                  canDecide={!p.sensitive || canSeeFileContents(myRole)}
+                  canDecide={mayVote && (!p.sensitive || canSeeFileContents(myRole))}
                 />
               ))}
             </div>
