@@ -168,21 +168,39 @@ type Turn = {
 };
 
 /**
- * Anthropic requires one result for each tool use in a conversation. A room
- * can be evicted between the conversation write and the turn checkpoint, so
- * old state may contain a duplicated result after a resume. Clean that state
- * before it reaches the API, while preserving all ordinary text and thinking
- * blocks.
+ * Anthropic validates a conversation whole, not one message at a time: each
+ * `tool_use` id may appear once, and exactly one result may answer it. A room
+ * can be evicted between the conversation write and the turn checkpoint, so a
+ * resumed turn can replay a round that was already recorded — putting the same
+ * `tool_use` block, or a second result for it, into the history.
+ *
+ * The replay does not have to land in the message holding the original, and
+ * when it lands in a later one the copy still looks locally well-formed: an
+ * assistant tool call followed by its result, twice over. A per-message pass
+ * cannot see that, and neither can `repairToolConversation`, which only ever
+ * compares a tool call against the message directly after it. So the ids are
+ * tracked across the whole conversation here and the second sighting of either
+ * kind of block is dropped. A message left with nothing at all goes with it —
+ * the API rejects an empty content array — and any result that orphans is
+ * cleaned up by `repairToolConversation` on the way to the API.
  */
 export function normalizeConversation(convo: MessageParam[]): MessageParam[] {
   let changed = false;
-  const normalized = convo.map((message) => {
-    if (!Array.isArray(message.content)) return message;
+  // Two sets, not one: a result carries the id of the call it answers, so a
+  // shared set would read every first result as a duplicate of its own call.
+  const seenUses = new Set<string>();
+  const seenResults = new Set<string>();
+  const normalized: MessageParam[] = [];
+  for (const message of convo) {
+    if (!Array.isArray(message.content)) {
+      normalized.push(message);
+      continue;
+    }
 
-    const seen = new Set<string>();
     const content = message.content.filter((block) => {
       if (block.type !== "tool_result" && block.type !== "tool_use") return true;
       const id = block.type === "tool_result" ? block.tool_use_id : block.id;
+      const seen = block.type === "tool_result" ? seenResults : seenUses;
       if (seen.has(id)) {
         changed = true;
         return false;
@@ -190,8 +208,10 @@ export function normalizeConversation(convo: MessageParam[]): MessageParam[] {
       seen.add(id);
       return true;
     });
-    return content.length === message.content.length ? message : { ...message, content };
-  });
+
+    if (content.length === message.content.length) normalized.push(message);
+    else if (content.length > 0) normalized.push({ ...message, content });
+  }
   return changed ? normalized : convo;
 }
 
