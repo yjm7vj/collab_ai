@@ -2242,11 +2242,15 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   overflow-y: auto;
   overflow-x: hidden;
 }
+/* The name takes the slack so the tags pack against the right edge. With
+   `space-between` instead, a row's middle tag sat wherever that row's name
+   happened to end, so "Private" landed at a different x on every line while
+   the branch stayed pinned — the tags have to read as a column, not as
+   punctuation trailing each name. */
 .ws-repo {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   text-align: left;
   background: none;
@@ -2254,6 +2258,7 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 }
 .ws-repo:hover:not(:disabled) { background: var(--panel-2); }
 .ws-repo-name {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
