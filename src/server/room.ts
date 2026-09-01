@@ -1751,6 +1751,69 @@ export class Room extends Agent<Env, RoomState> {
     const uid = this.#uidOf(connection);
     if (!uid) return;
 
+    // The authorised account is tried before the installation, and has to
+    // be: the picker lists what that account can reach across every
+    // installation it belongs to, so checking a chosen repository against
+    // this room's single stored installation would refuse the very
+    // organisation repositories the picker had just offered. The two must
+    // ask the same credential or they disagree about what exists.
+    const authorized = await this.#githubAccount();
+    if (authorized && authorized.uid === uid) {
+      const token = authorized.account.token;
+      // Parsing proves the shape of the name, never that GitHub has anything
+      // behind it: a typo, a repository someone else's account can see, or a
+      // branch that was never pushed all parse perfectly. Asking GitHub here
+      // is what turns those into a refusal at the moment of connecting,
+      // instead of a workspace that publishes `online: true` and only fails
+      // when the agent first tries to read it.
+      const access = await repoAccess(token, ref);
+      if (!access.ok) {
+        this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${access.error}`);
+        return;
+      }
+
+      // Reachable is not writable, and the difference is worth catching now:
+      // a read-only connection works perfectly until the room approves its
+      // first edit, which is the worst possible moment to discover it.
+      if (!access.access.canPush) {
+        this.#refuse(
+          connection,
+          `GitHub reports no write access to ${repo} for the connected account. ` +
+            `Connect an account that can push to it, or grant this one write access, then try again.`,
+        );
+        return;
+      }
+
+      // A branch named explicitly still has to exist. When none was named
+      // there is nothing further to check: the call above already proved the
+      // repository is there, and a repository with no commits yet is a
+      // legitimate thing to connect.
+      if (ref.ref !== "HEAD") {
+        const head = await refHead(token, ref);
+        if (!head.ok) {
+          this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
+          return;
+        }
+      }
+
+      const now = Date.now();
+      this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at, auth)
+               VALUES ('current', '', ${repo}, ${uid}, ${now}, 'oauth')
+               ON CONFLICT(k) DO UPDATE SET
+                 installation_id = excluded.installation_id,
+                 repo = excluded.repo,
+                 connected_by = excluded.connected_by,
+                 connected_at = excluded.connected_at,
+                 auth = excluded.auth`;
+      this.setState({
+        ...this.state,
+        workspace: { kind: "github", online: true, hostUid: uid, label: repo, canWrite: true },
+        github: this.#githubStatus(),
+      });
+      this.#system(`${this.#memberName(uid) ?? "someone"} connected ${repo}`);
+      return;
+    }
+
     const installationRow = this.sql<{ uid: string; installation_id: string }>`SELECT uid, installation_id FROM github_installations WHERE k = 'current'`[0];
     if (installationRow && installationRow.uid === uid) {
       const tokenRes = await installationToken(
@@ -1795,63 +1858,6 @@ export class Room extends Agent<Env, RoomState> {
       const now = Date.now();
       this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at, auth)
                VALUES ('current', ${installationRow.installation_id}, ${repo}, ${uid}, ${now}, 'app')
-               ON CONFLICT(k) DO UPDATE SET
-                 installation_id = excluded.installation_id,
-                 repo = excluded.repo,
-                 connected_by = excluded.connected_by,
-                 connected_at = excluded.connected_at,
-                 auth = excluded.auth`;
-      this.setState({
-        ...this.state,
-        workspace: { kind: "github", online: true, hostUid: uid, label: repo, canWrite: true },
-        github: this.#githubStatus(),
-      });
-      this.#system(`${this.#memberName(uid) ?? "someone"} connected ${repo}`);
-      return;
-    }
-
-    const authorized = await this.#githubAccount();
-    if (authorized && authorized.uid === uid) {
-      const token = authorized.account.token;
-      // Parsing proves the shape of the name, never that GitHub has anything
-      // behind it: a typo, a repository someone else's account can see, or a
-      // branch that was never pushed all parse perfectly. Asking GitHub here
-      // is what turns those into a refusal at the moment of connecting,
-      // instead of a workspace that publishes `online: true` and only fails
-      // when the agent first tries to read it.
-      const access = await repoAccess(token, ref);
-      if (!access.ok) {
-        this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${access.error}`);
-        return;
-      }
-
-      // Reachable is not writable, and the difference is worth catching now:
-      // a read-only connection works perfectly until the room approves its
-      // first edit, which is the worst possible moment to discover it.
-      if (!access.access.canPush) {
-        this.#refuse(
-          connection,
-          `GitHub reports no write access to ${repo} for the connected account. ` +
-            `Connect an account that can push to it, or grant this one write access, then try again.`,
-        );
-        return;
-      }
-
-      // A branch named explicitly still has to exist. When none was named
-      // there is nothing further to check: the call above already proved the
-      // repository is there, and a repository with no commits yet is a
-      // legitimate thing to connect.
-      if (ref.ref !== "HEAD") {
-        const head = await refHead(token, ref);
-        if (!head.ok) {
-          this.#refuse(connection, `Couldn't reach ${repo} on GitHub. ${head.error}`);
-          return;
-        }
-      }
-
-      const now = Date.now();
-      this.sql`INSERT INTO github (k, installation_id, repo, connected_by, connected_at, auth)
-               VALUES ('current', '', ${repo}, ${uid}, ${now}, 'oauth')
                ON CONFLICT(k) DO UPDATE SET
                  installation_id = excluded.installation_id,
                  repo = excluded.repo,
@@ -1958,7 +1964,45 @@ export class Room extends Agent<Env, RoomState> {
     if (!this.#allow(connection, "policy", "Only the room's owner and admins can connect a repository.")) return;
 
     const uid = this.#uidOf(connection);
+    const authorized = await this.#githubAccount();
     const installation = this.sql<{ uid: string; installation_id: string }>`SELECT uid, installation_id FROM github_installations WHERE k = 'current'`[0];
+
+    // The authorised account is asked first, because it is the only credential
+    // here that can see past a single installation. An installation token is
+    // minted for one installation and answers only for that one, so consulting
+    // it first capped the picker at whatever that installation covers — on a
+    // room whose App was installed from a personal account, the repositories
+    // its member owns and nothing they merely contribute to.
+    //
+    // Which repositories a person can see is their own business, so even
+    // another admin in the room may not enumerate them through someone else's
+    // authorisation — only the member who actually authorised may.
+    if (authorized && uid && uid === authorized.uid) {
+      // Every installation this person belongs to. See listAllAccessibleRepos
+      // for why /user/repos is the wrong question to ask an App user token.
+      const res = await listAllAccessibleRepos(authorized.account.token);
+      if (res.ok) {
+        // Sent to this one connection, never broadcast — see the comment on
+        // the "github.repos" ServerMsg case.
+        connection.send(JSON.stringify({ t: "github.repos", repos: res.repos } satisfies ServerMsg));
+        return;
+      }
+
+      // A deployment whose credentials belong to a classic OAuth App cannot
+      // call /user/installations at all. There the plain listing is not a
+      // degraded answer but the correct one, because such a token carries
+      // `repo` scope and is bounded by the account rather than by an App.
+      const fallback = await listUserRepos(authorized.account.token);
+      if (fallback.ok) {
+        connection.send(JSON.stringify({ t: "github.repos", repos: fallback.repos } satisfies ServerMsg));
+        return;
+      }
+      this.#refuse(connection, res.error);
+      return;
+    }
+
+    // Fallback: a room can hold an installation without anyone having
+    // authorised an account against it, and this is what answers there.
     if (installation && installation.uid === uid) {
       const pkcs8 = pemToPkcs8(this.env.GITHUB_APP_PRIVATE_KEY);
       if (!pkcs8.ok) {
@@ -1982,43 +2026,14 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
 
-    const authorized = await this.#githubAccount();
-    if (!authorized) {
-      this.#refuse(connection, "Connect a GitHub account first.");
-      return;
-    }
-
-    // Which repositories a person can see is their own business, so even
-    // another admin in the room may not enumerate them through someone
-    // else's authorisation — only the member who actually authorised may.
-    if (!uid || uid !== authorized.uid) {
+    // Neither credential belongs to this member. A room holding a connection
+    // somebody else made is a different problem from a room holding none, and
+    // saying which spares the person guessing at it.
+    if (authorized || installation) {
       this.#refuse(connection, "Only the member who connected GitHub can list their repositories.");
       return;
     }
-
-    // Every installation this person belongs to, not just the one this room
-    // happens to hold. See listAllAccessibleRepos for why /user/repos is the
-    // wrong question to ask an App user token: it answers with whatever the
-    // App's installations cover, which on a personal-only install is the
-    // repositories they own and nothing they merely contribute to.
-    const res = await listAllAccessibleRepos(authorized.account.token);
-    if (!res.ok) {
-      // A deployment whose credentials belong to a classic OAuth App cannot
-      // call /user/installations at all. There the plain listing is not a
-      // degraded answer but the correct one, because such a token carries
-      // `repo` scope and is bounded by the account rather than by an App.
-      const fallback = await listUserRepos(authorized.account.token);
-      if (!fallback.ok) {
-        this.#refuse(connection, res.error);
-        return;
-      }
-      connection.send(JSON.stringify({ t: "github.repos", repos: fallback.repos } satisfies ServerMsg));
-      return;
-    }
-
-    // Sent to this one connection, never broadcast — see the comment on the
-    // "github.repos" ServerMsg case.
-    connection.send(JSON.stringify({ t: "github.repos", repos: res.repos } satisfies ServerMsg));
+    this.#refuse(connection, "Connect a GitHub account first.");
   }
 
   /**
