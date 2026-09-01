@@ -57,27 +57,22 @@
   "durable_objects": {
     "bindings": [
       { "name": "Room", "class_name": "Room" },
-      { "name": "UserIndex", "class_name": "UserIndex" },
-      { "name": "Sandbox", "class_name": "Sandbox" }
+      { "name": "UserIndex", "class_name": "UserIndex" }
     ]
   },
 
-  // Interactive terminals run in room-isolated Linux containers. The image
-  // and npm package deliberately use the same Sandbox 1.0 preview line.
-  "containers": [
-    {
-      "class_name": "Sandbox",
-      "image": "docker.io/cloudflare/sandbox:next",
-      "instance_type": "basic",
-      "max_instances": 5
-    }
-  ],
-
   // Never edit a migration that has shipped — add a new tag instead.
+  //
+  // v3 registered Sandbox for the interactive-terminal feature, which ran in
+  // Cloudflare Containers. Containers require the Workers Paid plan, which
+  // this deployment does not have, so the feature is removed rather than left
+  // undeployable — v4 decommissions the class properly instead of just
+  // deleting its history, per Cloudflare's own migration rules.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Room"] },
     { "tag": "v2", "new_sqlite_classes": ["UserIndex"] },
-    { "tag": "v3", "new_sqlite_classes": ["Sandbox"] }
+    { "tag": "v3", "new_sqlite_classes": ["Sandbox"] },
+    { "tag": "v4", "deleted_classes": ["Sandbox"] }
   ],
 
   "observability": { "enabled": true }

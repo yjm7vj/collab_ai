@@ -2492,25 +2492,17 @@ export function WorkspacePanel({
   );
 }
 
-/** Workspace keeps its existing connection panel; Terminal opens separately. */
 export function WorkspaceActions({
   visible,
   onWorkspace,
-  onTerminal,
 }: {
   visible: boolean;
   onWorkspace: () => void;
-  onTerminal: () => void;
 }) {
   if (!visible) return null;
   return (
-    <>
-      <button type="button" className="chat-action" onClick={onWorkspace}>
-        Workspace
-      </button>
-      <button type="button" className="chat-action" onClick={onTerminal}>
-        Terminal
-      </button>
-    </>
+    <button type="button" className="chat-action" onClick={onWorkspace}>
+      Workspace
+    </button>
   );
 }

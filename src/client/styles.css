@@ -1556,45 +1556,7 @@ input:focus, textarea:focus {
   color: var(--ink-faint);
 }
 
-/* --------------------------------------------------------- Linux terminal */
-
 .workspace-modal { width: min(760px, 100%); }
-.terminal-modal {
-  width: min(1040px, 100%);
-  height: min(760px, 88vh);
-  background: var(--panel);
-}
-.terminal-status {
-  margin: 4px 0 0;
-  color: var(--ink-faint);
-  font-size: 11px;
-  font-weight: 400;
-}
-.terminal-note {
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--ink-faint);
-  font-size: 11px;
-  line-height: 1.45;
-}
-.terminal-host {
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  padding: 10px 12px;
-  overflow: hidden;
-  background: var(--panel);
-}
-.terminal-host .xterm { height: 100%; }
-.terminal-host .xterm-viewport { scrollbar-color: var(--line-strong) transparent; }
-.terminal-error {
-  padding: 9px 12px;
-  border-top: 1px solid var(--danger-line);
-  background: var(--danger-bg);
-  color: var(--bad);
-  font-size: 12px;
-}
 
 .presets { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
 .preset {
@@ -1825,8 +1787,6 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 }
 
 @media (max-width: 600px) {
-  .terminal-modal { height: min(720px, 92dvh); }
-  .terminal-host { padding: 8px; }
   .composer {
     padding: 10px 12px 12px;
   }

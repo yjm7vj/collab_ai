@@ -59,14 +59,12 @@ describe("context token accounting", () => {
 });
 
 describe("workspace and terminal", () => {
-  it("places Terminal immediately after Workspace in the chat actions", () => {
+  it("renders the Workspace action", () => {
     const html = renderToStaticMarkup(createElement(WorkspaceActions, {
       visible: true,
       onWorkspace: () => undefined,
-      onTerminal: () => undefined,
     }));
-    expect(html.indexOf(">Workspace<")).toBeGreaterThan(-1);
-    expect(html.indexOf(">Terminal<")).toBeGreaterThan(html.indexOf(">Workspace<"));
+    expect(html).toContain(">Workspace<");
     expect(html).not.toContain(">IDE<");
     expect(html).not.toContain("Code workspace");
   });

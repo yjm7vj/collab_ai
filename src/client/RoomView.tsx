@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 
 import {
@@ -48,10 +48,6 @@ import {
   pickDirectory,
   saveHandle,
 } from "./workspace";
-
-const TerminalPanel = lazy(() =>
-  import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })),
-);
 
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
@@ -120,7 +116,6 @@ export function RoomView({
   const [showRevisionHistory, setShowRevisionHistory] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
   // The repository list for the GitHub picker. `null` means "not fetched
   // yet"; an array means fetched, possibly empty.
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
@@ -964,16 +959,6 @@ export function RoomView({
         />
       )}
 
-      {showTerminal && (
-        <Suspense fallback={null}>
-          <TerminalPanel
-            roomId={roomId}
-            token={token}
-            onClose={() => setShowTerminal(false)}
-          />
-        </Suspense>
-      )}
-
       {showInvites && (
         <InvitePanel
           invites={invites}
@@ -1080,7 +1065,6 @@ export function RoomView({
                 <WorkspaceActions
                   visible={mayPolicy}
                   onWorkspace={() => setShowWorkspace(true)}
-                  onTerminal={() => setShowTerminal(true)}
                 />
               </>
             }

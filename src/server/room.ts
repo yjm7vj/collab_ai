@@ -879,14 +879,6 @@ export class Room extends Agent<Env, RoomState> {
       return json({ ok: true });
     }
 
-    if (url.pathname === "/authorize-terminal") {
-      const role = this.#memberRole(uid);
-      if (role === null || !can(asRole(role), "policy")) {
-        return json({ error: "forbidden" }, 403);
-      }
-      return json({ role });
-    }
-
     if (url.pathname === "/github-installed") {
       const role = this.#memberRole(uid);
       if (role === null || !can(asRole(role), "policy")) return json({ error: "forbidden" }, 403);
