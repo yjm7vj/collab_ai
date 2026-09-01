@@ -10,6 +10,7 @@ import {
   DEFAULT_PATH_POLICY,
   FS_LIMITS,
   clampRequest,
+  findUniqueText,
   matchGlob,
   normalizePath,
   pathDecision,
@@ -46,6 +47,13 @@ check('"a//b" collapses to "a/b"', normalizePath("a//b") === "a/b", normalizePat
 check('"a/./b" collapses to "a/b"', normalizePath("a/./b") === "a/b", normalizePath("a/./b"));
 check('"a/b/" strips trailing slash to "a/b"', normalizePath("a/b/") === "a/b", normalizePath("a/b/"));
 check('"./a/b" collapses to "a/b"', normalizePath("./a/b") === "a/b", normalizePath("./a/b"));
+
+console.log("\nexact edit matching");
+const uniqueMatch = findUniqueText("before\n#rebind(uid: string)\nafter", "#rebind");
+check("a unique short span is accepted", uniqueMatch.ok && uniqueMatch.index === 7, uniqueMatch);
+check("an empty span is rejected explicitly", findUniqueText("text", "").reason === "empty");
+check("a missing span is rejected", findUniqueText("text", "missing").reason === "missing");
+check("a duplicated span is rejected", findUniqueText("dup\ndup", "dup").reason === "ambiguous");
 
 console.log("\npath normalisation — rejects");
 const rejects: unknown[] = [

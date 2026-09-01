@@ -32,7 +32,7 @@
  * guarantee holds for anything a caller passes in directly.)
  */
 
-import { FS_LIMITS, matchGlob, type FsRequest, type FsResponse } from "../shared/workspace";
+import { findUniqueText, FS_LIMITS, matchGlob, type FsRequest, type FsResponse } from "../shared/workspace";
 import type { WorkspaceProvider } from "./workspace";
 
 export type GithubConfig = {
@@ -1080,8 +1080,11 @@ export class GithubProvider implements WorkspaceProvider {
     // Same unique-match-or-reject contract as the local provider (and
     // edit_doc in src/server/tools.ts): the span must appear exactly once,
     // or nothing changes.
-    const first = current.text.indexOf(oldText);
-    if (first === -1) {
+    const match = findUniqueText(current.text, oldText);
+    if (!match.ok && match.reason === "empty") {
+      return { ok: false, error: "old_text must contain the exact text to replace." };
+    }
+    if (!match.ok && match.reason === "missing") {
       return {
         ok: false,
         error:
@@ -1089,7 +1092,7 @@ export class GithubProvider implements WorkspaceProvider {
           "text, then retry with an exact span from it.",
       };
     }
-    if (current.text.indexOf(oldText, first + 1) !== -1) {
+    if (!match.ok) {
       return {
         ok: false,
         error:
@@ -1097,7 +1100,7 @@ export class GithubProvider implements WorkspaceProvider {
           "more surrounding context to make it unique.",
       };
     }
-    const updated = current.text.slice(0, first) + newText + current.text.slice(first + oldText.length);
+    const updated = current.text.slice(0, match.index) + newText + current.text.slice(match.index + oldText.length);
 
     const res = await commitFile(
       this.#token,

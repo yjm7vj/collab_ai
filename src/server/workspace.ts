@@ -29,7 +29,7 @@
  * the room; it never sits blocked on a promise that nothing will ever settle.
  */
 
-import { FS_LIMITS, matchGlob, type FsRequest, type FsResponse, type WorkspaceKind } from "../shared/workspace";
+import { findUniqueText, FS_LIMITS, matchGlob, type FsRequest, type FsResponse, type WorkspaceKind } from "../shared/workspace";
 
 export interface WorkspaceProvider {
   readonly kind: WorkspaceKind;
@@ -196,8 +196,11 @@ export class MockProvider implements WorkspaceProvider {
 
     // Same unique-match-or-reject contract as edit_doc in src/server/tools.ts:
     // the span must appear exactly once, or nothing changes.
-    const first = contents.indexOf(oldText);
-    if (first === -1) {
+    const match = findUniqueText(contents, oldText);
+    if (!match.ok && match.reason === "empty") {
+      return { ok: false, error: "old_text must contain the exact text to replace." };
+    }
+    if (!match.ok && match.reason === "missing") {
       return {
         ok: false,
         error:
@@ -205,7 +208,7 @@ export class MockProvider implements WorkspaceProvider {
           "text, then retry with an exact span from it.",
       };
     }
-    if (contents.indexOf(oldText, first + 1) !== -1) {
+    if (!match.ok) {
       return {
         ok: false,
         error:
@@ -213,7 +216,7 @@ export class MockProvider implements WorkspaceProvider {
           "more surrounding context to make it unique.",
       };
     }
-    this.#files.set(path, contents.slice(0, first) + newText + contents.slice(first + oldText.length));
+    this.#files.set(path, contents.slice(0, match.index) + newText + contents.slice(match.index + oldText.length));
     return { ok: true, data: "Edit applied." };
   }
 

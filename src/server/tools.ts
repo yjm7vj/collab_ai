@@ -11,7 +11,7 @@
 import { resolveTools, type AccessPolicy, type ToolName } from "../shared/access";
 import { serverToolsFor, type Workflow } from "../shared/models";
 import { delegatesOf, type WorkflowGraph } from "../shared/workflow";
-import type { WorkspaceInfo } from "../shared/workspace";
+import { findUniqueText, type WorkspaceInfo } from "../shared/workspace";
 
 export type ToolCtx = {
   getDoc(): string;
@@ -516,8 +516,11 @@ export function execute(name: string, input: any, ctx: ToolCtx): ToolOutcome {
         };
       }
       const doc = ctx.getDoc();
-      const first = doc.indexOf(oldText);
-      if (first === -1) {
+      const match = findUniqueText(doc, oldText);
+      if (!match.ok && match.reason === "empty") {
+        return { ok: false, text: "old_text must contain the exact text to replace." };
+      }
+      if (!match.ok && match.reason === "missing") {
         return {
           ok: false,
           text:
@@ -525,7 +528,7 @@ export function execute(name: string, input: any, ctx: ToolCtx): ToolOutcome {
             "current text, then retry with an exact span from it.",
         };
       }
-      if (doc.indexOf(oldText, first + 1) !== -1) {
+      if (!match.ok) {
         return {
           ok: false,
           text:
@@ -533,7 +536,7 @@ export function execute(name: string, input: any, ctx: ToolCtx): ToolOutcome {
             "Include more surrounding context to make it unique.",
         };
       }
-      ctx.setDoc(doc.slice(0, first) + newText + doc.slice(first + oldText.length));
+      ctx.setDoc(doc.slice(0, match.index) + newText + doc.slice(match.index + oldText.length));
       return { ok: true, text: "Edit applied." };
     }
 

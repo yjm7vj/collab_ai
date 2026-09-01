@@ -66,6 +66,22 @@ export function normalizePath(input: unknown): string | null {
   return segments.join("/");
 }
 
+/** Find one exact, non-empty span or return a safe reason to refuse it. */
+export function findUniqueText(
+  text: string,
+  needle: string,
+): { ok: true; index: number } | { ok: false; reason: "empty" | "missing" | "ambiguous" } {
+  if (needle.length === 0) return { ok: false, reason: "empty" };
+  const index = text.indexOf(needle);
+  if (index === -1) return { ok: false, reason: "missing" };
+  // Start after the matched span. Starting at index + 1 can classify a
+  // legitimate match as ambiguous when the target overlaps with itself.
+  if (text.indexOf(needle, index + needle.length) !== -1) {
+    return { ok: false, reason: "ambiguous" };
+  }
+  return { ok: true, index };
+}
+
 /* ---------------------------------------------------------------- globs */
 
 /**
