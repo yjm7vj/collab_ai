@@ -494,6 +494,71 @@ export async function ensureBranch(
   }
 }
 
+/**
+ * How a branch stands relative to a base, in GitHub's own words.
+ *
+ * "behind" is the one that matters here: the branch carries nothing the base
+ * does not, so moving it forward loses no work. "ahead" and "diverged" both
+ * mean commits exist only on the branch — real pending work, which must
+ * never be discarded to tidy a branch up.
+ */
+export type BranchComparison = "identical" | "ahead" | "behind" | "diverged";
+
+export async function compareBranches(
+  token: string,
+  ref: RepoRef,
+  base: string,
+  head: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true; status: BranchComparison } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  try {
+    const res = await doFetch(
+      repoUrl(ref, `/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`),
+      { headers: ghHeaders(token) },
+    );
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+    const body = (await res.json()) as { status?: unknown };
+    if (
+      body.status !== "identical" && body.status !== "ahead"
+      && body.status !== "behind" && body.status !== "diverged"
+    ) {
+      return { ok: false, error: "GitHub did not report how the branches compare." };
+    }
+    return { ok: true, status: body.status };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to compare the branches." };
+  }
+}
+
+/**
+ * Move a branch to a commit, without force.
+ *
+ * Deliberately never forced: GitHub rejects a non-fast-forward update, and
+ * that refusal is the safety property. A caller that has mistaken pending
+ * work for a stale branch gets an error rather than a silent deletion.
+ */
+export async function fastForwardBranch(
+  token: string,
+  ref: RepoRef,
+  branch: string,
+  sha: string,
+  fetchImpl?: typeof fetch,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const doFetch = fetchImpl ?? runtimeFetch;
+  try {
+    const res = await doFetch(repoUrl(ref, `/git/refs/heads/${encodeURIComponent(branch)}`), {
+      method: "PATCH",
+      headers: { ...ghHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ sha, force: false }),
+    });
+    if (!res.ok) return { ok: false, error: await ghErrorMessage(res) };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Failed to move the branch." };
+  }
+}
+
 /** Current blob sha for a path on a branch, or null when the file is new. */
 export async function fileSha(
   token: string,
@@ -1037,6 +1102,31 @@ export class GithubProvider implements WorkspaceProvider {
     if (!head.ok) return head;
     const branch = await ensureBranch(this.#token, this.#ref, this.#branch, head.sha, this.#fetchImpl);
     if (!branch.ok) return branch;
+    if (branch.created) return { ok: true };
+
+    // The branch already existed, which used to be the end of it — and that
+    // is how it went stale. ensureBranch never moves a branch it did not
+    // create, so a working branch left behind by an earlier round stayed
+    // pinned at whatever commit it was abandoned on while the base moved on.
+    // Every later edit was then built on that old tree: the room reads a
+    // file, writes it back, and the resulting pull request reads as though
+    // it reverts everything merged in between.
+    //
+    // Catching up is only safe when the branch carries no work of its own,
+    // so the comparison decides. "behind" means every commit on it is
+    // already in the base — nothing to lose. Anything else is pending work
+    // and is left exactly where it is.
+    const base = await resolveBranchName(this.#token, this.#ref, this.#fetchImpl);
+    if (!base.ok) return base;
+    const comparison = await compareBranches(this.#token, this.#ref, base.branch, this.#branch, this.#fetchImpl);
+    // A comparison that cannot be made is not a reason to refuse the write.
+    // Using the branch as-is is exactly what happened before any of this
+    // existed, so it stays the fallback: a stale edit beats a room that
+    // cannot write at all.
+    if (!comparison.ok || comparison.status !== "behind") return { ok: true };
+
+    const moved = await fastForwardBranch(this.#token, this.#ref, this.#branch, head.sha, this.#fetchImpl);
+    if (!moved.ok) return moved;
     return { ok: true };
   }
 

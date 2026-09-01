@@ -1189,6 +1189,135 @@ async function main() {
     }
   }
 
+  console.log("\na stale working branch is caught up before it is written to");
+  {
+    // ensureBranch never moves a branch it did not create, so a working
+    // branch left over from an earlier round stayed pinned at an old commit
+    // while the base moved on. Every later edit was then built on that old
+    // tree, and the pull request read as though it reverted whatever had
+    // been merged in between.
+    const staleRef = { owner: "ada", repo: "engine", ref: "" };
+
+    /** Routes the whole write flow, recording what was asked of GitHub. */
+    function branchStub(options: { comparison: string; fileText: string }) {
+      const calls: { method: string; url: string }[] = [];
+      const fetchImpl = (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        const method = String(init?.method ?? "GET").toUpperCase();
+        calls.push({ method, url });
+        const json = (body: unknown, status = 200) =>
+          new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+        if (url.includes("/git/ref/heads/")) return json({ object: { sha: "base-head-sha" } });
+        if (url.includes("/git/refs/heads/")) return json({ ref: "refs/heads/collab-ai" });
+        // The branch already exists — the case this whole section is about.
+        if (method === "POST" && url.endsWith("/git/refs")) {
+          return json({ message: "Reference already exists" }, 422);
+        }
+        if (url.includes("/compare/")) return json({ status: options.comparison });
+        if (url.includes("/contents")) {
+          if (method === "PUT") return json({ commit: { sha: "new-commit-sha" } }, 201);
+          return json({ content: btoa(options.fileText), encoding: "base64", sha: "blob-sha" });
+        }
+        return json({ default_branch: "main" });
+      }) as unknown as typeof fetch;
+      return { calls, fetchImpl };
+    }
+
+    const editReq = { op: "edit" as const, path: "README.md", deny: [], oldText: "two", newText: "2" };
+
+    {
+      const { calls, fetchImpl } = branchStub({ comparison: "behind", fileText: "one two three" });
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform(editReq);
+      check("an edit onto a behind branch still succeeds", res.ok === true, res);
+      check(
+        "a branch that is only behind is moved up to the base head",
+        calls.some((c) => c.method === "PATCH" && c.url.includes("/git/refs/heads/collab-ai")),
+        calls.map((c) => `${c.method} ${c.url}`),
+      );
+    }
+
+    {
+      // Commits that exist only on the working branch are approved work
+      // waiting on a pull request. Catching the branch up would delete them,
+      // so it must not happen however stale the branch looks.
+      const { calls, fetchImpl } = branchStub({ comparison: "diverged", fileText: "one two three" });
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", fetchImpl);
+      const res = await provider.perform(editReq);
+      check("an edit onto a diverged branch still succeeds", res.ok === true, res);
+      check(
+        "a branch carrying its own commits is never moved",
+        !calls.some((c) => c.method === "PATCH"),
+        calls.map((c) => `${c.method} ${c.url}`),
+      );
+    }
+
+    {
+      const { calls, fetchImpl } = branchStub({ comparison: "ahead", fileText: "one two three" });
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", fetchImpl);
+      await provider.perform(editReq);
+      check(
+        "a branch ahead of the base is never moved either",
+        !calls.some((c) => c.method === "PATCH"),
+        calls.map((c) => `${c.method} ${c.url}`),
+      );
+    }
+
+    {
+      // A comparison that cannot be made must not block the write: using the
+      // branch as-is is what happened before any of this existed.
+      const unreachable = (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        const method = String(init?.method ?? "GET").toUpperCase();
+        const json = (body: unknown, status = 200) =>
+          new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+        if (url.includes("/compare/")) return json({ message: "Not Found" }, 404);
+        if (url.includes("/git/ref/heads/")) return json({ object: { sha: "base-head-sha" } });
+        if (method === "POST" && url.endsWith("/git/refs")) return json({ message: "Reference already exists" }, 422);
+        if (url.includes("/contents")) {
+          if (method === "PUT") return json({ commit: { sha: "new-commit-sha" } }, 201);
+          return json({ content: btoa("one two three"), encoding: "base64", sha: "blob-sha" });
+        }
+        return json({ default_branch: "main" });
+      }) as unknown as typeof fetch;
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", unreachable);
+      const res = await provider.perform(editReq);
+      check("an unanswerable comparison does not block the edit", res.ok === true, res);
+    }
+
+    {
+      // A freshly created branch is already at the base head, so asking
+      // GitHub to compare it would be a wasted request on every first write.
+      const created = (async (input: unknown, init?: RequestInit) => {
+        const url = String(input);
+        const method = String(init?.method ?? "GET").toUpperCase();
+        const json = (body: unknown, status = 200) =>
+          new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+        if (url.includes("/git/ref/heads/")) return json({ object: { sha: "base-head-sha" } });
+        if (method === "POST" && url.endsWith("/git/refs")) return json({ ref: "refs/heads/collab-ai" }, 201);
+        if (url.includes("/compare/")) return json({ status: "behind" });
+        if (url.includes("/contents")) {
+          if (method === "PUT") return json({ commit: { sha: "new-commit-sha" } }, 201);
+          return json({ content: btoa("one two three"), encoding: "base64", sha: "blob-sha" });
+        }
+        return json({ default_branch: "main" });
+      }) as unknown as typeof fetch;
+      const seen: string[] = [];
+      const recording = (async (input: unknown, init?: RequestInit) => {
+        seen.push(String(input));
+        return created(input as RequestInfo, init);
+      }) as unknown as typeof fetch;
+      const provider = new GithubProvider("t", staleRef, [], "collab-ai", recording);
+      await provider.perform(editReq);
+      check(
+        "a branch this write just created is not compared",
+        !seen.some((u) => u.includes("/compare/")),
+        seen,
+      );
+    }
+  }
+
   console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
