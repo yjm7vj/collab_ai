@@ -773,22 +773,71 @@ input:focus, textarea:focus {
   background: var(--danger-bg);
 }
 
+/* Both of these are grid items, and a grid item's default `min-width: auto`
+   refuses to shrink below its content — so a long project name would widen the
+   whole pane instead of ellipsising. The old head declared `minmax(0, 1fr)`,
+   which said the same thing in grid's own words; a flex head has to say it
+   here, and at every level between the name and the pane. */
 .side-project {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
+.side-project > .side-project-head { min-width: 0; }
 
 .side-project-head {
   width: 100%;
   min-height: 32px;
   padding: 6px 8px;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 6px;
   text-align: left;
   font-size: 14px;
 }
+
+/* The name row is the disclosure control — the whole of it, not a 10px caret
+   someone has to aim at. It gives up every button default so it reads as the
+   heading it looks like, and keeps the project's actions beside it as their
+   own buttons rather than nesting them inside this one. */
+.side-project-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+/* `.side-pane button:hover` fills and outlines every button in this pane, which
+   is right for a control and wrong for a heading — an outlined box around the
+   project name reads as a text field. Same specificity, declared later, so the
+   fill stays and the border does not. */
+.side-pane .side-project-toggle:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: transparent;
+}
+.side-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Collapsed, the rows are gone and the caret alone would say nothing about how
+   much is behind it. The count is the quietest thing on the row. */
+.side-project-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+/* .side-channels sets `display: grid`, which is the same specificity as the UA's
+   [hidden] rule and would win on order — so collapsing is spelled out here. */
+.side-channels[hidden] { display: none; }
 .side-project-actions {
   position: relative;
   display: flex;
@@ -2080,7 +2129,9 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   padding: 2px 4px;
 }
 .tool-head:hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
-.tool-disclosure {
+/* The disclosure caret, shared wherever something opens in place: a collapsed
+   run of tool calls, a project in the sidebar. */
+.disclosure {
   color: var(--ink-faint);
   font-size: 11px;
   width: 10px;

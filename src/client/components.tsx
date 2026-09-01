@@ -443,6 +443,35 @@ function InlineRename({
   );
 }
 
+/**
+ * Which projects are collapsed, per browser rather than per room.
+ *
+ * This is a view preference, not shared state: it says nothing about the
+ * project itself, so it stays out of the synced snapshot and lives beside the
+ * other `collab_ai:` keys instead. Reads and writes are wrapped because a
+ * browser with site data blocked throws on access rather than returning null,
+ * and a sidebar that cannot remember a caret is still a working sidebar.
+ */
+const COLLAPSED_PROJECTS_KEY = "collab_ai:projects-collapsed";
+
+function storedCollapsedProjects(): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistCollapsedProjects(collapsed: Set<string>) {
+  try {
+    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...collapsed]));
+  } catch {
+    /* storage unavailable — the collapse still works for this session */
+  }
+}
+
 export function SidePane({
   activeRoomId,
   busy,
@@ -492,6 +521,7 @@ export function SidePane({
   const [openProjectMenu, setOpenProjectMenu] = useState<string | null>(null);
   const [renamingRoom, setRenamingRoom] = useState<string | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(storedCollapsedProjects);
   const openProjectActionsRef = useRef<HTMLDivElement | null>(null);
   const archivedRooms = [
     ...rooms.filter((room) => room.archived),
@@ -516,6 +546,45 @@ export function SidePane({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [openProjectMenu]);
+
+  const toggleProject = (projectId: string) => {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(projectId)) next.add(projectId);
+      persistCollapsedProjects(next);
+      return next;
+    });
+  };
+
+  /**
+   * Opening a room reveals it. Without this, following an invite or a copied
+   * link into a room inside a project someone collapsed weeks ago lands them
+   * in a conversation whose own row is hidden behind a caret, with the sidebar
+   * showing nothing selected.
+   *
+   * It fires once per room actually opened, not once per render. `projects` is
+   * rebuilt on every sidebar sync, so an effect that merely depended on it
+   * would re-expand the project holding the current room seconds after someone
+   * deliberately collapsed it — the caret would not stay shut. The ref is only
+   * marked once the room's project is known, so a sync that has not delivered
+   * the projects yet leaves the reveal owed rather than spent.
+   */
+  const revealedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeRoomId || revealedFor.current === activeRoomId) return;
+    const owner = projects.find((project) =>
+      project.rooms.some((room) => room.roomId === activeRoomId),
+    );
+    if (!owner) return;
+    revealedFor.current = activeRoomId;
+    setCollapsedProjects((prev) => {
+      if (!prev.has(owner.id)) return prev;
+      const next = new Set(prev);
+      next.delete(owner.id);
+      persistCollapsedProjects(next);
+      return next;
+    });
+  }, [activeRoomId, projects]);
 
   const submitProject = () => {
     const name = projectName.trim().slice(0, 42);
@@ -682,19 +751,40 @@ export function SidePane({
               )}
             </div>
           ) : (
-            projects.filter((project) => !project.archived).map((project) => (
+            projects.filter((project) => !project.archived).map((project) => {
+              const openRooms = project.rooms.filter((room) => !room.archived);
+              const collapsed = collapsedProjects.has(project.id);
+              const roomsId = `project-rooms-${project.id}`;
+              return (
               <div className="side-project" key={project.id}>
                 <div className="side-project-head">
-                  <span className="side-folder" aria-hidden="true" />
                   {renamingProject === project.id ? (
-                    <InlineRename
-                      value={project.name}
-                      label="Project name"
-                      onCommit={(name) => commitProjectRename(project, name)}
-                      onCancel={() => setRenamingProject(null)}
-                    />
+                    <>
+                      <span className="side-folder" aria-hidden="true" />
+                      <InlineRename
+                        value={project.name}
+                        label="Project name"
+                        onCommit={(name) => commitProjectRename(project, name)}
+                        onCancel={() => setRenamingProject(null)}
+                      />
+                    </>
                   ) : (
-                    <span>{project.name}</span>
+                    <button
+                      type="button"
+                      className="side-project-toggle"
+                      onClick={() => toggleProject(project.id)}
+                      aria-expanded={!collapsed}
+                      aria-controls={roomsId}
+                    >
+                      <span className="disclosure" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+                      <span className="side-folder" aria-hidden="true" />
+                      <span className="side-project-name">{project.name}</span>
+                      {/* Collapsed, the caret is the only thing left saying this
+                          project has anything in it — so it says how much. */}
+                      {collapsed && openRooms.length > 0 && (
+                        <span className="side-project-count">{openRooms.length}</span>
+                      )}
+                    </button>
                   )}
                   <div
                     className="side-project-actions"
@@ -738,8 +828,8 @@ export function SidePane({
                     )}
                   </div>
                 </div>
-                <div className="side-channels">
-                  {project.rooms.filter((room) => !room.archived).map((room) => (
+                <div className="side-channels" id={roomsId} hidden={collapsed}>
+                  {openRooms.map((room) => (
                     <div className="side-room-row" key={room.roomId}>
                       {renamingRoom === room.roomId ? (
                         <InlineRename
@@ -795,7 +885,7 @@ export function SidePane({
                       )}
                     </div>
                   ))}
-                  {project.rooms.filter((room) => !room.archived).length === 0 && (
+                  {openRooms.length === 0 && (
                     <span className="side-item-detail side-project-empty">No rooms yet · use + to add one</span>
                   )}
                   {project.workspace.label && (
@@ -805,7 +895,8 @@ export function SidePane({
                   )}
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </section>
 
@@ -1129,7 +1220,7 @@ function CollapsedSteps({ blocks }: { blocks: AgentBlock[] }) {
         className="steps-collapsed-toggle"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="tool-disclosure">{open ? "▾" : "▸"}</span>
+        <span className="disclosure">{open ? "▾" : "▸"}</span>
         {parts.join(" · ") || "Steps"}
       </button>
       {open && (
@@ -1178,7 +1269,7 @@ function ToolBlock({
   return (
     <div className={`tool tool-${block.status}`}>
       <div className="tool-head" onClick={() => setOpen((v) => !v)} role="button">
-        <span className="tool-disclosure">{open ? "▾" : "▸"}</span>
+        <span className="disclosure">{open ? "▾" : "▸"}</span>
         <span className="tool-name">{toolLabel(block.name)}</span>
         {summary && <span className="tool-summary">{summary}</span>}
         <span className={`pip pip-${block.status}`} aria-hidden="true" />
