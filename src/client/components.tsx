@@ -21,6 +21,8 @@ import {
   type MemberSummary,
   type DocumentRevision,
   type DecisionRecord,
+  type Grant,
+  grantIsLive,
   type PendingTool,
   type Presence as PresenceUser,
   type Vote,
@@ -1417,7 +1419,27 @@ export function ApprovalCard({
             {counts.deny}/{pending.threshold}
           </span>
         </button>
-        {mine && <span className="voted">You Voted To {titleCaseWords(mine)}</span>}
+        {/* A third way to approve: this call, and the next few like it. Sits
+            with the other votes rather than in a menu, because it is a vote —
+            it needs the same number of people as approving once does. */}
+        <button
+          className={`vote grant ${mine === "grant" ? "cast" : ""}`}
+          onClick={() => onVote(pending.toolUseId, "grant")}
+          disabled={!canDecide}
+          title={`Approve, and stop asking for ${pending.name} for a short while`}
+        >
+          Approve &amp; Stop Asking
+          <span className="count">
+            {counts.grant}/{pending.threshold}
+          </span>
+        </button>
+        {mine && (
+          <span className="voted">
+            {mine === "grant"
+              ? "You Voted To Approve And Stop Asking"
+              : `You Voted To ${titleCaseWords(mine)}`}
+          </span>
+        )}
       </div>
       {!canDecide && (
         <div className="hint redacted" style={{ fontStyle: "italic" }}>
@@ -1594,6 +1616,57 @@ export function RevisionHistoryPanel({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * What the agent may currently do without asking.
+ *
+ * Always on screen while any grant is live, next to the conversation rather
+ * than filed in a settings panel. The whole safety argument for a grant is
+ * that the room can see it standing and take it back in one click — a grant
+ * you have to go looking for is just a permission with extra steps.
+ */
+export function GrantStrip({
+  grants,
+  canRevoke,
+  onRevoke,
+}: {
+  grants: Grant[];
+  canRevoke: boolean;
+  onRevoke: (id: string) => void;
+}) {
+  // Re-render on a timer so "4 min left" is true rather than true-when-loaded.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 20_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const now = Date.now();
+  const live = grants.filter((g) => grantIsLive(g, now));
+  if (live.length === 0) return null;
+
+  return (
+    <div className="grants" role="status">
+      <span className="grants-head">Running without asking</span>
+      {live.map((g) => {
+        const minutes = Math.max(1, Math.round((g.expiresAt - now) / 60000));
+        return (
+          <span className="grant" key={g.id}>
+            <code>{g.tool}</code>
+            <span className="hint">
+              {minutes} min left · {g.maxUses - g.usedCount} of {g.maxUses} uses
+            </span>
+            {canRevoke && (
+              <button type="button" onClick={() => onRevoke(g.id)}>
+                Take back
+              </button>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }

@@ -24,11 +24,14 @@ import {
   INVITABLE_ROLES,
   UID_RE,
   colorFor,
+  grantFor,
+  grantIsLive,
   optionTally,
   tally,
   type AgentBlock,
   type ClientMsg,
   type DecisionRecord,
+  type Grant,
   type Entry,
   type GithubStatus,
   type InviteSummary,
@@ -315,6 +318,26 @@ const MUTATING_TOOLS = new Set([
   "write_doc", "edit_doc", "write_file", "edit_file", "delete_file", "delegate",
 ]);
 
+/**
+ * How long standing authority lasts, and how many times it may be used.
+ *
+ * Deliberately short. A grant exists to get a room through the next few
+ * minutes of repetitive approvals, not to become a permission somebody forgot
+ * about — the room can always grant again, and having to is the point.
+ */
+export const GRANT_WINDOW_MS = 15 * 60 * 1000;
+export const GRANT_MAX_USES = 10;
+
+/** Names of the people who granted authority, stored as JSON on the row. */
+function parseNames(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Votes come back out of SQL as JSON; a corrupt row loses its votes, not the record. */
 function parseVotes(raw: string): DecisionRecord["votes"] {
   try {
@@ -449,6 +472,21 @@ export class Room extends Agent<Env, RoomState> {
       installation_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )`;
+    // Standing authority: a class of action the room approved in advance, for
+    // a stretch of time and a number of uses. Rows are never deleted — a grant
+    // that has lapsed or been handed back is part of the record of what the
+    // room allowed and when, which is exactly what an auditor asks for.
+    this.sql`CREATE TABLE IF NOT EXISTS grants (
+      id TEXT PRIMARY KEY,
+      tool TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      max_uses INTEGER NOT NULL,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      granted_by TEXT NOT NULL,
+      revoked_at INTEGER NOT NULL DEFAULT 0
+    )`;
     // Who authorised what the agent did.
     //
     // The transcript already says an action happened; this says on whose
@@ -472,7 +510,8 @@ export class Room extends Agent<Env, RoomState> {
       threshold INTEGER NOT NULL,
       votes TEXT NOT NULL,
       asked_by TEXT NOT NULL,
-      policy_mode TEXT NOT NULL
+      policy_mode TEXT NOT NULL,
+      grant_id TEXT NOT NULL DEFAULT ''
     )`;
     // Bearer tokens for the MCP servers wired to an agent (see workflow.ts's
     // AgentNode#mcpServers, which carries no credential for exactly this
@@ -933,6 +972,7 @@ export class Room extends Agent<Env, RoomState> {
     verdict: DecisionRecord["verdict"];
     threshold: number;
     votes: Record<string, string>;
+    grantId?: string;
   }) {
     let serialized = "{}";
     try {
@@ -953,10 +993,77 @@ export class Room extends Agent<Env, RoomState> {
 
     const turn = this.#turn();
     this.sql`INSERT INTO decisions
-             (id, ts, tool_use_id, tool, summary, args, verdict, threshold, votes, asked_by, policy_mode)
+             (id, ts, tool_use_id, tool, summary, args, verdict, threshold, votes, asked_by, policy_mode, grant_id)
              VALUES (${crypto.randomUUID()}, ${Date.now()}, ${args.toolUseId}, ${args.tool},
                      ${args.summary}, ${serialized}, ${args.verdict}, ${args.threshold},
-                     ${votes}, ${turn?.authorName ?? "unknown"}, ${this.#policy().mode})`;
+                     ${votes}, ${turn?.authorName ?? "unknown"}, ${this.#policy().mode},
+                     ${args.grantId ?? ""})`;
+  }
+
+  /**
+   * Give the agent standing authority for this class of call.
+   *
+   * Scoped to the tool name and nothing finer. That is a deliberate limit
+   * rather than a stub: a grant somebody has to reason about ("write_file, but
+   * only under src/, but not package.json") is one they will approve without
+   * understanding. One tool, one short window, one small number of uses is a
+   * sentence a person can hold in their head while voting.
+   */
+  #createGrant(p: PendingTool) {
+    const now = Date.now();
+    const grantedBy = Object.entries(p.votes)
+      .filter(([, vote]) => vote === "grant")
+      .map(([uid]) => this.#memberName(uid) ?? "someone who has left");
+
+    this.sql`INSERT INTO grants
+             (id, tool, summary, created_at, expires_at, max_uses, used_count, granted_by, revoked_at)
+             VALUES (${crypto.randomUUID()}, ${p.name}, ${p.summary}, ${now},
+                     ${now + GRANT_WINDOW_MS}, ${GRANT_MAX_USES}, 0,
+                     ${JSON.stringify(grantedBy)}, 0)`;
+
+    this.#syncGrants();
+    this.#system(
+      `${grantedBy.join(" and ")} allowed ${p.name} to run without asking for the next ` +
+        `${GRANT_WINDOW_MS / 60000} minutes, up to ${GRANT_MAX_USES} times. ` +
+        `Anyone can take that back.`,
+    );
+  }
+
+  /** Standing authority the agent still holds. Lapsed and revoked ones are dropped. */
+  #liveGrants(): Grant[] {
+    const now = Date.now();
+    return this.sql<{
+      id: string; tool: string; summary: string; created_at: number;
+      expires_at: number; max_uses: number; used_count: number; granted_by: string;
+    }>`SELECT id, tool, summary, created_at, expires_at, max_uses, used_count, granted_by
+       FROM grants
+       WHERE revoked_at = 0 AND expires_at > ${now} AND used_count < max_uses
+       ORDER BY created_at DESC`.map((r) => ({
+      id: r.id,
+      tool: r.tool,
+      summary: r.summary,
+      createdAt: r.created_at,
+      expiresAt: r.expires_at,
+      maxUses: r.max_uses,
+      usedCount: r.used_count,
+      grantedBy: parseNames(r.granted_by),
+    }));
+  }
+
+  /** Push the current grants into RoomState so the room can see what it has allowed. */
+  #syncGrants() {
+    this.setState({ ...this.state, grants: this.#liveGrants() });
+  }
+
+  /**
+   * Spend one use of a grant.
+   *
+   * The count goes up before the action runs, not after. A call that fails
+   * still used the authority it was given — and a bug that let a failing call
+   * retry against the same grant forever would be the worst kind.
+   */
+  #useGrant(id: string) {
+    this.sql`UPDATE grants SET used_count = used_count + 1 WHERE id = ${id}`;
   }
 
   /** The room's consent record, newest first. */
@@ -964,16 +1071,17 @@ export class Room extends Agent<Env, RoomState> {
     return this.sql<{
       id: string; ts: number; tool_use_id: string; tool: string; summary: string;
       args: string; verdict: string; threshold: number; votes: string;
-      asked_by: string; policy_mode: string;
+      asked_by: string; policy_mode: string; grant_id: string;
     }>`SELECT * FROM decisions ORDER BY ts DESC LIMIT 500`.map((r) => ({
       id: r.id,
       ts: r.ts,
       tool: r.tool,
       summary: r.summary,
       args: r.args,
-      verdict: (r.verdict === "approved" || r.verdict === "denied"
+      verdict: (r.verdict === "approved" || r.verdict === "denied" || r.verdict === "granted"
         ? r.verdict
         : "unattended") as DecisionRecord["verdict"],
+      ...(r.grant_id ? { grantId: r.grant_id } : {}),
       threshold: r.threshold,
       votes: parseVotes(r.votes),
       askedBy: r.asked_by,
@@ -1612,6 +1720,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onRevisionList(connection, msg.uid);
       case "decision.list":
         return this.#onDecisionList(connection);
+      case "grant.revoke":
+        return this.#onGrantRevoke(connection, msg.id);
       case "member.role":
         return this.#onMemberRole(connection, msg.uid, msg.role);
       case "member.remove":
@@ -1917,6 +2027,27 @@ export class Room extends Agent<Env, RoomState> {
    * they belong to and on whose authority — withholding that from someone in
    * the room would defeat the point of keeping it.
    */
+  /**
+   * Hand standing authority back before it lapses.
+   *
+   * Anyone who can vote can revoke, and does not need the votes of others to
+   * do it. Withdrawing consent is not symmetric with giving it: if one person
+   * in the room thinks the agent should be asking again, it should ask again.
+   */
+  async #onGrantRevoke(connection: Connection, id: string) {
+    if (!this.#allow(connection, "vote", "You're a viewer in this room, so you can't change what the agent may do.")) {
+      return;
+    }
+    const name = this.#nameOf(connection);
+    const row = this.sql<{ tool: string }>`
+      SELECT tool FROM grants WHERE id = ${id} AND revoked_at = 0`[0];
+    if (!row) return; // already lapsed or handed back
+
+    this.sql`UPDATE grants SET revoked_at = ${Date.now()} WHERE id = ${id}`;
+    this.#syncGrants();
+    this.#system(`${name ?? "someone"} took back the standing approval for ${row.tool}.`);
+  }
+
   async #onDecisionList(connection: Connection) {
     const uid = this.#uidOf(connection);
     if (!uid || !this.#memberRole(uid)) return;
@@ -2774,7 +2905,7 @@ export class Room extends Agent<Env, RoomState> {
     // vote that can never be tallied.
     const validVote = target.options
       ? target.options.some((o) => o.id === vote)
-      : vote === "approve" || vote === "deny";
+      : vote === "approve" || vote === "deny" || vote === "grant";
     if (!validVote) return;
 
     const pending = this.state.pending.map((p) =>
@@ -3317,6 +3448,10 @@ export class Room extends Agent<Env, RoomState> {
         const conversation = repairToolConversation(this.#convo());
         if (conversation.repaired) this.#setConvo(conversation.messages);
 
+        // Drop any authority that lapsed since the last round, so a grant is
+        // never spent past its window just because nothing refreshed the view.
+        if (this.state.grants.some((g) => !grantIsLive(g, Date.now()))) this.#syncGrants();
+
         const graph = this.#activeGraph();
         // The lead's own servers, resolved as whoever's turn this is: a
         // personal-credential server acts for the person who spoke, not for
@@ -3521,7 +3656,7 @@ export class Room extends Agent<Env, RoomState> {
                 block.status = "error";
                 block.result = text;
               }
-            } else if (mcpDecision === "ask") {
+            } else if (mcpDecision === "ask" && !grantFor(this.state.grants, call.name, Date.now())) {
               gated.push({
                 toolUseId: call.id,
                 name: call.name,
@@ -3532,16 +3667,24 @@ export class Room extends Agent<Env, RoomState> {
               });
             } else {
               const parsed = parseMcpToolName(call.name);
+              // A live grant is spent here; without one the room's policy is
+              // what let this run. The record distinguishes the two, because
+              // "the room pre-authorised this" and "nobody was asked" are not
+              // the same answer to who authorised it.
+              const grant = grantFor(this.state.grants, call.name, Date.now());
+              if (grant) {
+                this.#useGrant(grant.id);
+                this.#syncGrants();
+              }
               const res = await callTool(target, parsed?.tool ?? call.name, call.input);
               const text = res.ok ? res.text : res.error;
-              // Nobody was asked, so the record says so rather than leaving a
-              // call to an external service with no authority attached to it.
               this.#recordDecision({
                 toolUseId: call.id,
                 tool: call.name,
                 summary: summarizeMcpCall(target.name, call.name, call.input),
                 input: call.input,
-                verdict: "unattended",
+                verdict: grant ? "granted" : "unattended",
+                grantId: grant?.id,
                 threshold: 0,
                 votes: {},
               });
@@ -3557,7 +3700,10 @@ export class Room extends Agent<Env, RoomState> {
                 block.result = text;
               }
             }
-          } else if (gatedNames.has(call.name)) {
+          } else if (
+            gatedNames.has(call.name) &&
+            !grantFor(this.state.grants, call.name, Date.now())
+          ) {
             const sensitive = isFileContentTool(call.name);
             gated.push({
               toolUseId: call.id,
@@ -3602,12 +3748,18 @@ export class Room extends Agent<Env, RoomState> {
             // about authority to change things, and a record padded with every
             // file listing is one nobody will read.
             if (MUTATING_TOOLS.has(call.name)) {
+              const grant = grantFor(this.state.grants, call.name, Date.now());
+              if (grant) {
+                this.#useGrant(grant.id);
+                this.#syncGrants();
+              }
               this.#recordDecision({
                 toolUseId: call.id,
                 tool: call.name,
                 summary: summarizeCall(call.name, call.input),
                 input: call.input,
-                verdict: "unattended",
+                verdict: grant ? "granted" : "unattended",
+                grantId: grant?.id,
                 threshold: 0,
                 votes: {},
               });
@@ -3710,6 +3862,14 @@ export class Room extends Agent<Env, RoomState> {
       }
     }
 
+    // Grants lapse by the clock, so a room waking up may be carrying authority
+    // in its synced state that expired while it slept. Recompute from the rows,
+    // which are the truth, rather than trusting what state was left holding.
+    const live = this.#liveGrants();
+    if (JSON.stringify(live) !== JSON.stringify(this.state.grants)) {
+      this.setState({ ...this.state, grants: live });
+    }
+
     const turn = this.#turn();
     // `running` rather than `state.status`: this is the object's first breath
     // and the room's own tables are the only thing certain to be readable yet.
@@ -3771,7 +3931,7 @@ export class Room extends Agent<Env, RoomState> {
     if (!turn || this.state.pending.length === 0) return;
 
     type Verdict =
-      | { kind: "gate"; p: PendingTool; approved: boolean }
+      | { kind: "gate"; p: PendingTool; approved: boolean; grant: boolean }
       | { kind: "choice"; p: PendingTool; option: { id: string; label: string } };
 
     const verdicts: Verdict[] = [];
@@ -3782,10 +3942,15 @@ export class Room extends Agent<Env, RoomState> {
         if (!winner) return; // at least one still undecided — keep waiting
         verdicts.push({ kind: "choice", p, option: winner });
       } else {
-        const { approve, deny } = tally(p);
-        if (approve >= p.threshold) verdicts.push({ kind: "gate", p, approved: true });
-        else if (deny >= p.threshold) verdicts.push({ kind: "gate", p, approved: false });
-        else return; // at least one still undecided — keep waiting
+        const { approve, deny, grant } = tally(p);
+        // Standing authority needs the same bar as the action itself. It is a
+        // bigger ask, so it never passes on fewer votes — only on the same
+        // number of people having asked for it specifically.
+        if (approve >= p.threshold) {
+          verdicts.push({ kind: "gate", p, approved: true, grant: grant >= p.threshold });
+        } else if (deny >= p.threshold) {
+          verdicts.push({ kind: "gate", p, approved: false, grant: false });
+        } else return; // at least one still undecided — keep waiting
       }
     }
 
@@ -3814,6 +3979,10 @@ export class Room extends Agent<Env, RoomState> {
             threshold: p.threshold,
             votes: p.votes,
           });
+          // The room asked for this class of call to stop needing a vote for a
+          // while. Recorded and announced, never silent: authority nobody
+          // noticed being handed over is the failure mode worth designing out.
+          if (v.grant) this.#createGrant(p);
         }
 
         let outcome: ToolOutcome;

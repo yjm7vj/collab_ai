@@ -15,7 +15,16 @@ import {
   sanitizeSettings,
   serverToolsFor,
 } from "../src/shared/models";
-import { REDACTED, redactEntry, thresholdFor } from "../src/shared/protocol";
+import {
+  REDACTED,
+  redactEntry,
+  thresholdFor,
+  tally,
+  grantFor,
+  grantIsLive,
+  type Grant,
+  type PendingTool,
+} from "../src/shared/protocol";
 import { SYSTEM_PROMPT } from "../src/server/model";
 import {
   MODE_PRESETS,
@@ -765,6 +774,63 @@ console.log("\nthe system prompt keeps up with the tools");
     /unattended/i.test(SYSTEM_PROMPT),
   );
 }
+
+
+
+/* ------------------------------------------------- standing authority */
+
+console.log("\nstanding authority");
+
+const gate = (votes: Record<string, string>, threshold = 2): PendingTool => ({
+  toolUseId: "t1",
+  name: "edit_file",
+  input: {},
+  summary: "Edit a file",
+  votes,
+  threshold,
+});
+
+// A grant is a stronger ask than an approval, so it has to imply one — but an
+// approval must never quietly become a grant.
+const bothGrant = tally(gate({ a: "grant", b: "grant" }));
+check("a grant vote counts toward approving the call", bothGrant.approve === 2, bothGrant);
+check("grant votes are also counted on their own", bothGrant.grant === 2, bothGrant);
+
+const mixed = tally(gate({ a: "grant", b: "approve" }));
+check("a plain approval still approves", mixed.approve === 2, mixed);
+check(
+  "a plain approval is not counted as wanting standing authority",
+  mixed.grant === 1,
+  mixed,
+);
+check(
+  "so a call can be approved without granting standing authority",
+  mixed.approve >= 2 && mixed.grant < 2,
+  mixed,
+);
+
+const denied = tally(gate({ a: "deny", b: "deny" }));
+check("denials are unaffected", denied.deny === 2 && denied.approve === 0, denied);
+
+const now = Date.now();
+const live: Grant = {
+  id: "g1", tool: "edit_file", summary: "Edit a file",
+  createdAt: now, expiresAt: now + 60_000, maxUses: 3, usedCount: 1, grantedBy: ["Ada"],
+};
+
+check("a live grant is live", grantIsLive(live, now));
+check("a grant is dead once its window closes", !grantIsLive({ ...live, expiresAt: now - 1 }, now));
+check("a grant is dead once its uses run out", !grantIsLive({ ...live, usedCount: 3 }, now));
+check(
+  "a grant never covers a tool it was not given for",
+  grantFor([live], "delete_file", now) === undefined,
+);
+check("a grant covers the tool it was given for", grantFor([live], "edit_file", now)?.id === "g1");
+check(
+  "an expired grant covers nothing",
+  grantFor([{ ...live, expiresAt: now - 1 }], "edit_file", now) === undefined,
+);
+
 
 console.log(failures === 0 ? "\nall checks passed\n" : `\n${failures} check(s) failed\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -2812,6 +2812,37 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   line-height: 1.5;
 }
 
+/* ------------------------------------------------------- standing authority */
+
+/* Kept in the conversation column, not in a settings panel: the argument for a
+   grant being safe is that the room can see it standing and end it in one
+   click. Warn-toned because it is the one state where the gate is down. */
+.grants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+  font-size: 12px;
+}
+.grants-head {
+  font-weight: 650;
+  color: var(--warn);
+}
+.grant {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+  border-radius: 999px;
+  background: var(--panel);
+}
+.grant code { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.grant button { min-height: 22px; padding: 1px 8px; font-size: 11px; }
+
 /* ---------------------------------------------------------- consent record */
 
 .consent-panel { max-width: 760px; width: 100%; }

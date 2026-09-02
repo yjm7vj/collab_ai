@@ -18,7 +18,11 @@ import { DEFAULT_POLICY, type AccessPolicy, type Role } from "./access";
 import { DEFAULT_GRAPH, type WorkflowGraph } from "./workflow";
 import { NO_WORKSPACE, type FsRequest, type FsResponse, type WorkspaceInfo, type WorkspaceKind } from "./workspace";
 
-export type Vote = "approve" | "deny";
+/**
+ * How a person can answer a gate. `grant` is an approval that also asks for
+ * the same call to stop needing a vote for a while — see `Grant`.
+ */
+export type Vote = "approve" | "deny" | "grant";
 
 /**
  * How a room admits people.
@@ -149,7 +153,47 @@ export type RoomState = {
    * only, never on the wire).
    */
   mcpTokensSet: string[];
+  /**
+   * Standing authority the agent currently holds. Everyone sees it, because a
+   * gate the room cannot see it has lowered is not a gate.
+   */
+  grants: Grant[];
 };
+
+/**
+ * Standing authority the room has given the agent, with an end to it.
+ *
+ * The middle ground between voting on every call and turning the vote off for
+ * good: the room approves a class of action for a stretch of time and a number
+ * of uses, and it lapses on its own. Nobody has to remember to take it back.
+ *
+ * Synced to every client on purpose. Standing authority that only the server
+ * knows about is indistinguishable, from inside the room, from no gate at all.
+ */
+export type Grant = {
+  id: string;
+  /** The tool this authorises, exactly as the agent calls it. */
+  tool: string;
+  /** What the room saw when it granted this. */
+  summary: string;
+  createdAt: number;
+  expiresAt: number;
+  /** Uses allowed in the window. */
+  maxUses: number;
+  usedCount: number;
+  /** Who voted it through. */
+  grantedBy: string[];
+};
+
+/** A grant is spent when its window closes or its uses run out. */
+export function grantIsLive(g: Grant, now: number): boolean {
+  return g.expiresAt > now && g.usedCount < g.maxUses;
+}
+
+/** The live grant covering this tool, if the room has given one. */
+export function grantFor(grants: Grant[], tool: string, now: number): Grant | undefined {
+  return grants.find((g) => g.tool === tool && grantIsLive(g, now));
+}
 
 /**
  * One recorded answer to "who authorised this?".
@@ -169,7 +213,15 @@ export type DecisionRecord = {
   summary: string;
   /** The arguments the call actually ran with, as JSON. */
   args: string;
-  verdict: "approved" | "denied" | "unattended";
+  /**
+   * `granted` is its own verdict, not a kind of `unattended`: the room did
+   * authorise this class of action, in advance and on the record. Collapsing
+   * the two would lose the difference between "pre-authorised" and "nobody was
+   * ever asked", which is the whole distinction this record exists to keep.
+   */
+  verdict: "approved" | "denied" | "unattended" | "granted";
+  /** The standing grant this ran under, when the verdict is `granted`. */
+  grantId?: string;
   /** Votes needed at the time. 0 for an unattended action. */
   threshold: number;
   votes: { uid: string; name: string; vote: string }[];
@@ -210,6 +262,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   context: { messages: 0, tokens: 0 },
   cost: EMPTY_LEDGER,
   mcpTokensSet: [],
+  grants: [],
 };
 
 /** One rendered piece of an agent turn. */
@@ -377,6 +430,8 @@ export type ClientMsg =
   | { t: "revision.list"; uid: string }
   /** Ask for the room's consent record — who authorised what the agent did. */
   | { t: "decision.list" }
+  /** Hand back standing authority before it lapses. */
+  | { t: "grant.revoke"; id: string }
   /** Change someone's role. The server re-checks that the actor outranks them. */
   | { t: "member.role"; uid: string; role: Role }
   /** Remove someone from the room and close their sockets. */
@@ -450,14 +505,26 @@ export function thresholdFor(userCount: number): number {
   return Math.max(1, Math.floor(userCount / 2) + 1);
 }
 
-export function tally(p: PendingTool): { approve: number; deny: number } {
+/**
+ * How a gate stands.
+ *
+ * `grant` is a vote to approve this call *and* to let the same call run
+ * unasked for a while — so it counts toward approval, and is also counted on
+ * its own. Wanting standing authority necessarily means wanting this one call;
+ * the reverse is not true, which is why they are two numbers and not one.
+ */
+export function tally(p: PendingTool): { approve: number; deny: number; grant: number } {
   let approve = 0;
   let deny = 0;
+  let grant = 0;
   for (const v of Object.values(p.votes)) {
     if (v === "approve") approve++;
-    else if (v === "deny") deny++;
+    else if (v === "grant") {
+      approve++;
+      grant++;
+    } else if (v === "deny") deny++;
   }
-  return { approve, deny };
+  return { approve, deny, grant };
 }
 
 /** Per-option vote counts for a question the agent asked the room. */

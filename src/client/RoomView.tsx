@@ -30,6 +30,7 @@ import {
   PermissionsPanel,
   RevisionHistoryPanel,
   ConsentRecordPanel,
+  GrantStrip,
   Transcript,
   WorkerStrip,
   WorkspacePanel,
@@ -366,6 +367,7 @@ export function RoomView({
     [send],
   );
   const interrupt = useCallback(() => send({ t: "interrupt" }), [send]);
+  const revokeGrant = useCallback((id: string) => send({ t: "grant.revoke", id }), [send]);
   const setMcpToken = useCallback(
     (nodeId: string, serverId: string, token: string) =>
       send({ t: "set_mcp_token", nodeId, serverId, token }),
@@ -1070,6 +1072,8 @@ export function RoomView({
           />
 
           {state.workers.length > 0 && <WorkerStrip workers={state.workers} />}
+
+          <GrantStrip grants={state.grants} canRevoke={mayVote} onRevoke={revokeGrant} />
 
           {state.pending.length > 0 && (
             <div className="approvals">
