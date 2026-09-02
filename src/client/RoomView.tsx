@@ -48,6 +48,7 @@ import {
   pickDirectory,
   saveHandle,
 } from "./workspace";
+import type { FsRequest, FsResponse } from "../shared/workspace";
 
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
@@ -116,6 +117,8 @@ export function RoomView({
   const [showRevisionHistory, setShowRevisionHistory] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [workspaceView, setWorkspaceView] = useState<"connections" | "ide">("connections");
+  const pendingClientFs = useRef(new Map<string, { resolve: (res: FsResponse) => void; timer: number }>());
   // The repository list for the GitHub picker. `null` means "not fetched
   // yet"; an array means fetched, possibly empty.
   const [repos, setRepos] = useState<GithubRepo[] | null>(null);
@@ -253,6 +256,14 @@ export function RoomView({
           send({ t: "fs.res", id: msg.id, res });
         })();
         break;
+      case "fs.client.res": {
+        const pending = pendingClientFs.current.get(msg.id);
+        if (!pending) break;
+        window.clearTimeout(pending.timer);
+        pendingClientFs.current.delete(msg.id);
+        pending.resolve(msg.res);
+        break;
+      }
       case "github.install":
         // Opened in a new tab rather than navigating away: the room is a live
         // socket and a full navigation would drop it, losing the transcript
@@ -552,6 +563,15 @@ export function RoomView({
   ]);
 
   const connectGithub = useCallback((repo: string) => send({ t: "github.connect", repo }), [send]);
+  const requestWorkspace = useCallback((req: FsRequest): Promise<FsResponse> => {
+    if (state.workspace.kind === "local" && rootRef.current) return performFsRequest(rootRef.current, req);
+    const id = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => { pendingClientFs.current.delete(id); resolve({ ok: false, error: "The workspace request timed out." }); }, 6_000);
+      pendingClientFs.current.set(id, { resolve, timer });
+      send({ t: "fs.client.req", id, req });
+    });
+  }, [send, state.workspace.kind]);
   const authGithub = useCallback(() => send({ t: "github.auth" }), [send]);
   const listRepos = useCallback(() => {
     setReposLoading(true);
@@ -965,6 +985,9 @@ export function RoomView({
           onAuthGithub={authGithub}
           onListRepos={listRepos}
           onSignOutGithub={signOutGithub}
+          onRequest={requestWorkspace}
+          canEdit={canSeeFileContents(myRole) && (state.workspace.kind === "github" ? state.workspace.canWrite !== false : canWrite)}
+          initialView={workspaceView}
           onClose={() => setShowWorkspace(false)}
         />
       )}
@@ -1078,7 +1101,8 @@ export function RoomView({
                 )}
                 <WorkspaceActions
                   visible={mayPolicy}
-                  onWorkspace={() => setShowWorkspace(true)}
+                  onWorkspace={() => { setWorkspaceView("connections"); setShowWorkspace(true); }}
+                  onIde={() => { setWorkspaceView("ide"); setShowWorkspace(true); }}
                 />
               </>
             }

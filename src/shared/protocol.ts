@@ -260,6 +260,8 @@ export type ServerMsg =
   /** Sent only to the workspace host's socket. Never broadcast. */
   | { t: "fs.req"; id: string; req: FsRequest }
   /** A file request made by the room's code workspace UI. Sent only to its requester. */
+  | { t: "fs.client.res"; id: string; res: FsResponse }
+  /** A file request made by the room's code workspace UI. Sent only to its requester. */
   /**
    * Where to send the browser next for GitHub — the OAuth authorise page, or
    * the GitHub App install page. Sent only to the connection that asked.
@@ -350,6 +352,8 @@ export type ClientMsg =
   | { t: "member.remove"; uid: string }
   /** A provider's reply to an earlier "fs.req". Only the host's answer counts. */
   | { t: "fs.res"; id: string; res: FsResponse }
+  /** Request files through the room's authorized workspace provider. */
+  | { t: "fs.client.req"; id: string; req: FsRequest }
   /** Request files through the room's authorized workspace provider. */
   /** Connect a workspace to this room. Owners and admins only. */
   | { t: "workspace.attach"; kind: WorkspaceKind; label: string; repo?: string }

@@ -1395,6 +1395,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onGithubSignout(connection);
       case "fs.res":
         return this.#onFsRes(connection, msg.id, msg.res);
+      case "fs.client.req":
+        return this.#onFsClientReq(connection, msg.id, msg.req);
     }
   }
 
@@ -2274,6 +2276,15 @@ export class Room extends Agent<Env, RoomState> {
     const uid = this.#uidOf(connection);
     if (!uid || uid !== this.state.workspace.hostUid) return;
     this.#pending.settle(id, res);
+  }
+
+  /** Serve an explicit code workspace request to its requesting member. */
+  async #onFsClientReq(connection: Connection, id: string, req: FsRequest) {
+    if (typeof id !== "string" || id.length === 0 || id.length > 100 || !req || typeof req !== "object") return;
+    const reply = (res: FsResponse) => connection.send(JSON.stringify({ t: "fs.client.res", id, res } satisfies ServerMsg));
+    if (!canSeeFileContents(this.#roleOf(connection))) { reply({ ok: false, error: "Only the room's owner or admins can use the code workspace." }); return; }
+    if (req.op !== "list" && req.op !== "read" && req.op !== "write") { reply({ ok: false, error: "The code workspace supports listing, reading, and writing files." }); return; }
+    reply(await this.#fs(req));
   }
 
   /**

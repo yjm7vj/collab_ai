@@ -58,18 +58,20 @@ describe("context token accounting", () => {
   });
 });
 
-describe("workspace and terminal", () => {
-  it("renders the Workspace action", () => {
+describe("workspace and IDE", () => {
+  it("places IDE immediately after Workspace in the chat actions", () => {
     const html = renderToStaticMarkup(createElement(WorkspaceActions, {
       visible: true,
       onWorkspace: () => undefined,
+      onIde: () => undefined,
     }));
-    expect(html).toContain(">Workspace<");
-    expect(html).not.toContain(">IDE<");
+    expect(html.indexOf(">Workspace<")).toBeGreaterThan(-1);
+    expect(html.indexOf(">IDE<")).toBeGreaterThan(html.indexOf(">Workspace<"));
+    expect(html).not.toContain(">Terminal<");
     expect(html).not.toContain("Code workspace");
   });
 
-  it("keeps the Workspace panel focused on local and GitHub connections", () => {
+  it("keeps local and GitHub connections alongside the IDE", () => {
     const html = renderToStaticMarkup(createElement(WorkspacePanel, {
       workspace: NO_WORKSPACE,
       supported: true,
@@ -84,12 +86,14 @@ describe("workspace and terminal", () => {
       onAuthGithub: () => undefined,
       onListRepos: () => undefined,
       onSignOutGithub: () => undefined,
+      onRequest: async () => ({ ok: false, error: "not connected" }),
+      canEdit: false,
       onClose: () => undefined,
     }));
 
     expect(html).toContain("A Folder On Your Computer");
     expect(html).toContain("A GitHub Repository");
-    expect(html).not.toContain(">Terminal<");
-    expect(html).not.toContain(">IDE<");
+    expect(html).toContain(">Connections<");
+    expect(html).toContain(">IDE<");
   });
 });
