@@ -27,6 +27,8 @@ import {
 } from "../shared/protocol";
 import { inlineMarkdown } from "./markdown";
 import type { WorkspaceInfo } from "../shared/workspace";
+import type { FsRequest, FsResponse } from "../shared/workspace";
+import { IdePanel } from "./IdePanel";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { contextUsage } from "../shared/context";
 import { ROLES, outranks, type Role } from "../shared/access";
@@ -2145,6 +2147,9 @@ export function WorkspacePanel({
   onAuthGithub,
   onListRepos,
   onSignOutGithub,
+  onRequest,
+  canEdit,
+  initialView = "connections",
   onClose,
 }: {
   workspace: WorkspaceInfo;
@@ -2161,12 +2166,16 @@ export function WorkspacePanel({
   onAuthGithub: () => void;
   onListRepos: () => void;
   onSignOutGithub: () => void;
+  onRequest: (req: FsRequest) => Promise<FsResponse>;
+  canEdit: boolean;
+  initialView?: WorkspaceView;
   onClose: () => void;
 }) {
   const attached = workspace.kind !== "none";
   const [allowWrites, setAllowWrites] = useState(false);
   const [repo, setRepo] = useState("");
   const [filter, setFilter] = useState("");
+  const [view, setView] = useState<WorkspaceView>(initialView);
 
   // Fetch the repository list the moment the panel knows there is an
   // authorised account, rather than making someone click "load" to see the
@@ -2202,7 +2211,7 @@ export function WorkspacePanel({
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div
-        className="modal workspace-modal"
+        className={view === "ide" ? "modal workspace-modal workspace-modal-ide" : "modal workspace-modal"}
         role="dialog"
         aria-label="Workspace"
         onClick={(e) => e.stopPropagation()}
@@ -2210,14 +2219,19 @@ export function WorkspacePanel({
         <header className="modal-head">
           <div>
             <h2>Workspace</h2>
-            <p className="field-note">Connect local files or a GitHub repository.</p>
+            <p className="field-note">Connect files or edit code in the same workspace.</p>
           </div>
           <button className="icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </header>
 
-        <div className="modal-body">
+        <nav className="workspace-tabs" aria-label="Workspace views">
+          <button type="button" className={view === "connections" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("connections")}>Connections</button>
+          <button type="button" className={view === "ide" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("ide")}>IDE</button>
+        </nav>
+
+        {view === "ide" ? <IdePanel embedded workspace={workspace} canEdit={canEdit} onRequest={onRequest} onClose={onClose} /> : <div className="modal-body">
           {!attached ? (
             <div className="ws-options">
               {supported ? (
@@ -2535,23 +2549,32 @@ export function WorkspacePanel({
               <button className="ws-disconnect" onClick={onDetach}>Disconnect</button>
             </section>
           )}
-        </div>
+        </div>}
       </div>
     </div>
   );
 }
 
+export type WorkspaceView = "connections" | "ide";
+
 export function WorkspaceActions({
   visible,
   onWorkspace,
+  onIde,
 }: {
   visible: boolean;
   onWorkspace: () => void;
+  onIde: () => void;
 }) {
   if (!visible) return null;
   return (
-    <button type="button" className="chat-action" onClick={onWorkspace}>
-      Workspace
-    </button>
+    <>
+      <button type="button" className="chat-action" onClick={onWorkspace}>
+        Workspace
+      </button>
+      <button type="button" className="chat-action" onClick={onIde}>
+        IDE
+      </button>
+    </>
   );
 }
