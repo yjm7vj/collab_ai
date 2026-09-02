@@ -1,11 +1,11 @@
 /**
- * The landing surface — the page a first-time, signed-out visitor lands on.
+ * The landing surface, the page a first-time, signed-out visitor lands on.
  *
  * The direction contract for this surface is the HTML comment at the top of
  * index.html's <body>. The short version: this product's whole idea is that
  * many people talk at once into one agent's single conversation, and that any
  * write the agent wants goes to the room first. Claims about that are cheap,
- * so this page doesn't make them — each chapter runs the mechanism instead.
+ * so this page doesn't make them. Each chapter runs the mechanism instead.
  * The demo rooms are synthetic and say so on their own chrome; every product
  * fact here comes from PRODUCT.md.
  *
@@ -640,8 +640,8 @@ function ChapterVote() {
 
   const outcomeText = settled
     ? approve > deny
-      ? "Approved 2–1 · the write went through"
-      : "Denied 2–1 · nothing was written"
+      ? "Approved 2 to 1 · the write went through"
+      : "Denied 2 to 1 · nothing was written"
     : mine
       ? "Waiting on the room"
       : "Open · needs a majority";
@@ -718,7 +718,7 @@ function ChapterVote() {
 const TURN_NODES = [
   { time: "14:02", label: "The agent proposes the write.", quiet: false },
   { time: "14:03", label: "Two votes land. One short.", quiet: false },
-  { time: "—", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
+  { time: "", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
   { time: "16:41", label: "Mia opens the link and approves.", quiet: false },
   { time: "16:41", label: "The same turn resumes and finishes.", quiet: false },
 ];
@@ -1066,7 +1066,7 @@ function ChapterRoom() {
           </div>
           <p className="lp-note">
             Tokens are the real bill, so the room watches them together in the
-            header — not one person discovering the number later.
+            header, not one person discovering the number later.
           </p>
         </div>
       </DemoPanel>
@@ -1084,8 +1084,8 @@ const PROVIDER_TEXT: Record<string, string> = {
 /**
  * The apex page's ending: one field, posted to /api/waitlist.
  *
- * A repeat address is a success, not an error — the Worker treats a second
- * signup as a no-op — so there is no state here for "already on the list". The
+ * A repeat address is a success, not an error. The Worker treats a second
+ * signup as a no-op, so there is no state here for "already on the list". The
  * confirmation does not repeat the address back: printing it leaves someone's
  * email sitting on a screen that may not be theirs alone, and it tells them
  * nothing they did not just type.
@@ -1169,7 +1169,7 @@ function WaitlistForm() {
 
 /**
  * How the page ends. The argument above the fold is the same on both
- * hostnames — it is the same product either way — so the two differ only in
+ * hostnames. It is the same product either way, so the two differ only in
  * what they ask for at the bottom: app.huddleai.org asks for a room, and
  * huddleai.org, which nobody can sign into yet, asks for an email.
  */
@@ -1290,7 +1290,7 @@ export function LandingPage({
               <p className="lp-body">
                 Every line is tagged with who said it and folded into a single
                 turn. Anything sent while the agent is working queues up and
-                joins the next one — no turn is split down the middle, and
+                joins the next one. No turn is split down the middle, and
                 nothing anyone says is quietly discarded.
               </p>
             </Reveal>
@@ -1308,7 +1308,7 @@ export function LandingPage({
                 When the agent reaches for a file or the shared document, the
                 call stops and becomes something the room can see and vote on.
                 Rooms that would rather move fast can set auto-accept and let
-                writes through — but that is a decision the room makes out loud,
+                writes through. That is a decision the room makes out loud,
                 not a default it discovers afterwards.
               </p>
               <p className="lp-note">Cast a vote below. Yours decides it.</p>
@@ -1367,7 +1367,7 @@ export function LandingPage({
               <p className="lp-body">
                 A room can work against a folder on one member's machine,
                 relayed live to everyone else, or against a GitHub repository
-                through a connected app — branches, contents, pull requests. The
+                through a connected app with branches, contents, and pull requests. The
                 voting rule doesn't change with the provider. The built-in code
                 workspace lets the room browse and edit both public and private
                 repositories without leaving the conversation.
@@ -1450,7 +1450,7 @@ export function LandingPage({
               </p>
               <WaitlistForm />
               <p className="lp-note">
-                Rooms are private — only the people you send the link to can get
+                Rooms are private. Only the people you send the link to can get
                 in. A room nobody is using hibernates until someone comes back.
               </p>
             </div>
@@ -1458,7 +1458,7 @@ export function LandingPage({
           <div className="lp-inner lp-close">
             <h2 className="lp-h2 lp-close-h">Open a room. Send one link.</h2>
             <p className="lp-lead">
-              Rooms are private — only the people you send the link to can get
+              Rooms are private. Only the people you send the link to can get
               in. A room nobody is using hibernates until someone comes back.
             </p>
 
@@ -1503,7 +1503,7 @@ export function LandingPage({
             <p className="lp-note">
               {needsSignIn
                 ? "We only read your name and avatar. Nothing is posted on your behalf."
-                : "Your name is how the room tags what you say — every message is attributed, so everyone can see who asked for what."}
+                : "Your name is how the room tags what you say. Every message is attributed, so everyone can see who asked for what."}
             </p>
           </div>
           )}

@@ -6,7 +6,7 @@
  * dark stage can never leak into the app shell, which is a different mode with
  * a different density. The tokens below are derived from the app's own system
  * (styles.css): the same cool surfaces, the same one accent, the same flat
- * border-plus-tint construction — pushed up to display scale, and given a deep
+ * border-plus-tint construction, pushed up to display scale, and given a deep
  * slate "stage" for the acts that need to go quiet and large.
  */
 
@@ -38,7 +38,7 @@ body:has(.lp),
   --lp-stage-ok: #6bc48c;
   --lp-stage-bad: #ff8d85;
   /* The proposed-change diff keeps its own red/green pair, distinct from
-     ok/bad, exactly as the app's system requires — but it always sits on the
+     ok/bad, exactly as the app's system requires, but it always sits on the
      stage, so it takes the dark values in both themes rather than inverting. */
   --lp-diff-old: #ff766d;
   --lp-diff-old-ink: #ffb6b0;
@@ -51,7 +51,7 @@ body:has(.lp),
 
   /* This surface's type ramp. The app's ramp tops out at a 15px working
      body, which is right at a desk and far too quiet for a page someone is
-     deciding from — so the landing declares its own steps once, here, rather
+     deciding from. The landing declares its own steps once, here, rather
      than scattering literals through the file. */
   --lp-display: clamp(2.55rem, 6.6vw, 5rem);
   --lp-h2: clamp(1.85rem, 3.6vw, 2.85rem);
@@ -579,7 +579,7 @@ html:has(.lp) {
 /* --------------------------------------------------------------- panels */
 
 /* Demo chrome. Same construction rule as the app: border plus tint, no
-   ambient shadow — these panels sit in the page, they don't float over it. */
+   ambient shadow. These panels sit in the page, they don't float over it. */
 .lp-panel {
   position: relative;
   border: 1px solid var(--line);
@@ -736,7 +736,7 @@ html:has(.lp) {
   /* Stacked, the three lines already sit directly above the turn they became;
      a rotated connector would only overlap them. The divider carries it. */
   .lp-merge-join { display: none; }
-  /* Side by side, the emptied column is the point — the lines left. Stacked,
+   /* Side by side, the emptied column is the point, the lines left. Stacked,
      it is 200px of nothing above the answer, so the row closes instead. */
   .lp-typers {
     /* Headroom, not a measurement: the three lines run ~250px, and the ceiling
@@ -1390,7 +1390,7 @@ html:has(.lp) {
 
 /* --------------------------------------------------------------- reveal */
 
-/* One reveal grammar, used once per region — the chapters differ by what
+/* One reveal grammar, used once per region. The chapters differ by what
    their demo does, not by a second entrance effect. */
 .lp-reveal {
   opacity: 0;
