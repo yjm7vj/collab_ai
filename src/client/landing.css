@@ -1575,6 +1575,12 @@ html:has(.lp) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
+.lp-mcp-box {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-xl);
+  background: color-mix(in srgb, var(--panel) 72%, var(--bg));
+}
 
 /* The room's workflow editor at page scale. It lives only on a stage act, so
    it speaks the stage vocabulary throughout; on a pale ground its ink would be
@@ -1995,6 +2001,11 @@ html:has(.lp) {
 }
 
 .lp-workflow-legend {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 20px;
@@ -2011,10 +2022,6 @@ html:has(.lp) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-.lp-workflow-legend-item em {
-  font-style: normal;
-  color: var(--lp-stage-dim);
 }
 .lp-workflow-swatch {
   width: 18px;

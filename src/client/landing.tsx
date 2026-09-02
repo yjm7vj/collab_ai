@@ -1125,7 +1125,7 @@ const WF_KINDS = [
   { kind: "delegates", label: "delegates to" },
   { kind: "reviews", label: "is reviewed by" },
   { kind: "handoff", label: "hands off to" },
-  { kind: "custom", label: "relates to", prose: true },
+  { kind: "custom", label: "relates to" },
 ];
 
 const WF_EDGES = [
@@ -1152,7 +1152,7 @@ function ChapterWorkflowBuilder() {
   const t = useTimeline(seen, WF_END, reduced, run);
 
   const [cards, setCards] = useState(WORKFLOW_CARDS);
-  const [selected, setSelected] = useState("research");
+  const [selected, setSelected] = useState("lead");
   const [typedPrompt, setTypedPrompt] = useState("");
   // Once the visitor takes the field, the script stops driving it.
   const [manual, setManual] = useState(false);
@@ -1216,7 +1216,7 @@ function ChapterWorkflowBuilder() {
 
   const replay = () => {
     setCards(WORKFLOW_CARDS);
-    setSelected("research");
+    setSelected("lead");
     setTypedPrompt("");
     setManual(false);
     setSentByHand(false);
@@ -1417,6 +1417,14 @@ function ChapterWorkflowBuilder() {
               )}
             </button>
           ))}
+          <div className="lp-workflow-legend" aria-label="Workflow link colors">
+            {WF_KINDS.map((k) => (
+              <span className="lp-workflow-legend-item" key={k.kind}>
+                <span className={`lp-workflow-swatch lp-wire-${k.kind}`} />
+                {k.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1449,19 +1457,6 @@ function ChapterWorkflowBuilder() {
             </ul>
           )}
         </div>
-      </div>
-
-      <div className="lp-workflow-legend">
-        {WF_KINDS.map((k) => (
-          <span className="lp-workflow-legend-item" key={k.kind}>
-            <span className={`lp-workflow-swatch lp-wire-${k.kind}`} />
-            {k.label}
-            {k.prose && <em>prompt only</em>}
-          </span>
-        ))}
-        <span className="lp-workflow-drag-hint">
-          Drag a card, or move it with the arrow keys
-        </span>
       </div>
 
       <p className="lp-note">
@@ -1867,6 +1862,28 @@ export function LandingPage({
           </div>
         </section>
 
+        <section className="lp-act lp-act--tint lp-act--mcp">
+          <div className="lp-inner lp-chapter">
+            <Reveal className="lp-chapter-head">
+              <span className="lp-feature-kicker">MCP servers</span>
+              <h2 className="lp-h2">Give workflows the tools they need.</h2>
+              <p className="lp-body">
+                MCP servers stay in their own section so the workflow stays easy
+                to read. Pick an approved server from the catalogue, grant it to
+                an agent, and decide whether it uses a shared credential or each
+                person's own. MCP calls still go through the room's vote.
+              </p>
+            </Reveal>
+            <Reveal delay={1}>
+              <div className="lp-feature-grid lp-mcp-box">
+                <article className="lp-feature-card"><h3>MCP catalogue</h3><p>Browse approved servers such as Linear, Stripe, Sentry, and Cloudflare without memorizing connection URLs.</p></article>
+                <article className="lp-feature-card"><h3>Scoped grants</h3><p>Grant a server to a specific agent and keep access limited to the user and room that approved it.</p></article>
+                <article className="lp-feature-card"><h3>Visible and reviewable</h3><p>Tool calls, approvals, and outcomes remain in the room history, with access that can be taken back.</p></article>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
         <section className="lp-act lp-act--tint">
           <div className="lp-inner lp-chapter lp-chapter--split">
             <Reveal className="lp-chapter-head">
@@ -1902,28 +1919,6 @@ export function LandingPage({
                 <div><span className="lp-activity-avatar">M</span><strong>Mia</strong><span>opened</span><code>src/server/room.ts</code></div>
                 <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 148</span><code>src/client/RoomView.tsx</code></div>
                 <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 code passages</span></div>
-              </div>
-            </Reveal>
-          </div>
-        </section>
-
-        <section className="lp-act lp-act--tint">
-          <div className="lp-inner lp-chapter">
-            <Reveal className="lp-chapter-head">
-              <h2 className="lp-h2">More capability, with clear boundaries.</h2>
-              <p className="lp-body">
-                Pick a server from the catalogue, hand it to one agent, and
-                decide whether it runs on the room&rsquo;s credential or on each
-                person&rsquo;s own. Nothing about that loosens the gate: the
-                room cannot tell a read from a write on somebody else&rsquo;s
-                server, so an MCP call is voted on like a file write.
-              </p>
-            </Reveal>
-            <Reveal delay={1}>
-              <div className="lp-feature-grid">
-                <article className="lp-feature-card"><h3>A catalogue, not a URL you have to know</h3><p>Linear, Stripe, Sentry and Cloudflare&rsquo;s own servers, each listed with the credential it actually takes. A server this app cannot reach yet says so instead of failing quietly.</p></article>
-                <article className="lp-feature-card"><h3>Shared credential, or your own</h3><p>A server can run on one token for the whole room, or on a token per person so the agent acts as whoever asked. The token never leaves the room&rsquo;s storage.</p></article>
-                <article className="lp-feature-card"><h3>Standing approval that ends by itself</h3><p>Approving and asking to stop being asked gives the agent fifteen minutes and ten uses. The room can see it in the header, and anyone can take it back.</p></article>
               </div>
             </Reveal>
           </div>
