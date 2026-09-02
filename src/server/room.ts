@@ -3563,7 +3563,7 @@ export class Room extends Agent<Env, RoomState> {
 
         // Drop any authority that lapsed since the last round, so a grant is
         // never spent past its window just because nothing refreshed the view.
-        if (this.state.grants.some((g) => !grantIsLive(g, Date.now()))) this.#syncGrants();
+        if ((this.state.grants ?? []).some((g) => !grantIsLive(g, Date.now()))) this.#syncGrants();
 
         const graph = this.#activeGraph();
         // The lead's own servers, resolved as whoever's turn this is: a
