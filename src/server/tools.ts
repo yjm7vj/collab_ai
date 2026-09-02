@@ -480,6 +480,26 @@ export function parseAskRoomOptions(input: any): AskRoomOption[] | null {
   return options;
 }
 
+/**
+ * What an MCP call will do, for the card the room votes on.
+ *
+ * The arguments are shown, not just the tool name: the MCP spec asks clients to
+ * "show tool inputs to the user before calling the server, to avoid malicious
+ * or accidental data exfiltration", and a vote on a call whose arguments nobody
+ * saw is not really a safeguard.
+ */
+export function summarizeMcpCall(serverName: string, toolName: string, input: unknown): string {
+  const tool = toolName.replace(/^mcp__[^_]*(?:_[^_]+)*?__/, "") || toolName;
+  let args = "";
+  try {
+    const json = JSON.stringify(input ?? {});
+    args = json === "{}" ? "" : ` with ${preview(json, 160)}`;
+  } catch {
+    args = " with arguments that could not be displayed";
+  }
+  return `Call ${tool} on ${serverName}${args}`;
+}
+
 /** One-line description of what a gated call will do, shown on the vote card. */
 export function summarize(name: string, input: any): string {
   switch (name) {

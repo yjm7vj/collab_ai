@@ -48,6 +48,7 @@ import {
   canSeeFileContents,
   describePolicy,
   isFileContentTool,
+  resolveTools,
   isVoter,
   outranks,
   sanitizeAccessPolicy,
@@ -96,10 +97,20 @@ import {
   type WorkerTask,
 } from "./model";
 import {
+  callTool,
+  isMcpToolName,
+  listTools,
+  mcpToolName,
+  parseMcpToolName,
+  slug,
+  type McpTool,
+} from "./mcp";
+import {
   execute,
   gatedFor,
   parseAskRoomOptions,
   summarize as summarizeCall,
+  summarizeMcpCall,
   toolsForRoom,
   workerToolsFor,
   workspaceGrantsFileTools,
@@ -286,6 +297,14 @@ const GITHUB_SIGNED_OUT_KEY = "github:signed-out";
  * mistaken for the shared one.
  */
 export const SHARED_MCP_UID = "*";
+
+/**
+ * How long a server's tool list is trusted before it is fetched again.
+ *
+ * Long enough that a turn doesn't pay for discovery, short enough that a server
+ * that gains a tool is usable the same afternoon.
+ */
+const MCP_TOOL_CACHE_MS = 10 * 60 * 1000;
 
 export class Room extends Agent<Env, RoomState> {
   initialState: RoomState = INITIAL_ROOM_STATE;
@@ -537,6 +556,55 @@ export class Room extends Agent<Env, RoomState> {
       });
     }
     return { servers, missing };
+  }
+
+  /**
+   * The tool definitions this turn's MCP servers offer, named for the model.
+   *
+   * Asking every server for its tool list before every model call would be slow
+   * and rude, so a list is cached per server URL and re-fetched when it ages
+   * out. A server that cannot be reached contributes nothing and says so in the
+   * transcript once, rather than failing silently or failing the turn.
+   */
+  async #mcpToolsFor(servers: WorkerMcpServer[]): Promise<unknown[]> {
+    const out: unknown[] = [];
+
+    for (const server of servers) {
+      const cacheKey = `mcp:tools:${slug(server.name)}`;
+      const cached = this.#kvGet<{ at: number; tools: McpTool[] } | null>(cacheKey, null);
+      let tools = cached && Date.now() - cached.at < MCP_TOOL_CACHE_MS ? cached.tools : null;
+
+      if (!tools) {
+        const listed = await listTools(server);
+        if (!listed.ok) {
+          this.#system(`Couldn't read tools from ${server.name}: ${listed.error}`);
+          continue;
+        }
+        tools = listed.tools;
+        this.#kvSet(cacheKey, { at: Date.now(), tools });
+      }
+
+      for (const t of tools) {
+        out.push({
+          name: mcpToolName(server.name, t.name),
+          // The description is the server's, and it is what the model reads to
+          // decide whether to call this. Named as third-party text so a
+          // description that tries to give the agent new instructions reads as
+          // what it is.
+          description: `[via ${server.name}, an external MCP server] ${t.description}`,
+          input_schema: t.inputSchema,
+        });
+      }
+    }
+
+    return out;
+  }
+
+  /** The server a prefixed tool name belongs to, or null if it's gone. */
+  #mcpTargetFor(name: string, servers: WorkerMcpServer[]): WorkerMcpServer | null {
+    const parsed = parseMcpToolName(name);
+    if (!parsed) return null;
+    return servers.find((s) => slug(s.name) === parsed.server) ?? null;
   }
 
   #convo(): MessageParam[] {
@@ -2921,6 +2989,15 @@ export class Room extends Agent<Env, RoomState> {
           const asUid = this.#turn()?.authorUid ?? "";
           const mcp = node && graph ? this.#mcpServersFor(node, asUid) : null;
 
+          // A worker runs inside one tool call with nowhere to park, so it
+          // cannot put anything to a vote. Under "ask" — the default — that
+          // means it gets no MCP tools at all rather than unsupervised ones;
+          // only a room that has explicitly allowed MCP hands them over.
+          const workerMcp =
+            resolveTools(this.#policy()).mcp === "allow" ? (mcp?.servers ?? []) : [];
+          const workerMcpTools =
+            workerMcp.length > 0 ? await this.#mcpToolsFor(workerMcp) : [];
+
           const r = await runWorker(
             this.#config(),
             settings,
@@ -2931,7 +3008,8 @@ export class Room extends Agent<Env, RoomState> {
               ? {
                   model: node.model,
                   system: workerSystemFor(graph, node),
-                  mcpServers: mcp?.servers ?? [],
+                  mcpServers: workerMcp,
+                  mcpTools: workerMcpTools,
                 }
               : null,
           );
@@ -3129,22 +3207,33 @@ export class Room extends Agent<Env, RoomState> {
               } yet.`,
           );
         }
+        // MCP tools are discovered from the servers themselves and offered as
+        // ordinary tools, so a call comes back to us and can be put to the room
+        // — see #mcpToolsFor. A room whose policy denies `mcp` is never offered
+        // them at all, rather than being offered tools it would always refuse.
+        const mcpDecision = resolveTools(this.#policy()).mcp;
+        const mcpServers = mcpDecision === "deny" ? [] : (leadMcp?.servers ?? []);
+        const mcpTools = mcpServers.length > 0 ? await this.#mcpToolsFor(mcpServers) : [];
+
         const maxOutputTokens = stored.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
         const { message, usage } = await runModel(
           this.#config(),
           this.#settings(),
           graph,
           conversation.messages,
-          toolsForRoom(
-            this.#policy(),
-            this.#settings().workflow,
-            // Connected, not online: a relay that blinks must not change the
-            // tool list, or the whole cached prefix is rebuilt with it. An
-            // offline workspace answers through #fs instead.
-            workspaceGrantsFileTools(this.state.workspace),
-            graph ? leadOf(graph).model : this.#settings().agentModel,
-            graph ?? undefined,
-          ),
+          [
+            ...toolsForRoom(
+              this.#policy(),
+              this.#settings().workflow,
+              // Connected, not online: a relay that blinks must not change the
+              // tool list, or the whole cached prefix is rebuilt with it. An
+              // offline workspace answers through #fs instead.
+              workspaceGrantsFileTools(this.state.workspace),
+              graph ? leadOf(graph).model : this.#settings().agentModel,
+              graph ?? undefined,
+            ),
+            ...mcpTools,
+          ],
           {
             onBlockStart: (index, type) => {
               if (type !== "text" && type !== "thinking") return;
@@ -3163,7 +3252,6 @@ export class Room extends Agent<Env, RoomState> {
             },
           },
           maxOutputTokens,
-          leadMcp?.servers,
         );
 
         this.#recordUsage(usage, true);
@@ -3295,6 +3383,45 @@ export class Room extends Agent<Env, RoomState> {
                 threshold: approvalThreshold(this.#policy().approval, this.#eligible(false)),
                 options,
               });
+            }
+          } else if (isMcpToolName(call.name)) {
+            // A call to somebody else's server. Under "ask" it goes to the room
+            // like any other gated action — which is the whole reason this app
+            // talks to MCP servers itself instead of letting the API do it.
+            // Under "allow" it runs now; "deny" never offered the tool at all.
+            const target = this.#mcpTargetFor(call.name, mcpServers);
+            if (!target) {
+              const text = "That MCP server is no longer connected to this room.";
+              results.push({ type: "tool_result", tool_use_id: call.id, content: text, is_error: true });
+              const block = entry.blocks.at(-1)!;
+              if (block.type === "tool") {
+                block.status = "error";
+                block.result = text;
+              }
+            } else if (mcpDecision === "ask") {
+              gated.push({
+                toolUseId: call.id,
+                name: call.name,
+                input: call.input,
+                summary: summarizeMcpCall(target.name, call.name, call.input),
+                votes: {},
+                threshold: approvalThreshold(this.#policy().approval, this.#eligible(false)),
+              });
+            } else {
+              const parsed = parseMcpToolName(call.name);
+              const res = await callTool(target, parsed?.tool ?? call.name, call.input);
+              const text = res.ok ? res.text : res.error;
+              results.push({
+                type: "tool_result",
+                tool_use_id: call.id,
+                content: text,
+                is_error: !res.ok,
+              });
+              const block = entry.blocks.at(-1)!;
+              if (block.type === "tool") {
+                block.status = res.ok ? "ok" : "error";
+                block.result = text;
+              }
             }
           } else if (gatedNames.has(call.name)) {
             const sensitive = isFileContentTool(call.name);
@@ -3523,6 +3650,22 @@ export class Room extends Agent<Env, RoomState> {
         let outcome: ToolOutcome;
         if (v.kind === "choice") {
           outcome = { ok: true, text: `The room chose: "${v.option.label}"` };
+        } else if (v.approved && isMcpToolName(p.name)) {
+          // Approved, so make the call the room just agreed to. The servers are
+          // resolved again here rather than carried on the pending record: this
+          // may be minutes later, and a token can have been changed or cleared
+          // in between — the credential in force now is the right one.
+          const graph = this.#activeGraph();
+          const asUid = turn.authorUid ?? "";
+          const servers = graph ? this.#mcpServersFor(leadOf(graph), asUid).servers : [];
+          const target = this.#mcpTargetFor(p.name, servers);
+          const parsed = parseMcpToolName(p.name);
+          if (!target || !parsed) {
+            outcome = { ok: false, text: "That MCP server is no longer connected to this room." };
+          } else {
+            const res = await callTool(target, parsed.tool, p.input);
+            outcome = res.ok ? { ok: true, text: res.text } : { ok: false, text: res.error };
+          }
         } else if (!v.approved) {
           outcome = {
             ok: false,

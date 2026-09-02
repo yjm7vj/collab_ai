@@ -1173,8 +1173,9 @@ function NodeInspector({
           </div>
         )}
         <span className="field-note">
-          Remote MCP servers only — this agent calls their tools directly. Tools from a
-          connected server run without a room vote, so only add servers you trust.
+          Remote MCP servers only. The room votes on each call before it reaches the server,
+          and sees the arguments — unless this room's permissions are set to allow MCP
+          without asking.
         </span>
       </div>
 

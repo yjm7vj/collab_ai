@@ -235,13 +235,16 @@ check("gatedFor under auto does not include edit_file", !gatedAuto.has("edit_fil
 
 const gatedAsk = gatedFor({ ...basePolicy, mode: "ask" });
 check(
-  "gatedFor under ask is exactly write_doc, edit_doc, write_file, edit_file, delete_file",
-  gatedAsk.size === 5 &&
+  "gatedFor under ask is exactly write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
+  gatedAsk.size === 6 &&
     gatedAsk.has("write_doc") &&
     gatedAsk.has("edit_doc") &&
     gatedAsk.has("write_file") &&
     gatedAsk.has("edit_file") &&
-    gatedAsk.has("delete_file"),
+    gatedAsk.has("delete_file") &&
+    // A call to somebody else's server is gated for the same reason a write
+    // is: the room cannot see what it does, so it decides first.
+    gatedAsk.has("mcp"),
   [...gatedAsk],
 );
 

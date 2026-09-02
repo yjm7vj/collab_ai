@@ -71,6 +71,7 @@ const TOOL_LABELS: Record<string, string> = {
   edit_file: "Edit File",
   delete_file: "Delete File",
   ask_room: "Ask The Room",
+  mcp: "MCP Server Tools",
 };
 
 function toolLabel(name: string): string {

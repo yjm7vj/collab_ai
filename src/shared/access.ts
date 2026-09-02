@@ -100,12 +100,14 @@ export type ToolDecision = "allow" | "ask" | "deny";
 export type ToolName =
   | "read_doc" | "write_doc" | "edit_doc" | "delegate" | "web_search" | "web_fetch"
   | "list_files" | "read_file" | "search_files"
-  | "write_file" | "edit_file" | "delete_file";
+  | "write_file" | "edit_file" | "delete_file"
+  | "mcp";
 
 export const TOOL_NAMES: readonly ToolName[] = [
   "read_doc", "write_doc", "edit_doc", "delegate", "web_search", "web_fetch",
   "list_files", "read_file", "search_files",
   "write_file", "edit_file", "delete_file",
+  "mcp",
 ] as const;
 
 /**
@@ -135,6 +137,7 @@ const ALL_ALLOW: Record<ToolName, ToolDecision> = {
   delegate: "allow", web_search: "allow", web_fetch: "allow",
   list_files: "allow", read_file: "allow", search_files: "allow",
   write_file: "allow", edit_file: "allow", delete_file: "allow",
+  mcp: "allow",
 };
 
 export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<ToolName, ToolDecision>> = {
@@ -144,17 +147,28 @@ export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<Tool
   // reading is exactly what read-only mode is for, so all three stay "allow".
   // The workspace write tools are withheld the same way — read-only means
   // those tools are not offered at all, which is the entire point of the mode.
+  // `mcp` is denied outright here, unlike the file reads above, because an MCP
+  // server's tools are arbitrary and this room has no way to tell a read from a
+  // write among them: the names and descriptions come from the server. A mode
+  // whose promise is "nothing changes" cannot keep that promise while calling
+  // tools it cannot classify.
   read_only: {
     ...ALL_ALLOW,
     write_doc: "deny", edit_doc: "deny",
     write_file: "deny", edit_file: "deny", delete_file: "deny",
+    mcp: "deny",
   },
   // A vote per file read would be unusable — the path policy is the real
   // control for reads, not the vote — so the file tools stay "allow" here too.
+  // `mcp` is gated here for the same reason the writes are: a tool on somebody
+  // else's server can do anything, and this is the mode where the room decides
+  // before that happens. It is also the default mode, so an MCP server wired up
+  // without anyone thinking about permissions is supervised by default.
   ask: {
     ...ALL_ALLOW,
     write_doc: "ask", edit_doc: "ask",
     write_file: "ask", edit_file: "ask", delete_file: "ask",
+    mcp: "ask",
   },
   // Auto-accept skips the vote for routine writes so the agent doesn't stall
   // out the flow, but deleting someone's file is not symmetric with editing
