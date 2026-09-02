@@ -1,14 +1,25 @@
 /**
  * This Worker is the trust boundary for the whole app: it decides who may open
  * a socket to a room, before the socket ever reaches the Durable Object. The
- * Durable Object in turn trusts the `x-room-uid` / `x-room-role` headers this
- * Worker sets on the upgrade request, because nothing else can reach it —
- * Durable Objects are not independently addressable from outside the Worker.
+ * Durable Object in turn trusts the `x-room-uid` header this Worker sets on
+ * the upgrade request, because nothing else can reach it — Durable Objects are
+ * not independently addressable from outside the Worker.
+ *
+ * That header says who, and nothing more. What they may do is read from the
+ * room's member table at connect time, so a role change takes effect on the
+ * next socket rather than whenever the credential that asserted it expires.
  */
 
 import { routeAgentRequest, getAgentByName } from "agents";
 
 import { mintToken, newId, verifyToken } from "./auth";
+import {
+  clearedSessionCookie,
+  mintSession,
+  sameOrigin,
+  sessionCookie,
+  sessionUid,
+} from "./session";
 import {
   authorizeUrl,
   deriveUid,
@@ -251,6 +262,60 @@ export default {
           "it, nothing can verify who is allowed into a room.",
         { status: 500 },
       );
+    }
+
+    /**
+     * Establish or end the session cookie.
+     *
+     * Called once when a room is opened, not once per connect: the cookie is
+     * then attached to every upgrade and every reconnect for free. That is the
+     * whole reason for preferring it to a per-connect ticket — reconnects
+     * arrive in storms, and this path is not on them.
+     */
+    if (url.pathname === "/api/session") {
+      if (request.method === "DELETE") {
+        return new Response(null, {
+          status: 204,
+          headers: { "set-cookie": clearedSessionCookie() },
+        });
+      }
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+
+      let body: { identity?: unknown; token?: unknown };
+      try {
+        body = (await request.json()) as { identity?: unknown; token?: unknown };
+      } catch {
+        return json({ error: "bad_request" }, 400);
+      }
+
+      // A signed identity is the stronger of the two and is tried first.
+      const identity = await identityFrom(env, body.identity);
+      if (identity) {
+        const session = await mintSession(env.ROOM_SECRET, identity);
+        return new Response(JSON.stringify({ uid: identity.uid }), {
+          headers: { "content-type": "application/json", "set-cookie": sessionCookie(session) },
+        });
+      }
+
+      // Otherwise a room token, which is what a tab has on a deployment with
+      // sign-in switched off. It proves the same uid, so exchanging it grants
+      // nothing new — but the session is capped at the token's own expiry so
+      // the exchange cannot extend it.
+      if (typeof body.token === "string") {
+        const claims = await verifyToken(env.ROOM_SECRET, body.token);
+        if (claims && ROOM_ID_RE.test(claims.rid) && UID_RE.test(claims.uid)) {
+          const session = await mintSession(
+            env.ROOM_SECRET,
+            { uid: claims.uid, name: "", avatar: "" },
+            claims.exp,
+          );
+          return new Response(JSON.stringify({ uid: claims.uid }), {
+            headers: { "content-type": "application/json", "set-cookie": sessionCookie(session) },
+          });
+        }
+      }
+
+      return json({ error: "unauthorized" }, 401);
     }
 
     if (url.pathname === "/api/rooms") {
@@ -817,8 +882,23 @@ export default {
 
       // The token rides in the URL fragment, not a query parameter: a
       // fragment is never sent to a server, so it does not land in the
-      // Worker's logs or any intermediary's.
-      return Response.redirect(`${url.origin}${returnTo}#auth=${token}`, 302);
+      // Worker's logs or any intermediary's. It stays in localStorage and
+      // drives the signed-in UI; the cookie set alongside it is what actually
+      // opens sockets, and unlike the token it is not readable by script.
+      const session = await mintSession(env.ROOM_SECRET, {
+        uid,
+        name: fetched.profile.name,
+        avatar: safeAvatarUrl(provider, fetched.profile.avatar),
+      });
+      // Response.redirect cannot carry extra headers, so the redirect is built
+      // by hand to make room for Set-Cookie.
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: `${url.origin}${returnTo}#auth=${token}`,
+          "set-cookie": sessionCookie(session),
+        },
+      });
     }
 
     if (url.pathname === "/api/github/callback") {
@@ -867,22 +947,49 @@ export default {
       const segments = reqUrl.pathname.split("/").filter(Boolean);
       const roomId = segments.at(-1) ?? "";
 
-      const token = reqUrl.searchParams.get("tk");
-      if (!token) return new Response("unauthorized", { status: 401 });
+      // The session cookie is the credential. It identifies the person, not
+      // the room: which rooms they may open is decided by the room's own
+      // member table, which the Durable Object consults on every connect and
+      // which is the only thing that is current.
+      let uid = await sessionUid(req, env.ROOM_SECRET);
 
-      const claims = await verifyToken(env.ROOM_SECRET, token);
-      if (!claims) return new Response("unauthorized", { status: 401 });
+      // Checked here rather than at the top of this function, because it is
+      // the cookie that needs it. A browser attaches the cookie to any upgrade
+      // aimed at this origin, including one opened by a page on another site,
+      // and a WebSocket handshake is not covered by CORS — so without this a
+      // hostile page could open an authenticated socket to any room its
+      // visitor belongs to. A `tk` request cannot be forged that way (the page
+      // would need the token itself), so the fallback below keeps its old
+      // behaviour and does not require an Origin. See session.ts.
+      if (uid && !sameOrigin(req, reqUrl.origin)) {
+        return new Response("forbidden", { status: 403 });
+      }
 
-      // A token minted for one room must never open a socket to another.
-      if (claims.rid !== roomId) return new Response("unauthorized", { status: 401 });
+      if (!uid) {
+        // ROLLOUT FALLBACK. A tab loaded before the cookie existed still has a
+        // room token in localStorage and no session. Remove this once those
+        // have aged out — while it stands, the credential is still in the URL
+        // and still in the request logs, which is the thing the cookie fixes.
+        const token = reqUrl.searchParams.get("tk");
+        if (!token) return new Response("unauthorized", { status: 401 });
+
+        const claims = await verifyToken(env.ROOM_SECRET, token);
+        if (!claims) return new Response("unauthorized", { status: 401 });
+
+        // A token minted for one room must never open a socket to another.
+        // The cookie path needs no equivalent: it grants nothing by itself.
+        if (claims.rid !== roomId) return new Response("unauthorized", { status: 401 });
+        uid = claims.uid;
+      }
 
       const headers = new Headers(req.headers);
       // `set` overwrites any value already on the request, which is what stops
       // a client from supplying its own x-room-uid on the upgrade request.
-      headers.set("x-room-uid", claims.uid);
-      // Same reasoning as x-room-uid: `set` overwrites, so a forged role header
-      // on the incoming request can't survive to reach the Durable Object.
-      headers.set("x-room-role", claims.role);
+      headers.set("x-room-uid", uid);
+      // No role header. Role is read from the member record inside the room —
+      // a credential that carried one would still be asserting the role held
+      // when it was minted, days after a demotion.
+      headers.delete("x-room-role");
       // The Durable Object needs the deployment's own origin to build an
       // OAuth redirect URI for repository connection. It must come from the
       // server, like the other bound headers above — `headers.set`

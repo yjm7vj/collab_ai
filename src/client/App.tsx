@@ -662,6 +662,53 @@ export function App() {
     [routeRoomId, tokenEpoch],
   );
 
+  /**
+   * Establish the session cookie before the room's socket opens.
+   *
+   * Once per room open, never per reconnect: the browser then attaches the
+   * cookie to every upgrade on its own, including the reconnect storms after
+   * a deploy. `null` means the attempt is still in flight — RoomView is held
+   * back until it settles, because the socket's credential depends on the
+   * answer and switching it afterwards would mean reconnecting.
+   *
+   * `false` is not a failure the person needs to see. It means this tab falls
+   * back to the room token in the URL, exactly as it did before the cookie
+   * existed, and the Worker still accepts that.
+   */
+  const [sessionReady, setSessionReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!token) {
+      setSessionReady(null);
+      return;
+    }
+    let cancelled = false;
+    setSessionReady(null);
+    void (async () => {
+      let ok = false;
+      try {
+        const res = await fetch("/api/session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          // RoomView is held back until this settles, so a request that never
+          // does would leave the room blank rather than merely un-cookied.
+          // Giving up falls back to the room token, which still works.
+          signal: AbortSignal.timeout(5000),
+          // Either credential establishes the same session. The identity is
+          // preferred server-side; the room token is what a tab has on a
+          // deployment with sign-in switched off.
+          body: JSON.stringify({ identity: storedIdentity() ?? undefined, token }),
+        });
+        ok = res.ok;
+      } catch {
+        ok = false;
+      }
+      if (!cancelled) setSessionReady(ok);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   useEffect(() => {
     setProblem(null);
   }, [route]);
@@ -867,6 +914,10 @@ export function App() {
   const signOut = useCallback(() => {
     localStorage.removeItem(IDENTITY_KEY);
     setIdentity(null);
+    // The cookie is HttpOnly, so only the server can clear it. Signing out
+    // without this would leave a credential behind that still opens sockets.
+    void fetch("/api/session", { method: "DELETE" }).catch(() => {});
+    setSessionReady(null);
   }, []);
 
   const updateDisplayName = useCallback((displayName: string) => {
@@ -1216,6 +1267,10 @@ export function App() {
   }
 
   if (token) {
+    // Still settling which credential the socket will use. One paint, and
+    // opening the socket twice is worse than waiting for it.
+    if (sessionReady === null) return null;
+
     const project = projects.find((candidate) =>
       candidate.rooms.some((room) => room.roomId === route.roomId));
     const room = (
@@ -1227,6 +1282,7 @@ export function App() {
         key={route.roomId}
         roomId={route.roomId}
         token={token}
+        sessionCookie={sessionReady}
         displayName={name}
         onDisplayNameChange={updateDisplayName}
         onSignOut={identity ? signOut : undefined}
