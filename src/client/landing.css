@@ -1277,6 +1277,52 @@ html:has(.lp) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
+
+.lp-workflow-builder {
+  overflow: hidden;
+  border: 1px solid var(--lp-stage-line-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--lp-stage-fill) 78%, transparent);
+}
+.lp-workflow-builder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--lp-stage-line-soft);
+}
+.lp-workflow-builder-head > div { display: grid; gap: 7px; }
+.lp-workflow-builder-head strong { color: var(--lp-stage-ink); font-size: 15px; }
+.lp-workflow-drag-hint { color: var(--lp-stage-faint); font-size: 12px; }
+.lp-workflow-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 360px; }
+.lp-workflow-chat { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-right: 1px solid var(--lp-stage-line-soft); }
+.lp-workflow-chat h3 { margin: 0; color: var(--lp-stage-ink); font-size: 17px; line-height: 1.15; }
+.lp-workflow-chat p { margin: 0; color: var(--lp-stage-faint); font-size: 12px; line-height: 1.45; }
+.lp-workflow-bubble, .lp-workflow-result { padding: 11px 12px; border: 1px solid var(--lp-stage-line-soft); border-radius: 10px; color: var(--lp-stage-ink); font-size: 12px; line-height: 1.45; }
+.lp-workflow-bubble { background: var(--lp-stage-fill); }
+.lp-workflow-result { border-color: color-mix(in srgb, var(--lp-stage-ok) 45%, transparent); color: var(--lp-stage-ok); }
+.lp-workflow-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: auto; }
+.lp-workflow-form input { width: 100%; min-width: 0; height: 38px; padding-inline: 10px; border: 1px solid var(--lp-stage-line); border-radius: 8px; background: transparent; color: var(--lp-stage-ink); font: inherit; font-size: 12px; }
+.lp-workflow-form input::placeholder { color: var(--lp-stage-faint); }
+.lp-workflow-form .lp-btn { justify-content: center; min-height: 38px; padding-inline: 12px; font-size: 12px; }
+.lp-workflow-canvas { position: relative; min-height: 360px; overflow: hidden; background-color: color-mix(in srgb, var(--lp-stage) 86%, transparent); background-image: radial-gradient(var(--lp-stage-line-soft) 1px, transparent 1px); background-size: 22px 22px; }
+.lp-workflow-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.lp-workflow-lines path { fill: none; stroke: var(--lp-stage-accent); stroke-width: .45; vector-effect: non-scaling-stroke; opacity: .8; }
+.lp-workflow-card { position: absolute; z-index: 1; display: grid; gap: 6px; width: min(152px, calc(100% - 20px)); min-height: 104px; padding: 11px; border: 1px solid var(--lp-stage-line); border-radius: 11px; background: var(--lp-stage); color: var(--lp-stage-faint); text-align: left; font: inherit; font-size: 11px; line-height: 1.3; cursor: grab; touch-action: none; transition: border-color 160ms ease, box-shadow 160ms ease; }
+.lp-workflow-card:active { cursor: grabbing; }
+.lp-workflow-card[data-selected="true"] { border-color: var(--lp-stage-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--lp-stage-accent) 20%, transparent); }
+.lp-workflow-card--lead { background: color-mix(in srgb, var(--lp-stage-accent) 14%, var(--lp-stage)); }
+.lp-workflow-card-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; color: var(--lp-stage-ink); }
+.lp-workflow-card-top span { padding: 2px 6px; border-radius: 999px; background: var(--lp-stage-accent); color: #07101b; font-size: 10px; font-weight: 700; }
+.lp-workflow-card small { color: var(--lp-stage-ok); font-size: 11px; }
+.lp-workflow-link { position: absolute; z-index: 2; padding: 4px 7px; border: 1px solid var(--lp-stage-accent); border-radius: 999px; background: var(--lp-stage); color: var(--lp-stage-faint); font-size: 10px; }
+.lp-workflow-link::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: var(--lp-stage-accent); }
+.lp-workflow-link--top { left: 43%; top: 28%; }
+.lp-workflow-link--bottom { left: 43%; top: 68%; }
+.lp-workflow-canvas-foot { position: absolute; right: 14px; bottom: 13px; display: flex; align-items: center; gap: 7px; color: var(--lp-stage-faint); font-size: 11px; }
+.lp-workflow-live { width: 6px; height: 6px; border-radius: 50%; background: var(--lp-stage-ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-stage-ok) 16%, transparent); }
+.lp-workflow-builder > .lp-note { margin: 0; padding: 0 18px 14px; font-size: 11px; line-height: 1.45; }
 .lp-feature-card {
   min-height: 150px;
   padding: 20px;
@@ -1310,6 +1356,11 @@ html:has(.lp) {
 
 @media (max-width: 760px) {
   .lp-feature-grid { grid-template-columns: 1fr; }
+  .lp-workflow-layout { grid-template-columns: 1fr; }
+  .lp-workflow-chat { border-right: 0; border-bottom: 1px solid var(--lp-stage-line-soft); }
+  .lp-workflow-form { margin-top: 4px; }
+  .lp-workflow-canvas { min-height: 390px; }
+  .lp-workflow-builder-head { align-items: flex-start; flex-direction: column; gap: 8px; }
 }
 
 /* --------------------------------------------------------------- footer */

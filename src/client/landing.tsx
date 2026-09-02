@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 
@@ -894,6 +895,130 @@ function ChapterWorkspace() {
   );
 }
 
+/* ----------------------------------------- chapter 4b: workflow builder */
+
+type WorkflowCard = {
+  id: string;
+  title: string;
+  model: string;
+  brief: string;
+  x: number;
+  y: number;
+  lead?: boolean;
+};
+
+const WORKFLOW_CARDS: WorkflowCard[] = [
+  { id: "lead", title: "Lead", model: "Opus 5", brief: "Breaks the request into focused tasks.", x: 8, y: 38, lead: true },
+  { id: "research", title: "Researcher", model: "Haiku 4.5", brief: "Finds and cites the right sources.", x: 56, y: 15 },
+  { id: "critic", title: "Critic", model: "Sonnet 5", brief: "Checks the result before it returns.", x: 56, y: 60 },
+];
+
+function ChapterWorkflowBuilder() {
+  const [cards, setCards] = useState(WORKFLOW_CARDS);
+  const [selected, setSelected] = useState("lead");
+  const [prompt, setPrompt] = useState("");
+  const [toolReady, setToolReady] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
+
+  const moveCard = (event: ReactPointerEvent<HTMLButtonElement>, card: WorkflowCard) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const canvasBox = canvas.getBoundingClientRect();
+    const cardBox = event.currentTarget.getBoundingClientRect();
+    dragRef.current = {
+      id: card.id,
+      offsetX: event.clientX - cardBox.left,
+      offsetY: event.clientY - cardBox.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelected(card.id);
+    const update = (next: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!dragRef.current) return;
+      const x = ((next.clientX - canvasBox.left - dragRef.current.offsetX) / canvasBox.width) * 100;
+      const y = ((next.clientY - canvasBox.top - dragRef.current.offsetY) / canvasBox.height) * 100;
+      setCards((current) => current.map((item) => item.id === card.id
+        ? { ...item, x: Math.max(2, Math.min(72, x)), y: Math.max(4, Math.min(78, y)) }
+        : item));
+    };
+    const finish = () => {
+      dragRef.current = null;
+      window.removeEventListener("pointermove", update as unknown as EventListener);
+      window.removeEventListener("pointerup", finish);
+    };
+    window.addEventListener("pointermove", update as unknown as EventListener);
+    window.addEventListener("pointerup", finish, { once: true });
+  };
+
+  const createTool = (event: FormEvent) => {
+    event.preventDefault();
+    if (!prompt.trim()) return;
+    setCards((current) => current.some((card) => card.id === "source-checker")
+      ? current
+      : [...current, { id: "source-checker", title: "Source checker", model: "Custom tool", brief: "Flags claims without citations.", x: 56, y: 39 }]);
+    setToolReady(true);
+    setPrompt("");
+  };
+
+  return (
+    <div className="lp-workflow-builder">
+      <div className="lp-workflow-builder-head">
+        <div><span className="lp-feature-kicker">Workflow builder</span><strong>Shape the team around the task.</strong></div>
+        <span className="lp-workflow-drag-hint">Drag cards to reshape the workflow</span>
+      </div>
+      <div className="lp-workflow-layout">
+        <aside className="lp-workflow-chat">
+          <span className="lp-feature-kicker">AI workflow chat</span>
+          <h3>Create your own AI tool.</h3>
+          <p>Describe a specialist in plain language. The assistant drafts its brief and adds it to the canvas.</p>
+          <div className="lp-workflow-bubble">Add a source checker that flags claims without citations.</div>
+          {toolReady && <div className="lp-workflow-result" role="status">Source checker drafted and added to the canvas.</div>}
+          <form className="lp-workflow-form" onSubmit={createTool}>
+            <input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe a tool" aria-label="Describe a tool" />
+            <button type="submit" className="lp-btn lp-btn--primary">Create tool</button>
+          </form>
+        </aside>
+        <div className="lp-workflow-canvas" ref={canvasRef}>
+          <svg className="lp-workflow-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M29 50 C42 50 45 26 58 26" />
+            <path d="M29 50 C42 50 45 71 58 71" />
+          </svg>
+          {cards.map((card) => (
+            <button
+              type="button"
+              className={`lp-workflow-card${card.lead ? " lp-workflow-card--lead" : ""}`}
+              data-selected={selected === card.id}
+              aria-pressed={selected === card.id}
+              key={card.id}
+              style={{ left: `${card.x}%`, top: `${card.y}%` }}
+              onClick={() => setSelected(card.id)}
+              onPointerDown={(event) => moveCard(event, card)}
+              onKeyDown={(event) => {
+                const step = 3;
+                if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+                event.preventDefault();
+                setCards((current) => current.map((item) => item.id === card.id ? {
+                  ...item,
+                  x: Math.max(2, Math.min(72, item.x + (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0))),
+                  y: Math.max(4, Math.min(78, item.y + (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0))),
+                } : item));
+              }}
+            >
+              <span className="lp-workflow-card-top"><strong>{card.title}</strong><span>{card.lead ? "Lead" : "Agent"}</span></span>
+              <small>{card.model}</small>
+              <span>{card.brief}</span>
+            </button>
+          ))}
+          <span className="lp-workflow-link lp-workflow-link--top">delegates to</span>
+          <span className="lp-workflow-link lp-workflow-link--bottom">delegates to</span>
+          <div className="lp-workflow-canvas-foot"><span className="lp-workflow-live" /> Changes preview live in the room</div>
+        </div>
+      </div>
+      <p className="lp-note">Move a card with your mouse or arrow keys. Grants can give the workflow access to approved MCP tools while user-scoped permissions stay in place.</p>
+    </div>
+  );
+}
+
 /* ------------------------------------------- chapter 5: the room's settings */
 
 const ANNOUNCEMENTS = [
@@ -1229,6 +1354,9 @@ export function LandingPage({
                 <article className="lp-feature-card"><span className="lp-feature-kicker">Continue</span><h3>Durable by default</h3><p>Long-running work can pause and resume without losing the room’s context.</p></article>
               </div>
             </Reveal>
+            <Reveal delay={2}>
+              <ChapterWorkflowBuilder />
+            </Reveal>
           </div>
         </section>
 
@@ -1268,6 +1396,28 @@ export function LandingPage({
                 <div><span className="lp-activity-avatar">M</span><strong>Mia</strong><span>opened</span><code>src/server/room.ts</code></div>
                 <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 148</span><code>src/client/RoomView.tsx</code></div>
                 <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 code passages</span></div>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        <section className="lp-act lp-act--tint">
+          <div className="lp-inner lp-chapter">
+            <Reveal className="lp-chapter-head">
+              <span className="lp-eyebrow">Tools and control</span>
+              <h2 className="lp-h2">More capability, with clear boundaries.</h2>
+              <p className="lp-body">
+                Browse an MCP catalog, grant a workflow access to the tools it
+                needs, and keep every connection scoped to the user and room.
+                Security is part of the product surface, with infrastructure
+                supported by Cloudflare, Stripe, and Sentry.
+              </p>
+            </Reveal>
+            <Reveal delay={1}>
+              <div className="lp-feature-grid">
+                <article className="lp-feature-card"><span className="lp-feature-kicker">MCP catalog</span><h3>Connect the tools you already use</h3><p>See available MCP servers in one place, then choose which approved tools can continue a workflow.</p></article>
+                <article className="lp-feature-card"><span className="lp-feature-kicker">User-scoped permissions</span><h3>Grants stay intentional</h3><p>Access follows the person and the room. A workflow only receives the permissions it was given.</p></article>
+                <article className="lp-feature-card"><span className="lp-feature-kicker">Agent history</span><h3>Clearly recorded from start to finish</h3><p>Tool calls, workflow steps, approvals, and outcomes remain visible in the room history.</p></article>
               </div>
             </Reveal>
           </div>
