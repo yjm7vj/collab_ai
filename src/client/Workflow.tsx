@@ -754,7 +754,7 @@ export function WorkflowPanel({
               // unsaved draft — a server row added here has no token to set
               // until Apply gives it somewhere real to live.
               savedServerIds={
-                new Set(graph.nodes.find((n) => n.id === selNode.id)?.mcpServers.map((s) => s.id) ?? [])
+                new Set(graph.nodes.find((n) => n.id === selNode.id)?.mcpServers?.map((s) => s.id) ?? [])
               }
               mcpTokensSet={mcpTokensSet}
               onSetMcpToken={onSetMcpToken}
@@ -974,6 +974,9 @@ function NodeInspector({
   onSetMcpToken: (nodeId: string, serverId: string, token: string) => void;
 }) {
   const isLead = node.id === graph.leadId;
+  // `?? []`: a graph applied before mcpServers existed synced nodes without
+  // it — this comes straight off RoomState, not sanitizeGraph's output.
+  const mcpServers = node.mcpServers ?? [];
   // The catalogue already knows which models are fit to lead and which are fit
   // to fan out to; offering the others here would only produce a choice the
   // server rewrites on Apply.
@@ -1048,7 +1051,7 @@ function NodeInspector({
         <div className="field">
           <span className="field-label">MCP Servers</span>
           <div className="wf-mcp-list">
-            {node.mcpServers.map((s) => (
+            {mcpServers.map((s) => (
               <div className="wf-mcp-row" key={s.id}>
                 <input
                   className="wf-mcp-name"
@@ -1058,7 +1061,7 @@ function NodeInspector({
                   placeholder="Name"
                   onChange={(e) =>
                     onPatch({
-                      mcpServers: node.mcpServers.map((x) =>
+                      mcpServers: mcpServers.map((x) =>
                         x.id === s.id ? { ...x, name: e.target.value } : x,
                       ),
                     })
@@ -1072,7 +1075,7 @@ function NodeInspector({
                   placeholder="https://…"
                   onChange={(e) =>
                     onPatch({
-                      mcpServers: node.mcpServers.map((x) =>
+                      mcpServers: mcpServers.map((x) =>
                         x.id === s.id ? { ...x, url: e.target.value } : x,
                       ),
                     })
@@ -1082,7 +1085,7 @@ function NodeInspector({
                   <button
                     className="wf-danger"
                     onClick={() =>
-                      onPatch({ mcpServers: node.mcpServers.filter((x) => x.id !== s.id) })
+                      onPatch({ mcpServers: mcpServers.filter((x) => x.id !== s.id) })
                     }
                   >
                     Remove
@@ -1100,11 +1103,11 @@ function NodeInspector({
               </div>
             ))}
           </div>
-          {canEdit && node.mcpServers.length < GRAPH_LIMITS.mcpServersPerNode && (
+          {canEdit && mcpServers.length < GRAPH_LIMITS.mcpServersPerNode && (
             <button
               onClick={() =>
                 onPatch({
-                  mcpServers: [...node.mcpServers, { id: newId(), name: "", url: "" }],
+                  mcpServers: [...mcpServers, { id: newId(), name: "", url: "" }],
                 })
               }
             >

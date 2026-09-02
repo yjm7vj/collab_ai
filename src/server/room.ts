@@ -468,9 +468,12 @@ export class Room extends Agent<Env, RoomState> {
 
   /** A node's MCP servers, each resolved with its stored token (if any). */
   #mcpServersFor(node: AgentNode): WorkerMcpServer[] {
-    if (node.mcpServers.length === 0) return [];
+    // `?? []`: a graph persisted before mcpServers existed has nodes without
+    // it — this reads straight off stored state, not sanitizeGraph's output.
+    const servers = node.mcpServers ?? [];
+    if (servers.length === 0) return [];
     const tokens = this.#mcpTokensFor(node.id);
-    return node.mcpServers.map((s) => ({
+    return servers.map((s) => ({
       name: s.name,
       url: s.url,
       ...(tokens.get(s.id) ? { authorizationToken: tokens.get(s.id) } : {}),
@@ -2529,7 +2532,7 @@ export class Room extends Agent<Env, RoomState> {
       return;
 
     const node = this.#graph().nodes.find((n) => n.id === nodeId);
-    const server = node?.mcpServers.find((s) => s.id === serverId);
+    const server = node?.mcpServers?.find((s) => s.id === serverId);
     if (!server) return; // stale UI — the server was removed from the graph already
 
     this.#setMcpToken(nodeId, serverId, token);
@@ -3287,6 +3290,19 @@ export class Room extends Agent<Env, RoomState> {
   override async onStart(props?: Record<string, unknown>): Promise<void> {
     await super.onStart(props);
     this.#ready();
+
+    // A graph persisted before a field existed on AgentNode (mcpServers, at
+    // this writing) is missing it on every node — sanitizeGraph backfills
+    // the default and re-validates everything else. Only write back (and
+    // resync) when something actually changed, so this is a no-op on every
+    // ordinary wake.
+    if (this.state.graph) {
+      const migrated = sanitizeGraph(this.state.graph);
+      if (JSON.stringify(migrated) !== JSON.stringify(this.state.graph)) {
+        this.setState({ ...this.state, graph: migrated });
+      }
+    }
+
     const turn = this.#turn();
     // `running` rather than `state.status`: this is the object's first breath
     // and the room's own tables are the only thing certain to be readable yet.

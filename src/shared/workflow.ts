@@ -361,7 +361,10 @@ export function graphKey(x: WorkflowGraph): string {
         n.name,
         n.model,
         n.prompt,
-        n.mcpServers.map((s) => `${s.name}|${s.url}`).sort().join(","),
+        // `?? []`: a graph persisted before mcpServers existed has nodes
+        // without it — this is read straight off stored/synced state, not
+        // sanitizeGraph's output, so the type's guarantee doesn't reach here.
+        (n.mcpServers ?? []).map((s) => `${s.name}|${s.url}`).sort().join(","),
       ])
       .sort(),
     edges: x.edges
