@@ -111,5 +111,6 @@ describe("workspace and IDE", () => {
 
     expect(html).toContain("Connect a workspace to begin.");
     expect(html).toContain(">Open Connections<");
+    expect(html).toContain("Connect a workspace to edit code");
   });
 });

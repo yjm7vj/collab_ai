@@ -1574,14 +1574,19 @@ input:focus, textarea:focus {
 .workspace-tabs { display: flex; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .workspace-tab { min-height: 32px; padding: 5px 10px; border-color: transparent; background: transparent; }
 .workspace-tab:hover:not(:disabled), .workspace-tab.active { border-color: var(--accent); background: var(--accent-bg); color: var(--ink); }
-.ide-embedded, .ide-shell { min-width: 0; min-height: 0; flex: 1; display: flex; }
+.ide-embedded, .ide-shell { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .ide-context-bar { min-height: 42px; display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
 .ide-status { margin: 4px 0 0; color: var(--ink-faint); font-size: 11px; font-weight: 400; }
 .ide-toolbar { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.ide-context-bar, .ide-toolbar { flex: 0 0 auto; }
 .ide-new-file { display: flex; gap: 6px; margin-left: auto; }
 .ide-new-file input { width: 190px; height: 30px; font-size: 12px; }
 .ide-new-file button, .ide-toolbar > button { padding: 6px 9px; font-size: 12px; }
 .ide-body { min-height: 0; flex: 1; display: grid; grid-template-columns: 260px minmax(0, 1fr); }
+.ide-empty-state { min-height: 0; flex: 1; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 32px; color: var(--ink-faint); text-align: center; }
+.ide-empty-state strong { color: var(--ink); font-size: 16px; }
+.ide-empty-state span { max-width: 380px; font-size: 12px; line-height: 1.5; }
+.ide-empty-state button { margin-top: 6px; }
 .ide-files { min-width: 0; overflow: auto; padding: 12px 8px; border-right: 1px solid var(--line); background: var(--panel-2); }
 .ide-files-title { padding: 0 8px 8px; color: var(--ink-faint); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
 .ide-file { width: 100%; display: block; overflow: hidden; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-dim); font-family: var(--mono); font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
