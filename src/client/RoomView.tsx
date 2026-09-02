@@ -56,6 +56,19 @@ import type { IdeActivity, IdeCursor } from "../shared/ide";
 
 const CLIENT_FS_TIMEOUT_MS = FS_LIMITS.timeoutMs + 5_000;
 
+function replyDraft(entry: Entry): { id: string; authorName: string; text: string } | null {
+  if (entry.kind === "system") return null;
+  const text = entry.kind === "user"
+    ? entry.text
+    : entry.blocks.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+  if (!text.trim()) return null;
+  return {
+    id: entry.id,
+    authorName: entry.kind === "user" ? entry.authorName : "Huddle.AI",
+    text: text.trim().slice(0, 280),
+  };
+}
+
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
  * token exists — App is the one that gets us there.
@@ -162,6 +175,7 @@ export function RoomView({
   const [canWrite, setCanWrite] = useState(false);
   const [ideCursors, setIdeCursors] = useState<IdeCursor[]>([]);
   const [ideActivity, setIdeActivity] = useState<IdeActivity[]>([]);
+  const [replyTo, setReplyTo] = useState<{ id: string; authorName: string; text: string } | null>(null);
 
   useEffect(() => {
     if (!showSettingsMenu && !showAccountMenu) return;
@@ -379,7 +393,7 @@ export function RoomView({
     [onDisplayNameChange, send],
   );
 
-  const say = useCallback((text: string) => send({ t: "say", text }), [send]);
+  const say = useCallback((text: string, replyId?: string) => send({ t: "say", text, ...(replyId ? { replyTo: replyId } : {}) }), [send]);
   const vote = useCallback(
     (toolUseId: string, v: string) => send({ t: "vote", toolUseId, vote: v }),
     [send],
@@ -1093,6 +1107,11 @@ export function RoomView({
           <Transcript
             entries={entries}
             me={me}
+            users={state.users}
+            onReply={(entry) => {
+              const draft = replyDraft(entry);
+              if (draft) setReplyTo(draft);
+            }}
             working={state.status === "thinking"}
             toolDisplay={toolDisplay}
           />
@@ -1176,6 +1195,8 @@ export function RoomView({
             }
             onSend={say}
             onInterrupt={interrupt}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
           />
         </section>
 

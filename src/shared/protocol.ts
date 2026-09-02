@@ -337,6 +337,11 @@ export type Entry =
       authorName: string;
       color: string;
       text: string;
+      replyTo?: {
+        id: string;
+        authorName: string;
+        text: string;
+      };
     }
   | { id: string; ts: number; kind: "agent"; blocks: AgentBlock[] }
   | { id: string; ts: number; kind: "system"; text: string };
@@ -455,7 +460,7 @@ export type GithubRepoSource = {
 export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */
   | { t: "rename"; name: string }
-  | { t: "say"; text: string }
+  | { t: "say"; text: string; replyTo?: string }
   | { t: "vote"; toolUseId: string; vote: string }
   /** Set (or, with an empty string, clear) one MCP server's bearer token. */
   | { t: "set_mcp_token"; nodeId: string; serverId: string; token: string }

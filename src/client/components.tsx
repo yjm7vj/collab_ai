@@ -1144,11 +1144,15 @@ export function Presence({ users, me }: { users: PresenceUser[]; me: string | nu
 export function Transcript({
   entries,
   me,
+  users = [],
+  onReply,
   working = false,
   toolDisplay = "compact",
 }: {
   entries: Entry[];
   me: string | null;
+  users?: PresenceUser[];
+  onReply?: (entry: Entry) => void;
   /** True while the agent is mid-turn, so the last entry may still fill in. */
   working?: boolean;
   toolDisplay?: "hidden" | "compact" | "full";
@@ -1185,6 +1189,8 @@ export function Transcript({
           key={entry.id}
           entry={entry}
           me={me}
+          users={users}
+          onReply={onReply}
           live={working && i === entries.length - 1}
           toolDisplay={toolDisplay}
         />
@@ -1196,11 +1202,15 @@ export function Transcript({
 const EntryView = memo(function EntryView({
   entry,
   me,
+  users,
+  onReply,
   live,
   toolDisplay,
 }: {
   entry: Entry;
   me: string | null;
+  users: PresenceUser[];
+  onReply?: (entry: Entry) => void;
   /** This is the entry the agent is still writing into. */
   live: boolean;
   toolDisplay: "hidden" | "compact" | "full";
@@ -1210,12 +1220,16 @@ const EntryView = memo(function EntryView({
   }
 
   if (entry.kind === "user") {
+    const author = users.find((user) => user.uid === entry.authorUid);
     return (
       <div className={`msg user ${entry.authorUid === me ? "mine" : ""}`}>
-        <div className="who" style={{ color: entry.color }}>
-          {entry.authorName}
+        <MessageAvatar name={entry.authorName} color={entry.color} avatar={author?.avatar} />
+        <div className="msg-content">
+          <MessageMeta name={entry.authorName} color={entry.color} ts={entry.ts} />
+          {entry.replyTo && <ReplyQuote reply={entry.replyTo} />}
+          <div className="body">{entry.text}</div>
         </div>
-        <div className="body">{entry.text}</div>
+        {onReply && <ReplyButton onClick={() => onReply(entry)} />}
       </div>
     );
   }
@@ -1251,17 +1265,51 @@ const EntryView = memo(function EntryView({
 
   return (
     <div className="msg agent">
-      <div className="who agent-who">Agent</div>
-      <div className="body">
+      <MessageAvatar name="Huddle.AI" color="var(--accent)" agent />
+      <div className="msg-content">
+        <MessageMeta name="Huddle.AI" color="var(--accent)" ts={entry.ts} agent live={live} />
+        <div className="body">
         {/* Only while the turn is actually running: a turn that ended without
             producing a block — interrupted, or failed before the model spoke —
             would otherwise leave these dots pulsing for good. */}
         {entry.blocks.length === 0 && live && <span className="dots" aria-label="Working" />}
         {rendered}
+        </div>
       </div>
+      {onReply && <ReplyButton onClick={() => onReply(entry)} />}
     </div>
   );
 });
+
+function formatMessageTime(ts: number): string {
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(ts));
+}
+
+function MessageAvatar({ name, color, avatar, agent = false }: { name: string; color: string; avatar?: string; agent?: boolean }) {
+  return (
+    <span className={`message-avatar ${agent ? "message-avatar-agent" : ""}`} style={{ borderColor: color }} aria-hidden="true">
+      {avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" /> : agent ? "AI" : name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+function MessageMeta({ name, color, ts, agent = false, live = false }: { name: string; color: string; ts: number; agent?: boolean; live?: boolean }) {
+  return (
+    <div className="message-meta">
+      <span className={`who ${agent ? "agent-who" : ""}`} style={{ color }}>{name}</span>
+      {live && <span className="message-live">Working</span>}
+      <time dateTime={new Date(ts).toISOString()} title={new Date(ts).toLocaleString()}>{formatMessageTime(ts)}</time>
+    </div>
+  );
+}
+
+function ReplyQuote({ reply }: { reply: { authorName: string; text: string } }) {
+  return <div className="reply-quote"><strong>{reply.authorName}</strong><span>{reply.text}</span></div>;
+}
+
+function ReplyButton({ onClick }: { onClick: () => void }) {
+  return <button type="button" className="message-reply" onClick={onClick} aria-label="Reply to message">Reply</button>;
+}
 
 /** One-line description of a tool call, for the collapsed row. */
 function describeCall(name: string, input: unknown): string {
@@ -1892,6 +1940,8 @@ export function Composer({
   quickActions,
   onSend,
   onInterrupt,
+  replyTo,
+  onClearReply,
 }: {
   disabled: boolean;
   busy: boolean;
@@ -1900,21 +1950,29 @@ export function Composer({
   policyLabel: string;
   statusLabel: string;
   quickActions?: ReactNode;
-  onSend: (text: string) => void;
+  onSend: (text: string, replyTo?: string) => void;
   onInterrupt: () => void;
+  replyTo?: { id: string; authorName: string; text: string } | null;
+  onClearReply?: () => void;
 }) {
   const [value, setValue] = useState("");
 
   const submit = () => {
     const text = value.trim();
     if (!text) return;
-    onSend(text);
+    onSend(text, replyTo?.id);
     setValue("");
   };
 
   return (
     <div className="composer">
       {quickActions && <div className="composer-toolbar">{quickActions}</div>}
+      {replyTo && (
+        <div className="composer-reply">
+          <div><span>Replying to <strong>{replyTo.authorName}</strong></span><span>{replyTo.text}</span></div>
+          {onClearReply && <button type="button" onClick={onClearReply} aria-label="Cancel reply">×</button>}
+        </div>
+      )}
       <textarea
         value={value}
         disabled={disabled || readOnly}

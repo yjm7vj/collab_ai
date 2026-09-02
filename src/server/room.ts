@@ -1738,7 +1738,7 @@ export class Room extends Agent<Env, RoomState> {
       case "rename":
         return this.#onRename(connection, msg.name);
       case "say":
-        return this.#onSay(connection, msg.text);
+        return this.#onSay(connection, msg.text, msg.replyTo);
       case "vote":
         return this.#onVote(connection, msg.toolUseId, msg.vote);
       case "set_mcp_token":
@@ -2966,7 +2966,22 @@ export class Room extends Agent<Env, RoomState> {
     }
   }
 
-  async #onSay(connection: Connection, rawText: string) {
+  #replyReference(rawId: unknown): { id: string; authorName: string; text: string } | undefined {
+    if (typeof rawId !== "string" || rawId.length === 0 || rawId.length > 100) return undefined;
+    const entry = this.#getEntry(rawId);
+    if (!entry || entry.kind === "system") return undefined;
+    const text = entry.kind === "user"
+      ? entry.text
+      : entry.blocks.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+    if (!text.trim()) return undefined;
+    return {
+      id: entry.id,
+      authorName: entry.kind === "user" ? entry.authorName : "Huddle.AI",
+      text: text.trim().slice(0, 280),
+    };
+  }
+
+  async #onSay(connection: Connection, rawText: string, rawReplyId?: string) {
     if (!this.#allow(connection, "speak", "You're a viewer in this room, so you can't talk to the agent.")) return;
     const text = rawText.trim();
     if (!text) return;
@@ -2974,6 +2989,7 @@ export class Room extends Agent<Env, RoomState> {
     const name = uid ? this.#memberName(uid) : null;
     if (!uid || !name) return; // must join before speaking
 
+    const replyTo = this.#replyReference(rawReplyId);
     this.#append({
       id: crypto.randomUUID(),
       ts: Date.now(),
@@ -2982,6 +2998,7 @@ export class Room extends Agent<Env, RoomState> {
       authorName: name,
       color: colorFor(uid),
       text,
+      ...(replyTo ? { replyTo } : {}),
     });
 
     // Queue rather than interrupt. If the agent is mid-turn this line waits and

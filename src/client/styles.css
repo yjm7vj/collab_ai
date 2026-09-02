@@ -1073,7 +1073,37 @@ input:focus, textarea:focus {
   font-style: italic;
 }
 
-.msg { display: grid; gap: 3px; }
+.msg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  border-radius: 10px;
+}
+.msg:hover { background: color-mix(in srgb, var(--panel) 54%, transparent); }
+.message-avatar {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-weight: 750;
+}
+.message-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.message-avatar-agent { background: color-mix(in srgb, var(--accent) 18%, var(--panel-2)); color: var(--accent); }
+.msg-content { min-width: 0; display: grid; gap: 5px; }
+.message-meta { min-width: 0; display: flex; align-items: baseline; gap: 8px; min-height: 17px; }
+.message-meta time { color: var(--ink-faint); font-size: 10px; white-space: nowrap; }
+.message-live { color: var(--accent); font-size: 10px; font-weight: 650; }
 .who {
   font-size: 11px;
   font-weight: 650;
@@ -1082,6 +1112,31 @@ input:focus, textarea:focus {
 }
 .agent-who { color: var(--accent); }
 .mine .body { border-color: var(--mine-line); }
+.message-reply {
+  align-self: center;
+  opacity: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+.msg:hover .message-reply, .message-reply:focus-visible { opacity: 1; }
+.message-reply:hover { color: var(--ink); border-color: var(--accent); }
+.reply-quote {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel-2) 75%, transparent);
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.reply-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-quote strong { color: var(--ink-dim); font-weight: 650; }
 
 .body { min-width: 0; }
 .user .body {
@@ -1263,6 +1318,23 @@ input:focus, textarea:focus {
   overflow-x: auto;
   padding-bottom: 2px;
 }
+.composer-reply {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel-2) 82%, transparent);
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.composer-reply > div { min-width: 0; display: grid; gap: 2px; }
+.composer-reply > div span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-reply strong { color: var(--ink-dim); }
+.composer-reply button { flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--ink-faint); font-size: 18px; }
+.composer-reply button:hover { color: var(--ink); background: transparent; }
 .chat-action {
   flex: none;
   padding: 5px 10px;
@@ -1892,6 +1964,9 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   .composer {
     padding: 10px 12px 12px;
   }
+  .message-reply { opacity: 1; }
+  .msg { grid-template-columns: 30px minmax(0, 1fr) auto; column-gap: 8px; }
+  .message-avatar { width: 28px; height: 28px; font-size: 10px; }
   .composer-toolbar {
     gap: 6px;
   }
