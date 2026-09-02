@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ContextGauge, WorkspaceActions, WorkspacePanel } from "../src/client/components";
+import { IdePanel } from "../src/client/IdePanel";
 import { contextUsage } from "../src/shared/context";
 import { DEFAULT_SETTINGS, EMPTY_LEDGER } from "../src/shared/models";
 import { NO_GITHUB } from "../src/shared/protocol";
@@ -95,5 +96,20 @@ describe("workspace and IDE", () => {
     expect(html).toContain("A GitHub Repository");
     expect(html).toContain(">Connections<");
     expect(html).toContain(">IDE<");
+    expect(html).toContain("Connect files or edit code in the same workspace.");
+  });
+
+  it("gives an unconnected IDE a direct path to workspace connections", () => {
+    const html = renderToStaticMarkup(createElement(IdePanel, {
+      embedded: true,
+      workspace: NO_WORKSPACE,
+      canEdit: false,
+      onRequest: async () => ({ ok: false, error: "not connected" }),
+      onClose: () => undefined,
+      onOpenConnections: () => undefined,
+    }));
+
+    expect(html).toContain("Connect a workspace to begin.");
+    expect(html).toContain(">Open Connections<");
   });
 });

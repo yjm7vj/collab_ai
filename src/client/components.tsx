@@ -2231,7 +2231,7 @@ export function WorkspacePanel({
           <button type="button" className={view === "ide" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("ide")}>IDE</button>
         </nav>
 
-        {view === "ide" ? <IdePanel embedded workspace={workspace} canEdit={canEdit} onRequest={onRequest} onClose={onClose} /> : <div className="modal-body">
+        {view === "ide" ? <IdePanel embedded workspace={workspace} canEdit={canEdit} onRequest={onRequest} onClose={onClose} onOpenConnections={() => setView("connections")} /> : <div className="modal-body">
           {!attached ? (
             <div className="ws-options">
               {supported ? (

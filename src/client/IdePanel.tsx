@@ -8,11 +8,12 @@ function filesFromListing(data: string): string[] {
   return data.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("(") && !line.endsWith("/") && CODE_EXTENSIONS.test(line));
 }
 
-export function IdePanel({ workspace, canEdit, onRequest, onClose, embedded = false }: {
+export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnections, embedded = false }: {
   workspace: WorkspaceInfo;
   canEdit: boolean;
   onRequest: (req: FsRequest) => Promise<FsResponse>;
   onClose: () => void;
+  onOpenConnections?: () => void;
   embedded?: boolean;
 }) {
   const [files, setFiles] = useState<string[]>([]);
@@ -68,7 +69,7 @@ export function IdePanel({ workspace, canEdit, onRequest, onClose, embedded = fa
     <div className={embedded ? "ide-embedded" : "modal-scrim"} onClick={embedded ? undefined : onClose}>
       <div className={embedded ? "ide-shell" : "modal ide-modal"} role="dialog" aria-label="IDE" onClick={(event) => event.stopPropagation()}>
         {embedded ? <div className="ide-context-bar"><strong>IDE</strong><span className="ide-status">{status}</span></div> : <header className="modal-head"><div><h2>IDE</h2><p className="ide-status">{status}</p></div><button className="icon" onClick={onClose} aria-label="Close IDE">✕</button></header>}
-        <div className="ide-toolbar"><button type="button" onClick={() => void loadFiles()} disabled={loading}>Refresh</button>{canEdit && <form onSubmit={(event) => { event.preventDefault(); void createFile(); }} className="ide-new-file"><input value={newPath} onChange={(event) => setNewPath(event.target.value)} placeholder="src/new-file.ts" aria-label="New file path" /><button type="submit" disabled={!newPath.trim() || saving}>New file</button></form>}</div>
+        <div className="ide-toolbar"><button type="button" onClick={() => void loadFiles()} disabled={loading}>Refresh</button>{workspace.kind === "none" && onOpenConnections && <button type="button" className="primary" onClick={onOpenConnections}>Open Connections</button>}{canEdit && <form onSubmit={(event) => { event.preventDefault(); void createFile(); }} className="ide-new-file"><input value={newPath} onChange={(event) => setNewPath(event.target.value)} placeholder="src/new-file.ts" aria-label="New file path" /><button type="submit" disabled={!newPath.trim() || saving}>New file</button></form>}</div>
         <div className="ide-body"><aside className="ide-files" aria-label="Code files"><div className="ide-files-title">Files</div>{loading && !files.length && <div className="ide-empty">Loading...</div>}{!loading && !files.length && <div className="ide-empty">No code files found.</div>}{files.map((path) => <button type="button" key={path} className={`ide-file ${selected === path ? "ide-file-selected" : ""}`} onClick={() => void openFile(path)}>{path}</button>)}</aside><section className="ide-editor" aria-label="Code editor"><div className="ide-editor-head"><span>{selected || "Select a file"}{dirty ? " · unsaved" : ""}</span><button type="button" className="primary" onClick={() => void saveFile()} disabled={!selected || !dirty || !canEdit || saving}>{saving ? "Saving..." : "Save"}</button></div><textarea className="ide-code" value={content} disabled={!selected || loading} onChange={(event) => { setContent(event.target.value); setDirty(true); }} spellCheck={false} aria-label={selected ? `Editing ${selected}` : "Code editor"} placeholder="Choose a code file from the left." />{error && <div className="ide-error">{error}</div>}</section></div>
       </div>
     </div>
