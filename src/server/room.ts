@@ -1601,22 +1601,29 @@ export class Room extends Agent<Env, RoomState> {
    * The Worker has already checked the token's signature and expiry before this
    * runs, and passes the result in headers a client cannot forge. What is
    * re-checked here is everything the token cannot know: whether that member
-   * still exists. A token stays cryptographically valid after someone is
-   * removed, so membership — not the token — is the authority.
+   * still exists, and what they may now do. A token stays cryptographically
+   * valid after someone is removed or demoted, so the member record — not the
+   * token — is the authority for both.
    */
   override async onConnect(connection: Connection, ctx: ConnectionContext) {
     this.#ready();
 
     const uid = ctx.request.headers.get("x-room-uid");
-    const role = ctx.request.headers.get("x-room-role");
-    if (!uid || !role) {
+    if (!uid) {
       connection.close(4401, "unauthorized");
       return;
     }
-    if (this.#memberRole(uid) === null) {
+    const storedRole = this.#memberRole(uid);
+    if (storedRole === null) {
       connection.close(4403, "not a member of this room");
       return;
     }
+    // The role on record, NOT the one in the token. A token is valid for a
+    // week, so a token minted before a demotion still claims the old role, and
+    // binding that to the socket would hand it back every time the person
+    // reconnected. `#rebind` can only reach sockets that are already open; a
+    // demotion applied while someone's tab was closed has nothing to rebind.
+    const role = asRole(storedRole);
 
     const origin = ctx.request.headers.get("x-room-origin");
     if (origin) this.#setOrigin(origin);
@@ -1632,7 +1639,7 @@ export class Room extends Agent<Env, RoomState> {
     // Bring the room's GitHub pointer into line with the account behind it
     // before the status below is computed from it, so the first thing this
     // connection is told is already right.
-    await this.#syncGithubAccount(uid, asRole(role));
+    await this.#syncGithubAccount(uid, role);
 
     // Same reasoning as visibility above: a fresh instance starts from
     // INITIAL_ROOM_STATE's NO_GITHUB, which knows nothing about this
@@ -1652,7 +1659,7 @@ export class Room extends Agent<Env, RoomState> {
 
     connection.setState({ uid, role });
     connection.send(JSON.stringify({ t: "you", uid, role } satisfies ServerMsg));
-    const allowed = canSeeFileContents(asRole(role));
+    const allowed = canSeeFileContents(role);
     connection.send(
       JSON.stringify({
         t: "history",
