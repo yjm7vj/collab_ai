@@ -48,7 +48,9 @@ import {
   pickDirectory,
   saveHandle,
 } from "./workspace";
-import type { FsRequest, FsResponse } from "../shared/workspace";
+import { FS_LIMITS, type FsRequest, type FsResponse } from "../shared/workspace";
+
+const CLIENT_FS_TIMEOUT_MS = FS_LIMITS.timeoutMs + 5_000;
 
 /**
  * Everything that needs a live socket to the room. Only ever mounted once a
@@ -565,13 +567,20 @@ export function RoomView({
   const connectGithub = useCallback((repo: string) => send({ t: "github.connect", repo }), [send]);
   const requestWorkspace = useCallback((req: FsRequest): Promise<FsResponse> => {
     if (state.workspace.kind === "local" && rootRef.current) return performFsRequest(rootRef.current, req);
+    if (!connected) return Promise.resolve({ ok: false, error: "The room connection is not ready. Try again in a moment." });
     const id = crypto.randomUUID();
     return new Promise((resolve) => {
-      const timer = window.setTimeout(() => { pendingClientFs.current.delete(id); resolve({ ok: false, error: "The workspace request timed out." }); }, 6_000);
+      const timer = window.setTimeout(() => { pendingClientFs.current.delete(id); resolve({ ok: false, error: "The workspace host did not respond within 30 seconds." }); }, CLIENT_FS_TIMEOUT_MS);
       pendingClientFs.current.set(id, { resolve, timer });
-      send({ t: "fs.client.req", id, req });
+      try {
+        send({ t: "fs.client.req", id, req });
+      } catch {
+        window.clearTimeout(timer);
+        pendingClientFs.current.delete(id);
+        resolve({ ok: false, error: "The room connection closed before the workspace request was sent." });
+      }
     });
-  }, [send, state.workspace.kind]);
+  }, [connected, send, state.workspace.kind]);
   const authGithub = useCallback(() => send({ t: "github.auth" }), [send]);
   const listRepos = useCallback(() => {
     setReposLoading(true);

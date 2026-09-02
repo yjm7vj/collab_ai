@@ -313,7 +313,7 @@ export const FS_LIMITS = {
   /** Maximum bytes accepted for one write. */
   writeBytes: 512_000,
   /** How long the room waits for a provider before giving up, in ms. */
-  timeoutMs: 5_000,
+  timeoutMs: 30_000,
 } as const;
 
 function clampInt(value: unknown, min: number, max: number, whenInvalid: number): number {

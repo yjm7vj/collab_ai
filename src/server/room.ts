@@ -2411,7 +2411,11 @@ export class Room extends Agent<Env, RoomState> {
     const { id, promise } = this.#pending.open(FS_LIMITS.timeoutMs);
     // Sent to the host's connection only, never broadcast — handing a file
     // request to the whole room would let any member answer it.
-    host.send(JSON.stringify({ t: "fs.req", id, req: clamped } satisfies ServerMsg));
+    try {
+      host.send(JSON.stringify({ t: "fs.req", id, req: clamped } satisfies ServerMsg));
+    } catch {
+      this.#pending.settle(id, { ok: false, error: "The workspace host connection closed before the request was sent." });
+    }
     return promise;
   }
 
