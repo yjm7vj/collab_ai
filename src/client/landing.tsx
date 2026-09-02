@@ -490,9 +490,9 @@ function DemoPanel({
 /* --------------------------------------------------- chapter 1: the merge */
 
 const MERGE_LINES = [
-  { who: "Ana", at: 0, text: "can we move the auth check into the middleware?" },
-  { who: "Ravi", at: 500, text: "and drop the duplicate one in the handler" },
-  { who: "Mia", at: 1100, text: "keep the 401 body identical though" },
+  { who: "Ana", at: 0, text: "Can we move the auth check into the middleware?" },
+  { who: "Ravi", at: 500, text: "And drop the duplicate one in the handler" },
+  { who: "Mia", at: 1100, text: "Keep the 401 body identical though" },
 ];
 
 const MERGE_REPLY =
@@ -505,7 +505,7 @@ const MERGE_REPLY =
  * behaviour: a message that arrives mid-turn is queued in the room's inbox and
  * drained into the next turn, rather than interrupting the one in flight.
  */
-const LATE_LINE = { who: "Ana", text: "also: a test that the 401 body is unchanged" };
+const LATE_LINE = { who: "Ana", text: "Also: a test that the 401 body is unchanged" };
 
 const FOLD_AT = 3200;
 const TURN_AT = 3600;
@@ -565,7 +565,7 @@ function ChapterMerge() {
             <div className="lp-inbox" data-in={queued}>
               <span className="lp-inbox-head">
                 <IconClock />
-                Inbox · 1 waiting
+                Inbox · 1 Waiting
               </span>
               <div className="lp-msg">
                 <span className="lp-msg-who">{LATE_LINE.who}</span>
@@ -641,7 +641,7 @@ function ChapterMerge() {
           </div>
         </div>
         <div className="lp-panel-bar lp-panel-foot">
-          <span>Four messages · two turns · none dropped</span>
+          <span>Four messages · two turns · None dropped</span>
           <button
             type="button"
             className="lp-linkbtn"
@@ -718,8 +718,8 @@ function ChapterVote() {
 
   const outcomeText = settled
     ? approve >= BAR
-      ? `Approved ${approve} of ${BAR} · the edit was applied`
-      : `Denied ${deny} of ${BAR} · nothing was written`
+      ? `Approved ${approve} of ${BAR} · The edit was applied`
+      : `Denied ${deny} of ${BAR} · Nothing was written`
     : mine
       ? `Waiting on the room · 1 of ${BAR}`
       : `Open · ${BAR} of ${VOTERS} decides it`;
@@ -880,11 +880,11 @@ function ChapterDurable() {
   return (
     <div ref={ref}>
       <DemoPanel
-        label="One turn · four hours"
+          label="One turn · Four hours"
         right={
           <span className="lp-presence">
             <IconClock />
-            persisted state
+            Persisted state
           </span>
         }
       >
@@ -913,7 +913,7 @@ function ChapterDurable() {
         </div>
         <div className="lp-panel-bar lp-panel-foot">
           <span>Saved state, not a held-open request</span>
-          <span className="lp-presence">resumed in a later invocation</span>
+          <span className="lp-presence">Resumed in a later invocation</span>
         </div>
       </DemoPanel>
     </div>
@@ -980,7 +980,7 @@ function ChapterWorkspace() {
         right={
           <span className="lp-presence">
             <span className="lp-presence-dot" />
-            {kind === "local" ? "host online" : "app installed"}
+            {kind === "local" ? "Host online" : "App installed"}
           </span>
         }
       >
@@ -991,7 +991,7 @@ function ChapterWorkspace() {
                 <IconBranch />
                 collab/auth-middleware
               </span>
-              <span>opened as a pull request</span>
+              <span>Opened as a pull request</span>
             </div>
           )}
           {LOCAL_FILES.map((file) => (
@@ -1003,7 +1003,7 @@ function ChapterWorkspace() {
               </span>
               {file.tag && (
                 <span className="lp-ws-tag" data-kind={file.tag}>
-                  {file.tag === "new" ? "added" : "edited"}
+                  {file.tag === "new" ? "Added" : "Edited"}
                 </span>
               )}
             </div>
@@ -1013,7 +1013,7 @@ function ChapterWorkspace() {
             room's transcript being shared does not make its contents shared. */}
         <div className="lp-panel-bar lp-panel-foot">
           <span>Owners and admins see contents</span>
-          <span className="lp-presence">editors and viewers see the path</span>
+          <span className="lp-presence">Editors and viewers see the path</span>
         </div>
       </DemoPanel>
     </div>
@@ -1122,10 +1122,10 @@ const WORKFLOW_CARDS: WorkflowCard[] = [
  * reworded a prompt would be a lie about the system.
  */
 const WF_KINDS = [
-  { kind: "delegates", label: "delegates to" },
-  { kind: "reviews", label: "is reviewed by" },
-  { kind: "handoff", label: "hands off to" },
-  { kind: "custom", label: "relates to" },
+  { kind: "delegates", label: "Delegates to" },
+  { kind: "reviews", label: "Is reviewed by" },
+  { kind: "handoff", label: "Hands off to" },
+  { kind: "custom", label: "Relates to" },
 ];
 
 const WF_EDGES = [
@@ -1437,7 +1437,7 @@ function ChapterWorkflowBuilder() {
           <p>{active.detail}</p>
         </div>
         <div className="lp-workflow-inspect-servers">
-          <span className="lp-workflow-inspect-label">MCP servers</span>
+          <span className="lp-workflow-inspect-label">MCP Servers</span>
           {active.servers.length === 0 ? (
             <p className="lp-workflow-empty">
               None on this agent. Pick the researcher to see two.
@@ -1480,28 +1480,28 @@ const ANNOUNCEMENTS = [
   {
     time: "09:14",
     who: "Ana",
-    what: "changed the setup",
-    detail: "manager · Opus 5 directing Haiku 4.5 · effort high · up to 5 workers (auto)",
+    what: "Changed the setup",
+    detail: "Manager · Opus 5 directing Haiku 4.5 · Effort high · Up to 5 workers (auto)",
   },
   {
     time: "09:31",
     who: "Ravi",
-    what: "changed what the agent may do",
+    what: "Changed what the agent may do",
     detail:
-      "ask first · majority · votes on write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
+      "Ask first · Majority · Votes on write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
   },
   {
     time: "11:02",
     who: "Mia",
-    what: "changed the workflow",
+    what: "Changed the workflow",
     detail:
-      "custom · Lead on Opus 5 · 3 teammates (Researcher A, Researcher B, Critic) · 4 links",
+      "Custom · Lead on Opus 5 · 3 teammates (Researcher A, Researcher B, Critic) · 4 links",
   },
   {
     time: "14:20",
     who: null,
     what: "Compacted 32 earlier messages",
-    detail: "the conversation passed 120,000 tokens. The last 12 are kept verbatim.",
+    detail: "The conversation passed 120,000 tokens. The last 12 are kept verbatim.",
   },
 ];
 
@@ -1770,7 +1770,7 @@ export function LandingPage({
           </div>
           <p className="lp-hero-meta">
             <span className="lp-hero-pip" />
-            Everyone talks at once · nothing is dropped · writes go to a vote
+            Everyone talks at once · Nothing is dropped · Writes go to a vote
           </p>
         </div>
         <span className="lp-cue">
@@ -1915,9 +1915,9 @@ export function LandingPage({
             </Reveal>
             <Reveal delay={1}>
               <div className="lp-activity-demo">
-                <div><span className="lp-activity-avatar">M</span><strong>Mia</strong><span>opened</span><code>src/server/room.ts</code></div>
-                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 148</span><code>src/client/RoomView.tsx</code></div>
-                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 code passages</span></div>
+                <div><span className="lp-activity-avatar">M</span><strong>Mia</strong><span>Opened</span><code>src/server/room.ts</code></div>
+                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>Editing line 148</span><code>src/client/RoomView.tsx</code></div>
+                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>Indexed 42 code passages</span></div>
               </div>
             </Reveal>
           </div>
