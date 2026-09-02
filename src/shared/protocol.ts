@@ -281,6 +281,37 @@ export const INITIAL_ROOM_STATE: RoomState = {
   grants: [],
 };
 
+/**
+ * Fill in whatever a stored RoomState is missing.
+ *
+ * Room state is persisted, not rebuilt, so state written before a field
+ * existed comes back without it — and the clients it syncs to then call array
+ * methods on `undefined` and take the whole room's render down. That has now
+ * happened twice: once for `mcpServers`, once for `grants`.
+ *
+ * Guarding each reader was the fix both times, and both times the next new
+ * field arrived unguarded. This is the version that does not depend on anyone
+ * remembering: `RoomState` has no optional fields, so TypeScript will not let
+ * `INITIAL_ROOM_STATE` omit one — which makes it a complete template, and
+ * makes filling from it correct for every field that will ever be added.
+ *
+ * Only absent keys are filled. A stored `false`, `0` or `""` is a real value
+ * and is left exactly as it is.
+ */
+export function completeRoomState(stored: Partial<RoomState> | null | undefined): RoomState {
+  const out = { ...INITIAL_ROOM_STATE };
+  for (const [key, value] of Object.entries(stored ?? {})) {
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
+/** Which fields a stored state is missing. Empty when it is already complete. */
+export function missingRoomStateKeys(stored: Partial<RoomState> | null | undefined): string[] {
+  const has = new Set(Object.keys(stored ?? {}));
+  return Object.keys(INITIAL_ROOM_STATE).filter((key) => !has.has(key));
+}
+
 /** One rendered piece of an agent turn. */
 export type AgentBlock =
   | { type: "thinking"; text: string }
