@@ -34,6 +34,7 @@ colors:
   on-stage-accent: "#06101f"
   lp-stage-ok: "#6bc48c"
   lp-stage-bad: "#ff8d85"
+  lp-stage-warn: "#e8b761"
   ok: "#297e50"
   bad: "#cf322d"
   warn: "#966710"
@@ -405,10 +406,32 @@ Each panel wears a **panel bar** — an 11px uppercase label strip in `--ink-fai
 
 The bar's left slot also carries the **Illustration chip**: a dashed `--line-strong` pill, 11px/700 uppercase, no fill. Every demo panel on the landing carries one. This is not decoration and not a disclaimer bolted on — PRODUCT.md records no evidence on hand, so a fabricated room has to say so in its own chrome, and it borrows the app's existing dashed-border cue for "unfilled slot" rather than inventing a new one. **A new demo panel gets the chip or does not ship.**
 
+### Workflow canvas (landing)
+The room's agent graph at page scale, built as the app's editor is: a canvas of
+agent cards, typed wires between them, and an inspector for the selected card.
+The canvas holds one fixed coordinate space (`WF_CANVAS`) and every card's
+position *and size* is a percentage of it, so a wire can never point at where a
+card used to be. Cards are fixed boxes — the brief takes exactly two lines
+whether it is long, short or absent, and the MCP chip is pushed to the bottom
+edge — because a card that grows with its text stops being a node on a canvas.
+
+Link kind is one decision carried on a custom property (`--lp-wire`), read by
+the wire, its arrowhead, its label and its legend swatch alike: `delegates` is
+the stage accent, `reviews` is `--lp-stage-warn`, `handoff` is `--lp-stage-ok`,
+`custom` is `--lp-stage-faint`. The legend names all four and marks `custom` as
+prompt-only, because three of the kinds change what runs and one only changes
+what the agents are told; drawing them identically would be a lie about the
+system. Below 760px the canvas becomes the list it describes and the wires drop
+out — a scaled canvas with unreadable labels is worse than no canvas.
+
+Depth here is ground, not shadow: the canvas is mixed darker than the panel it
+sits in, and the cards sit at the panel's own value on top of it.
+
 ### Landing state graphics
 - **Outcome pip:** a 7px dot that is `--lp-stage-faint` when idle, pulses in `--lp-stage-accent` while a vote is open, and lands on `--lp-stage-ok` / `--lp-stage-bad` — the app's pip vocabulary at page scale, color carrying the state and animation carrying "in progress."
 - **Vote control:** 36px, `--lp-r-sm`, translucent stage fill; once cast, the chosen option's border and text turn `--lp-stage-ok` or `--lp-stage-bad` while the unchosen one recedes to `--lp-stage-faint` on `--lp-stage-line-soft`. Neither is faded, and neither uses the native `disabled` attribute — the control stays focusable under `aria-disabled` and its click handler no-ops.
-- **Timeline node:** an 11px ring — `--panel` fill with a `--line-strong` border unlit, filling to `--accent` when reached, and staying hollow-with-accent-border for the "quiet" steps (the hours nothing happened), so the durable turn's waiting is visible as a different kind of node rather than as a gap.
+- **Timeline node:** an 11px ring — `--panel` fill with a `--line-strong` border unlit, filling to `--accent` when reached, and staying hollow-with-accent-border for the "quiet" steps (the hours nothing happened), so the durable turn's waiting is visible as a different kind of node rather than as a gap. **The track is assembled from each node's own segment** rather than drawn once behind them all, which is what lets the quiet step carry a dashed rail instead of a gap the eye reads as a fault; the same construction turns on its side below 820px.
+- **Grant strip:** the app's "Running without asking" row, reproduced when a vote to *approve and stop asking* clears the bar — tool name, minutes left, uses left. Standing authority the room cannot see is indistinguishable from no gate at all, so it is drawn rather than described.
 - **Scroll spine:** a fixed 2px rail in the left gutter with an accent fill that tracks scroll and a 9px head. It is the hero's convergence continued down the page; it is the only element that persists across all acts.
 
 ### Motion (landing)

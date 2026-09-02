@@ -40,11 +40,26 @@ persuades by running the mechanism instead of claiming it: both demo rooms are
 labelled "Sample room · illustration" in their own chrome, and the people in
 them (Ana, Ravi, Mia) are authored fixtures, not customers.
 
-Every product fact on the page comes from PRODUCT.md: tagged `[Name]:` merges,
-the inbox fold, gated writes as proposals, auto-accept as an explicit room
-decision, the turn as persisted resumable state, hibernation, local-folder and
-GitHub workspace providers, room-shared settings announced in the transcript,
-and the header token gauge.
+Every product fact on the page is read off the code, not paraphrased from the
+category: tagged `[Name]:` merges and the inbox drain (`Room#startTurn`), gated
+writes as proposals with three answers — approve, deny, and the standing
+approval `grant` buys for fifteen minutes and ten uses (`Vote`, `tally`,
+`GRANT_WINDOW_MS`), a strict-majority bar that approve and deny clear alike
+(`thresholdFor`), auto-accept as one of four named permission modes, the turn as
+persisted resumable state, hibernation, local-folder and GitHub workspace
+providers with contents withheld from editors and viewers (`canSeeFileContents`),
+the room's own agent graph and its four link kinds (`RELATIONS`), remote MCP
+servers per agent on a shared or personal credential (`McpServerRef`) drawn from
+the catalogue in `mcpCatalog.ts`, settings changes announced in the transcript in
+the exact shape `describeSettings` / `describePolicy` / `describeGraph` write
+them, and the header gauge's real pair of numbers — prompt tokens against the
+compaction limit, and spend at list price.
+
+Two claims the page deliberately keeps rather than smooths over, because they
+are what the room actually does: an MCP call is gated like a file write, since
+the room cannot tell a read from a write on somebody else's server; and a
+catalogue server that speaks only OAuth says so instead of being wired up to
+fail quietly.
 
 ## Direction
 
@@ -65,10 +80,23 @@ chapter's demo hangs off the same thread. This is the one authored motion
 moment; the chapters differ by what their demo *does*, not by a second
 entrance effect.
 
+Six chapters, and every heading leads its chapter in the DOM and on screen —
+the workspace chapter used to mirror its columns, which put the heading last
+visually and first for a screen reader. Variety comes from three things
+instead: ground (pale, tinted, stage), chapter shape (full-width head-over-demo
+against a split), and the act's own padding step. A full-width chapter sets its
+heading and paragraph side by side rather than leaving the right half of the
+band empty.
+
 ## Constraints
 
 - The product name is **Huddle.AI** (settled Aug 2026). The nav wordmark sets it
   at control size and full weight beside the mark; it is no longer a placeholder.
+- Demo chrome copies the app's own construction rather than approximating it:
+  the transcript's collapsed tool row, the approval card's tool label and change
+  path, the grant strip, the workflow canvas with its inspector, and the header
+  gauge. A demo that invents a control the app does not have is a bug, not a
+  liberty — the "room budget" the spend panel used to show was one.
 - Nothing may claim adoption, scale, or endorsement.
 - The demos are content, not decoration: every one reaches its finished state
   under `prefers-reduced-motion`, and the page is complete before any motion

@@ -37,6 +37,14 @@ body:has(.lp),
   --lp-on-stage-accent: #06101f;
   --lp-stage-ok: #6bc48c;
   --lp-stage-bad: #ff8d85;
+  /* The third member of the stage's semantic triple. The app's --warn is tuned
+     for a pale ground and goes muddy on the stage, and the workflow legend
+     needs a "limitation, not failure" tint of its own. */
+  --lp-stage-warn: #e8b761;
+  /* PALETTE[3] and PALETTE[4] from src/shared/protocol.ts: the colours the room
+     really hands out, so a demo avatar is not a fourth blue nobody decided. */
+  --lp-person-a: #6b7fd7;
+  --lp-person-b: #c05fa8;
   /* The proposed-change diff keeps its own red/green pair, distinct from
      ok/bad, exactly as the app's system requires, but it always sits on the
      stage, so it takes the dark values in both themes rather than inverting. */
@@ -47,7 +55,15 @@ body:has(.lp),
 
   --lp-gutter: clamp(20px, 5vw, 72px);
   --lp-max: 1180px;
+  /* Three act steps rather than one. The stage is where the page goes quiet
+     and large, so it takes the generous one; the tinted act runs tight against
+     its neighbours. The alternation is the page's vertical rhythm. */
   --lp-act-pad: clamp(84px, 11vw, 150px);
+  --lp-act-pad-wide: clamp(104px, 13vw, 178px);
+  --lp-act-pad-tight: clamp(64px, 8vw, 110px);
+  /* The one internal step for a demo panel's body. Named because five demos
+     were each spelling the same clamp() out by hand. */
+  --lp-pad-panel: clamp(14px, 2vw, 20px);
 
   /* This surface's type ramp. The app's ramp tops out at a 15px working
      body, which is right at a desk and far too quiet for a page someone is
@@ -152,10 +168,12 @@ html:has(.lp) {
   padding-block: var(--lp-act-pad);
 }
 .lp-act--stage {
+  padding-block: var(--lp-act-pad-wide);
   background: var(--lp-stage);
   color: var(--lp-stage-ink);
 }
 .lp-act--tint {
+  padding-block: var(--lp-act-pad-tight);
   background: color-mix(in srgb, var(--panel-3) 55%, var(--bg));
 }
 .lp-act--workflow { padding-bottom: clamp(42px, 6vw, 82px); }
@@ -561,19 +579,32 @@ html:has(.lp) {
   gap: 18px;
   max-width: 62ch;
 }
+/* A full-width chapter sets its heading and its paragraph side by side. Alone,
+   the heading used the left half of the band and left the right half empty,
+   which reads as an unfinished row rather than as air. Split chapters keep the
+   single measure: their demo is already holding the other half. */
+.lp-chapter:not(.lp-chapter--split) > .lp-chapter-head {
+  max-width: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px clamp(32px, 5vw, 72px);
+  align-items: start;
+}
+.lp-chapter:not(.lp-chapter--split) > .lp-chapter-head .lp-body {
+  padding-top: 0.4em;
+}
 .lp-chapter--split {
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   align-items: center;
-}
-.lp-chapter--split-rev .lp-chapter-head {
-  order: 2;
 }
 @media (max-width: 900px) {
   .lp-chapter--split {
     grid-template-columns: minmax(0, 1fr);
   }
-  .lp-chapter--split-rev .lp-chapter-head {
-    order: 0;
+  .lp-chapter:not(.lp-chapter--split) > .lp-chapter-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lp-chapter:not(.lp-chapter--split) > .lp-chapter-head .lp-body {
+    padding-top: 0;
   }
 }
 
@@ -673,12 +704,27 @@ html:has(.lp) {
   }
 }
 
+/* The two states of the left column share one cell. The three lines leaving
+   is the point, but a column that then stays empty for the rest of the page
+   reads as a bug, so what arrived while the agent was busy takes the space. */
+.lp-mergecol {
+  display: grid;
+  align-content: center;
+  padding: var(--lp-pad-panel);
+  min-height: 236px;
+}
+.lp-mergecol > * {
+  grid-area: 1 / 1;
+  align-self: center;
+  /* Grid items default to min-width:auto, which let a long line push the
+     stacked column wider than the panel holding it. */
+  min-width: 0;
+}
 .lp-typers {
   display: grid;
   gap: 10px;
-  padding: clamp(14px, 2vw, 20px);
 }
-.lp-typer {
+.lp-msg {
   display: grid;
   gap: 5px;
   padding: 9px 12px;
@@ -690,23 +736,63 @@ html:has(.lp) {
     transform 520ms var(--lp-ease),
     filter 420ms var(--lp-ease);
 }
-.lp-typer[data-folded="true"] {
+.lp-msg[data-folded="true"] {
   opacity: 0;
   filter: blur(6px);
   transform: translateX(26px) scale(0.96);
 }
-.lp-typer-name {
+.lp-msg-who {
   font-size: var(--lp-fs-label);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-faint);
 }
-.lp-typer-text {
+.lp-msg-body {
   font-size: var(--lp-fs-ui);
   color: var(--ink);
   min-height: 1.5em;
   overflow-wrap: anywhere;
+}
+
+/* Queued, not sent. The dashed edge is the app's own cue for a slot that is
+   not filled yet, which is what a line waiting for the next turn is. */
+.lp-inbox {
+  display: grid;
+  gap: 9px;
+  align-content: center;
+  padding: 12px 13px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--lp-r-lg);
+  background: var(--panel-2);
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 520ms var(--lp-ease),
+    transform 520ms var(--lp-ease);
+}
+.lp-inbox[data-in="true"] {
+  opacity: 1;
+  transform: none;
+}
+.lp-inbox-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.lp-inbox .lp-msg {
+  background: var(--bg);
+}
+.lp-inbox-note {
+  margin: 0;
+  font-size: var(--lp-fs-meta);
+  line-height: 1.5;
+  color: var(--ink-faint);
 }
 .lp-caret {
   display: inline-block;
@@ -737,12 +823,18 @@ html:has(.lp) {
   /* Stacked, the three lines already sit directly above the turn they became;
      a rotated connector would only overlap them. The divider carries it. */
   .lp-merge-join { display: none; }
-   /* Side by side, the emptied column is the point, the lines left. Stacked,
-     it is 200px of nothing above the answer, so the row closes instead. */
+  /* Stacked, the two states no longer share a cell: the three lines close up
+     and the queued one opens below the answer, in reading order. */
+  .lp-mergecol > * {
+    grid-area: auto;
+  }
+  .lp-mergecol {
+    gap: 12px;
+    min-height: 0;
+  }
   .lp-typers {
     /* Headroom, not a measurement: the three lines run ~250px, and the ceiling
-       only has to exceed them so the collapse to 0 has somewhere to start.
-       Raise it if the demo copy grows or text is scaled well past default. */
+       only has to exceed them so the collapse to 0 has somewhere to start. */
     max-height: 400px;
     overflow: hidden;
     transition:
@@ -753,10 +845,28 @@ html:has(.lp) {
     max-height: 0;
     padding-block: 0;
   }
+  /* Stacked, an invisible card still takes its height, which left a column of
+     nothing above the answer. It opens instead of fading in. */
+  .lp-inbox {
+    max-height: 0;
+    padding-block: 0;
+    border-width: 0;
+    overflow: hidden;
+    transform: none;
+    transition:
+      max-height 520ms var(--lp-ease),
+      padding-block 520ms var(--lp-ease),
+      opacity 520ms var(--lp-ease);
+  }
+  .lp-inbox[data-in="true"] {
+    max-height: 340px;
+    padding-block: 12px;
+    border-width: 1px;
+  }
 }
 
 .lp-turnwrap {
-  padding: clamp(14px, 2vw, 20px);
+  padding: var(--lp-pad-panel);
   border-left: 1px solid var(--line);
   align-self: stretch;
   display: grid;
@@ -769,6 +879,13 @@ html:has(.lp) {
     border-left: none;
     border-top: 1px solid var(--line);
   }
+}
+.lp-turn-cap {
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
 }
 .lp-turn {
   display: grid;
@@ -787,20 +904,65 @@ html:has(.lp) {
   font-weight: 700;
   color: var(--accent);
 }
-.lp-reply {
+.lp-agent {
   display: grid;
-  gap: 5px;
+  gap: 8px;
+  justify-items: start;
 }
-.lp-reply-who {
+.lp-agent-who {
   font-size: var(--lp-fs-label);
   font-weight: 650;
   color: var(--accent);
 }
-.lp-reply-text {
+.lp-agent-text {
   font-size: var(--lp-fs-ui);
   line-height: 1.55;
   color: var(--ink);
   min-height: 1.5em;
+}
+
+/* The transcript's collapsed tool row at page scale: name, what it touched,
+   the shared pip, and the same status words the room writes. */
+.lp-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-xs);
+  background: var(--panel-2);
+  font-size: var(--lp-fs-meta);
+  color: var(--ink-faint);
+}
+.lp-tool-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.lp-tool-sum {
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+.lp-tool-status {
+  font-weight: 600;
+}
+.lp-tool-hint {
+  margin-left: auto;
+}
+.lp-pip {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--lp-r-pill);
+  background: var(--ink-faint);
+}
+.lp-pip[data-status="ok"] {
+  background: var(--ok);
+}
+.lp-pip[data-status="running"] {
+  background: var(--accent);
+  animation: lp-pulse 1.2s ease-in-out infinite;
 }
 .lp-dots {
   display: inline-block;
@@ -822,7 +984,18 @@ html:has(.lp) {
 .lp-approval {
   display: grid;
   gap: 12px;
-  padding: clamp(14px, 2vw, 20px);
+  padding: var(--lp-pad-panel);
+}
+.lp-approval-path {
+  font-size: var(--lp-fs-meta);
+  color: var(--lp-stage-faint);
+}
+.lp-approval-path code {
+  font-family: inherit;
+  padding: 1px 6px;
+  border-radius: var(--lp-r-xs);
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-dim);
 }
 .lp-approval-top {
   display: flex;
@@ -927,12 +1100,22 @@ html:has(.lp) {
   border-color: var(--lp-stage-bad);
   color: var(--lp-stage-bad);
 }
+/* Standing authority is still an approval, so it lands on the same green as
+   one. What differs is the strip it leaves behind, not the answer's colour. */
+.lp-vote[data-cast="true"][data-kind="grant"] {
+  border-color: var(--lp-stage-ok);
+  color: var(--lp-stage-ok);
+}
 .lp-vote-count {
   font-size: var(--lp-fs-meta);
   color: var(--lp-stage-faint);
 }
-.lp-vote-spacer {
-  flex: 1 1 auto;
+.lp-outcome-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .lp-outcome {
   display: inline-flex;
@@ -955,46 +1138,64 @@ html:has(.lp) {
   animation: lp-pulse 1.4s ease-in-out infinite;
 }
 
+/* What the room's header shows once a grant carries: the tool it covers, what
+   is left of it, and the fact that it ends by itself. */
+.lp-grants {
+  display: grid;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--lp-stage-line);
+  border-radius: var(--lp-r-lg);
+  background: var(--lp-stage-fill);
+}
+.lp-grants-head {
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lp-stage-faint);
+}
+.lp-grant {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-size: var(--lp-fs-ui);
+}
+.lp-grant-tool {
+  font-weight: 700;
+  color: var(--lp-stage-ink);
+}
+.lp-grant-hint {
+  font-size: var(--lp-fs-meta);
+  color: var(--lp-stage-faint);
+}
+.lp-grant-note {
+  font-size: var(--lp-fs-meta);
+  line-height: 1.5;
+  color: var(--lp-stage-faint);
+}
+
 /* --------------------------------------------- chapter 3: the durable turn */
 
 .lp-timeline {
   position: relative;
-  padding: clamp(22px, 3.5vw, 40px) clamp(14px, 2vw, 26px) clamp(18px, 2.5vw, 28px);
+  padding: clamp(26px, 3.5vw, 40px) var(--lp-pad-panel) clamp(22px, 3vw, 32px);
 }
-.lp-track {
-  position: relative;
-  height: 2px;
-  margin: 0 12px 34px;
-  background: var(--line);
-  border-radius: var(--lp-r-pill);
-}
-.lp-track-fill {
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  background: var(--accent);
-  border-radius: var(--lp-r-pill);
-  transform-origin: left;
-}
+/* The track is assembled from each step's own segment rather than drawn once
+   behind them all. That is what lets the hours nothing happened be a dashed
+   stretch, visible waiting, instead of a gap the eye reads as a fault. */
 .lp-nodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0;
-  margin-inline: 12px;
-  margin-top: -46px;
-}
-@media (max-width: 820px) {
-  .lp-track { display: none; }
-  .lp-nodes {
-    grid-template-columns: minmax(0, 1fr);
-    margin-top: 0;
-    gap: 4px;
-  }
-  .lp-node { padding-left: 22px; border-left: 1px solid var(--line); }
+  column-gap: 16px;
 }
 .lp-node {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   align-content: start;
   min-width: 0;
   transition:
@@ -1005,12 +1206,47 @@ html:has(.lp) {
   opacity: 0.32;
   transform: translateY(8px);
 }
+.lp-node-rail {
+  position: relative;
+  display: block;
+  height: 11px;
+}
+.lp-node-rail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: -16px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--line);
+  transition: background 300ms var(--lp-ease), border-color 300ms var(--lp-ease);
+}
+.lp-node:last-child .lp-node-rail::before {
+  right: 0;
+}
+.lp-node[data-lit="true"] .lp-node-rail::before {
+  background: var(--accent);
+}
+.lp-node[data-quiet="true"] .lp-node-rail::before {
+  background: none;
+  border-top: 2px dashed var(--line);
+  height: 0;
+}
+.lp-node[data-quiet="true"][data-lit="true"] .lp-node-rail::before {
+  border-top-color: var(--accent);
+}
 .lp-node-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
   width: 11px;
   height: 11px;
   border-radius: var(--lp-r-pill);
   background: var(--panel);
   border: 2px solid var(--line-strong);
+  box-sizing: border-box;
   transition: background 300ms var(--lp-ease), border-color 300ms var(--lp-ease);
 }
 .lp-node[data-lit="true"] .lp-node-dot {
@@ -1021,6 +1257,7 @@ html:has(.lp) {
   background: var(--panel);
   border-color: var(--accent);
 }
+/* Holds the row when a step has no clock time of its own. */
 .lp-node-time {
   min-height: 1.2em;
   font-size: var(--lp-fs-meta);
@@ -1031,11 +1268,53 @@ html:has(.lp) {
   font-size: var(--lp-fs-ui);
   line-height: 1.4;
   color: var(--ink);
-  max-width: 22ch;
+  max-width: 24ch;
 }
 .lp-node[data-quiet="true"] .lp-node-label {
   color: var(--ink-dim);
   font-style: italic;
+}
+@media (max-width: 820px) {
+  /* The same segmented track, turned on its side. */
+  .lp-nodes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lp-node {
+    grid-template-columns: 11px minmax(0, 1fr);
+    column-gap: 14px;
+    row-gap: 3px;
+    padding-bottom: 18px;
+  }
+  .lp-node-rail {
+    grid-row: 1 / span 2;
+    height: 100%;
+    min-height: 11px;
+  }
+  .lp-node-rail::before {
+    left: 50%;
+    right: auto;
+    top: 13px;
+    bottom: -18px;
+    width: 2px;
+    height: auto;
+    margin: 0 0 0 -1px;
+  }
+  .lp-node[data-quiet="true"] .lp-node-rail::before {
+    border-top: 0;
+    border-left: 2px dashed var(--line);
+    width: 0;
+    height: auto;
+    background: none;
+  }
+  .lp-node[data-quiet="true"][data-lit="true"] .lp-node-rail::before {
+    border-left-color: var(--accent);
+  }
+  .lp-node:last-child {
+    padding-bottom: 0;
+  }
+  .lp-node:last-child .lp-node-rail::before {
+    display: none;
+  }
 }
 
 /* ---------------------------------------------- chapter 4: the workspace */
@@ -1136,6 +1415,10 @@ html:has(.lp) {
 
 /* ------------------------------------------ chapter 5: the room instrument */
 
+.lp-instrument .lp-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 .lp-instrument {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
@@ -1169,6 +1452,11 @@ html:has(.lp) {
   flex: none;
 }
 .lp-announce-line strong { color: var(--ink); font-weight: 650; }
+/* The room writes one line: who did it, then the configuration it settled on.
+   The detail is quieter than the actor, and it is still there. */
+.lp-announce-body { min-width: 0; }
+.lp-announce-what { color: var(--ink); }
+.lp-announce-detail { color: var(--ink-faint); overflow-wrap: anywhere; }
 
 .lp-gaugewrap {
   display: grid;
@@ -1178,9 +1466,15 @@ html:has(.lp) {
 }
 .lp-gauge-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 4px 10px;
+}
+.lp-gauge-cost {
+  margin-left: auto;
+  font-size: var(--lp-fs-control);
+  font-weight: 700;
+  color: var(--ink-dim);
 }
 .lp-gauge-value {
   font-size: var(--lp-stat);
@@ -1282,80 +1576,461 @@ html:has(.lp) {
   gap: 12px;
 }
 
+/* The room's workflow editor at page scale. It lives only on a stage act, so
+   it speaks the stage vocabulary throughout; on a pale ground its ink would be
+   white on white. One fixed coordinate space holds positions AND card sizes,
+   which is what lets a wire find a card's real edge at any width. */
 .lp-workflow-builder {
+  border: 1px solid var(--lp-stage-line);
+  border-radius: var(--lp-r-xl);
+  background: var(--lp-stage-2);
   overflow: hidden;
-  border: 1px solid var(--lp-stage-line-soft);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--lp-stage-fill) 78%, transparent);
 }
 .lp-workflow-builder-head {
   display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 14px var(--lp-pad-panel);
+  border-bottom: 1px solid var(--lp-stage-line-soft);
+  background: color-mix(in srgb, var(--lp-stage) 60%, transparent);
+}
+.lp-workflow-builder-head strong {
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-control);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.lp-workflow-drag-hint {
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-meta);
+}
+.lp-workflow-layout {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+.lp-workflow-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: var(--lp-pad-panel);
+  border-right: 1px solid var(--lp-stage-line-soft);
+}
+.lp-workflow-chat h3 {
+  margin: 0;
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-control);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.lp-workflow-chat p {
+  margin: 0;
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-meta);
+  line-height: 1.5;
+}
+.lp-workflow-chat-label {
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lp-workflow-bubble,
+.lp-workflow-result {
+  padding: 10px 12px;
+  border: 1px solid var(--lp-stage-line-soft);
+  border-radius: var(--lp-r-lg);
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-meta);
+  line-height: 1.5;
+}
+.lp-workflow-bubble {
+  background: var(--lp-stage-fill);
+}
+.lp-workflow-result {
+  border-color: color-mix(in srgb, var(--lp-stage-ok) 45%, transparent);
+  color: var(--lp-stage-ok);
+}
+.lp-workflow-form {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+}
+.lp-workflow-form input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding-inline: 12px;
+  border: 1px solid var(--lp-stage-line);
+  border-radius: var(--lp-r-md);
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-ink);
+  font: inherit;
+  font-size: var(--lp-fs-small);
+}
+.lp-workflow-form input::placeholder {
+  color: var(--lp-stage-faint);
+}
+.lp-workflow-form input:focus {
+  border-color: var(--lp-stage-accent);
+}
+.lp-workflow-form .lp-btn {
+  width: 100%;
+  height: 42px;
+  justify-content: center;
+  font-size: var(--lp-fs-small);
+}
+
+.lp-workflow-canvas {
+  position: relative;
+  aspect-ratio: 760 / 392;
+  /* Depth by ground, not by shadow: the canvas sits below the panel and the
+     cards sit above the canvas. */
+  background: color-mix(in srgb, var(--lp-stage) 70%, var(--lp-stage-2));
+}
+.lp-workflow-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* One colour per link kind, carried on a custom property so the wire, its
+   arrowhead, its label and its legend swatch all read one decision. */
+.lp-wire-delegates { --lp-wire: var(--lp-stage-accent); }
+.lp-wire-reviews { --lp-wire: var(--lp-stage-warn); }
+.lp-wire-handoff { --lp-wire: var(--lp-stage-ok); }
+.lp-wire-custom { --lp-wire: var(--lp-stage-faint); }
+
+.lp-workflow-wire {
+  fill: none;
+  stroke: var(--lp-wire);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.lp-workflow-lines marker path {
+  fill: var(--lp-wire);
+  stroke: none;
+}
+.lp-workflow-link {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--lp-wire) 45%, transparent);
+  border-radius: var(--lp-r-pill);
+  background: color-mix(in srgb, var(--lp-stage) 70%, var(--lp-stage-2));
+  color: var(--lp-wire);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.lp-workflow-card {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 9px 11px;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-align: left;
+  border: 1px solid var(--lp-stage-line);
+  border-radius: var(--lp-r-lg);
+  background: var(--lp-stage-2);
+  color: var(--lp-stage-dim);
+  font: inherit;
+  cursor: grab;
+  touch-action: none;
+  transition:
+    border-color 160ms var(--lp-ease),
+    background 160ms var(--lp-ease);
+}
+.lp-workflow-card:active {
+  cursor: grabbing;
+}
+.lp-workflow-card:hover {
+  background: color-mix(in srgb, var(--lp-stage-2) 82%, var(--lp-stage-ink));
+}
+.lp-workflow-card[data-lead="true"] {
+  border-color: var(--lp-stage-accent);
+  background: color-mix(in srgb, var(--lp-stage-accent) 12%, var(--lp-stage-2));
+}
+/* Selection is an outline, the way the room's own editor marks it. A halo
+   belongs to a contact-free dot, not to something with an edge. */
+.lp-workflow-card[data-selected="true"] {
+  outline: 2px solid var(--lp-stage-accent);
+  outline-offset: 2px;
+}
+.lp-workflow-card-top {
+  flex: none;
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--lp-stage-line-soft);
+  gap: 8px;
+  min-width: 0;
 }
-.lp-workflow-builder-head > div { display: grid; gap: 7px; }
-.lp-workflow-builder-head strong { color: var(--lp-stage-ink); font-size: 15px; }
-.lp-workflow-drag-hint { color: var(--lp-stage-faint); font-size: 12px; }
-.lp-workflow-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 360px; }
-.lp-workflow-chat { display: flex; flex-direction: column; gap: 10px; padding: 18px; border-right: 1px solid var(--lp-stage-line-soft); }
-.lp-workflow-chat h3 { margin: 0; color: var(--lp-stage-ink); font-size: 17px; line-height: 1.15; }
-.lp-workflow-chat p { margin: 0; color: var(--lp-stage-faint); font-size: 12px; line-height: 1.45; }
-.lp-workflow-chat-label { color: var(--lp-stage-faint); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.lp-workflow-bubble, .lp-workflow-result { padding: 11px 12px; border: 1px solid var(--lp-stage-line-soft); border-radius: 10px; color: var(--lp-stage-ink); font-size: 12px; line-height: 1.45; }
-.lp-workflow-bubble { background: var(--lp-stage-fill); }
-.lp-workflow-result { border-color: color-mix(in srgb, var(--lp-stage-ok) 45%, transparent); color: var(--lp-stage-ok); }
-.lp-workflow-form { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: auto; }
-.lp-workflow-form input { width: 100%; min-width: 0; height: 46px; padding-inline: 12px; border: 1px solid var(--lp-stage-line); border-radius: 8px; background: transparent; color: var(--lp-stage-ink); font: inherit; font-size: 12px; }
-.lp-workflow-form input::placeholder { color: var(--lp-stage-faint); }
-.lp-workflow-form .lp-btn { width: 100%; height: 46px; justify-content: center; min-height: 46px; padding-inline: 12px; font-size: 12px; }
-.lp-workflow-canvas { position: relative; min-height: 360px; overflow: hidden; background-color: color-mix(in srgb, var(--lp-stage) 86%, transparent); background-image: radial-gradient(var(--lp-stage-line-soft) 1px, transparent 1px); background-size: 22px 22px; }
-.lp-workflow-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.lp-workflow-lines path { fill: none; stroke: var(--lp-stage-accent); stroke-width: .45; vector-effect: non-scaling-stroke; opacity: .8; }
-.lp-workflow-card { position: absolute; z-index: 1; display: grid; gap: 6px; width: min(152px, calc(100% - 20px)); min-height: 104px; padding: 11px; border: 1px solid var(--lp-stage-line); border-radius: 11px; background: var(--lp-stage); color: var(--lp-stage-faint); text-align: left; font: inherit; font-size: 11px; line-height: 1.3; cursor: grab; touch-action: none; transition: border-color 160ms ease, box-shadow 160ms ease; }
-.lp-workflow-card:active { cursor: grabbing; }
-.lp-workflow-card[data-selected="true"] { border-color: var(--lp-stage-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--lp-stage-accent) 20%, transparent); }
-.lp-workflow-card--lead { background: color-mix(in srgb, var(--lp-stage-accent) 14%, var(--lp-stage)); }
-.lp-workflow-card-top { display: flex; align-items: center; justify-content: space-between; gap: 7px; color: var(--lp-stage-ink); }
-.lp-workflow-card-top span { padding: 2px 6px; border-radius: 999px; background: var(--lp-stage-accent); color: #07101b; font-size: 10px; font-weight: 700; }
-.lp-workflow-card small { color: var(--lp-stage-ok); font-size: 11px; }
-.lp-workflow-link { position: absolute; z-index: 2; padding: 4px 7px; border: 1px solid var(--lp-stage-accent); border-radius: 999px; background: var(--lp-stage); color: var(--lp-stage-faint); font-size: 10px; }
-.lp-workflow-link::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: var(--lp-stage-accent); }
-.lp-workflow-link--handoff { border-color: var(--lp-stage-ok); }
-.lp-workflow-link--handoff::before { background: var(--lp-stage-ok); }
-.lp-workflow-link--review { border-color: var(--lp-stage-accent); }
-.lp-workflow-link--handoff, .lp-workflow-link--review { transform: translate(-50%, -50%); }
-.lp-workflow-canvas-foot { position: absolute; right: 14px; bottom: 13px; display: flex; align-items: center; gap: 7px; color: var(--lp-stage-faint); font-size: 11px; }
-.lp-workflow-live { width: 6px; height: 6px; border-radius: 50%; background: var(--lp-stage-ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-stage-ok) 16%, transparent); }
-.lp-workflow-builder > .lp-note { margin: 0; padding: 0 18px 14px; font-size: 11px; line-height: 1.45; }
+.lp-workflow-card-top strong {
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-small);
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lp-workflow-badge {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: var(--lp-r-pill);
+  border: 1px solid var(--lp-stage-accent);
+  color: var(--lp-stage-accent);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+}
+/* The model is a label, not a status. Green here meant nothing. */
+.lp-workflow-card small {
+  flex: none;
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-label);
+}
+/* Two lines whether the brief is long, short or absent, so the row below it
+   lands in the same place on every card. */
+.lp-workflow-card-brief {
+  flex: none;
+  height: 2.8em;
+  font-size: var(--lp-fs-meta);
+  line-height: 1.4;
+  color: var(--lp-stage-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lp-workflow-card-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: start;
+  margin-top: auto;
+  padding: 1px 8px;
+  border-radius: var(--lp-r-pill);
+  border: 1px solid var(--lp-stage-line);
+  color: var(--lp-stage-dim);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+}
+
+.lp-workflow-inspect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 18px clamp(20px, 3vw, 40px);
+  padding: var(--lp-pad-panel);
+  border-top: 1px solid var(--lp-stage-line-soft);
+}
+.lp-workflow-inspect-agent p {
+  margin: 6px 0 0;
+  color: var(--lp-stage-dim);
+  font-size: var(--lp-fs-small);
+  line-height: 1.5;
+}
+.lp-workflow-inspect-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lp-workflow-inspect-head strong {
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-control);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.lp-workflow-chip {
+  padding: 2px 9px;
+  border-radius: var(--lp-r-pill);
+  border: 1px solid var(--lp-stage-line);
+  color: var(--lp-stage-dim);
+  font-size: var(--lp-fs-meta);
+  font-weight: 600;
+}
+.lp-workflow-inspect-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lp-workflow-empty {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--lp-stage-line);
+  border-radius: var(--lp-r-lg);
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-meta);
+}
+.lp-workflow-inspect-servers ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.lp-workflow-inspect-servers li {
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--lp-stage-line-soft);
+  border-radius: var(--lp-r-lg);
+  background: var(--lp-stage-fill);
+}
+.lp-workflow-server-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lp-workflow-server-top strong {
+  color: var(--lp-stage-ink);
+  font-size: var(--lp-fs-small);
+}
+.lp-workflow-mode {
+  margin-left: auto;
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--lp-r-pill);
+  border: 1px solid var(--lp-stage-line);
+  color: var(--lp-stage-dim);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+}
+.lp-workflow-server-url {
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-meta);
+  overflow-wrap: anywhere;
+}
+/* A limitation, not a failure: the app's own chip-warn reasoning, in prose. */
+.lp-workflow-server-note {
+  color: var(--lp-stage-warn);
+  font-size: var(--lp-fs-meta);
+  line-height: 1.5;
+}
+
+.lp-workflow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 10px var(--lp-pad-panel);
+  border-top: 1px solid var(--lp-stage-line-soft);
+  background: color-mix(in srgb, var(--lp-stage) 60%, transparent);
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lp-workflow-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lp-workflow-legend-item em {
+  font-style: normal;
+  color: var(--lp-stage-dim);
+}
+.lp-workflow-swatch {
+  width: 18px;
+  height: 3px;
+  border-radius: var(--lp-r-pill);
+  background: var(--lp-wire);
+}
+.lp-workflow-builder > .lp-note {
+  margin: 0;
+  padding: 12px var(--lp-pad-panel) 16px;
+  border-top: 1px solid var(--lp-stage-line-soft);
+}
+
+/* Ground-aware, like every other surface here: pale by default, restated on
+   the stage. These cards used stage ink unconditionally, which put near-white
+   text on a pale tint act in light mode. */
 .lp-feature-card {
   min-height: 150px;
   padding: 20px;
-  border: 1px solid var(--lp-stage-line-soft);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--lp-stage-fill) 70%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-xl);
+  background: var(--panel);
 }
-.lp-feature-card h3 { margin: 10px 0 8px; font-size: 18px; color: var(--lp-stage-ink); }
-.lp-feature-card p { margin: 0; color: var(--lp-stage-faint); line-height: 1.55; }
-.lp-feature-kicker, .lp-eyebrow { color: var(--lp-stage-ok); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.lp-feature-card h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.lp-feature-card p { margin: 0; color: var(--ink-dim); line-height: 1.55; }
+.lp-act--stage .lp-feature-card {
+  border-color: var(--lp-stage-line);
+  background: var(--lp-stage-2);
+}
+.lp-act--stage .lp-feature-card h3 { color: var(--lp-stage-ink); }
+.lp-act--stage .lp-feature-card p { color: var(--lp-stage-dim); }
 .lp-activity-demo {
   display: grid;
   gap: 10px;
   padding: 18px;
   border: 1px solid var(--lp-stage-line-soft);
   border-radius: 12px;
-  background: var(--lp-stage-fill);
-  color: var(--lp-stage-faint);
-  font-size: 13px;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font-size: var(--lp-fs-small);
+}
+.lp-act--stage .lp-activity-demo {
+  border-color: var(--lp-stage-line);
+  background: var(--lp-stage-2);
+  color: var(--lp-stage-dim);
 }
 .lp-activity-demo > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.lp-activity-demo strong { color: var(--lp-stage-ink); }
-.lp-activity-demo code { color: var(--lp-stage-ok); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.lp-activity-avatar { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #5e7cf2; color: white; font-size: 11px; font-weight: 700; }
-.lp-activity-avatar--alt { background: #bd6ca7; }
-.lp-activity-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lp-stage-ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-stage-ok) 16%, transparent); }
+.lp-activity-demo strong { color: var(--ink); }
+/* The system deliberately has one typeface. Code-like content is marked by
+   size and tint, never by a second family. */
+.lp-activity-demo code {
+  font-family: inherit;
+  padding: 1px 6px;
+  border-radius: var(--lp-r-xs);
+  background: var(--panel-2);
+  color: var(--ink-dim);
+}
+.lp-activity-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--lp-r-pill);
+  background: var(--lp-person-a);
+  color: var(--lp-on-stage-accent);
+  font-size: var(--lp-fs-label);
+  font-weight: 700;
+}
+.lp-activity-avatar--alt { background: var(--lp-person-b); }
+.lp-activity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--lp-r-pill);
+  background: var(--ok);
+}
+.lp-act--stage .lp-activity-demo strong { color: var(--lp-stage-ink); }
+.lp-act--stage .lp-activity-demo code {
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-dim);
+}
+.lp-act--stage .lp-activity-dot { background: var(--lp-stage-ok); }
 .lp-legal { flex: 1 1 100%; border-top: 1px solid var(--lp-stage-line-soft); padding-top: 14px; }
 .lp-legal summary { cursor: pointer; color: var(--lp-stage-ink); font-weight: 650; }
 .lp-legal-body { max-width: 760px; padding-top: 12px; color: var(--lp-stage-faint); line-height: 1.6; }
@@ -1365,8 +2040,36 @@ html:has(.lp) {
   .lp-feature-grid { grid-template-columns: 1fr; }
   .lp-workflow-layout { grid-template-columns: 1fr; }
   .lp-workflow-chat { border-right: 0; border-bottom: 1px solid var(--lp-stage-line-soft); }
-  .lp-workflow-form { grid-template-columns: 1fr; margin-top: 4px; }
-  .lp-workflow-canvas { min-height: 390px; }
+  .lp-workflow-form { margin-top: 4px; }
+  .lp-workflow-inspect { grid-template-columns: minmax(0, 1fr); }
+  /* Too narrow to scale a canvas and keep its cards readable: holding the
+     aspect ratio here shrank each card to about seventy pixels. The graph
+     becomes the list it describes, and the legend carries the link kinds.
+     Positions and sizes are inline styles, so the reset has to outrank them. */
+  .lp-workflow-canvas {
+    position: static;
+    aspect-ratio: auto;
+    display: grid;
+    gap: 8px;
+    padding: var(--lp-pad-panel);
+    background: none;
+  }
+  .lp-workflow-lines,
+  .lp-workflow-link {
+    display: none;
+  }
+  .lp-workflow-card {
+    position: static;
+    cursor: default;
+    width: auto !important;
+    height: auto !important;
+    left: auto !important;
+    top: auto !important;
+  }
+  .lp-workflow-card-brief {
+    height: auto;
+    -webkit-line-clamp: 3;
+  }
   .lp-workflow-builder-head { align-items: flex-start; flex-direction: column; gap: 8px; }
 }
 

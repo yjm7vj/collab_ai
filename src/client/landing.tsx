@@ -168,6 +168,17 @@ const IconFile = () => (
     }
   />
 );
+const IconServer = () => (
+  <Icon
+    path={
+      <>
+        <rect x="1.9" y="2.4" width="12.2" height="4.6" rx="1.2" />
+        <rect x="1.9" y="9" width="12.2" height="4.6" rx="1.2" />
+        <path d="M4.4 4.7h.01M4.4 11.3h.01" />
+      </>
+    }
+  />
+);
 const IconClock = () => (
   <Icon
     path={
@@ -487,10 +498,21 @@ const MERGE_LINES = [
 const MERGE_REPLY =
   "One change, then. I'll lift the check into requireSession, delete the copy in the route handler, and leave the 401 body byte-for-byte the same.";
 
+/**
+ * The line somebody sends after the turn has already started.
+ *
+ * It is the second half of this chapter's claim and the room's actual
+ * behaviour: a message that arrives mid-turn is queued in the room's inbox and
+ * drained into the next turn, rather than interrupting the one in flight.
+ */
+const LATE_LINE = { who: "Ana", text: "also: a test that the 401 body is unchanged" };
+
 const FOLD_AT = 3200;
 const TURN_AT = 3600;
-const REPLY_AT = 5000;
-const MERGE_END = 9200;
+const TOOL_AT = 4300;
+const REPLY_AT = 5400;
+const LATE_AT = 7000;
+const MERGE_END = 12000;
 
 function ChapterMerge() {
   const reduced = useReducedMotion();
@@ -500,6 +522,7 @@ function ChapterMerge() {
   // transition in it runs again from its own start state.
   const t = useTimeline(seen, MERGE_END, reduced, run);
   const folded = t >= FOLD_AT;
+  const queued = t >= LATE_AT;
 
   return (
     <div ref={ref}>
@@ -513,25 +536,46 @@ function ChapterMerge() {
       >
         <p className="lp-sr">
           Ana, Ravi and Mia each send a line at the same time. The three lines
-          arrive as one turn, tagged with each speaker's name, and the agent
-          answers the room once.
+          reach the agent as one turn, tagged with each speaker&rsquo;s name, and
+          the agent answers the room once. A fourth line, sent while the agent is
+          still working, waits in the room&rsquo;s inbox and joins the next turn.
         </p>
         <div className="lp-merge" key={run} aria-hidden="true">
-          <div className="lp-typers" data-folded={folded}>
-            {MERGE_LINES.map((line) => {
-              const shown = typed(line.text, t, line.at, 34);
-              return (
-                <div className="lp-typer" key={line.who} data-folded={folded}>
-                  <span className="lp-typer-name">{line.who}</span>
-                  <span className="lp-typer-text">
-                    {shown}
-                    {!folded && shown.length < line.text.length && t > line.at && (
-                      <i className="lp-caret" />
-                    )}
-                  </span>
-                </div>
-              );
-            })}
+          {/* One column, reused rather than emptied: the three lines leave, and
+              what arrived while the agent was busy takes their place. The fan
+              stays drawn: the queued line is going to merge into a turn the
+              same way the three did, so the picture is still true of it. */}
+          <div className="lp-mergecol">
+            <div className="lp-typers" data-folded={folded}>
+              {MERGE_LINES.map((line) => {
+                const shown = typed(line.text, t, line.at, 34);
+                return (
+                  <div className="lp-msg" key={line.who} data-folded={folded}>
+                    <span className="lp-msg-who">{line.who}</span>
+                    <span className="lp-msg-body">
+                      {shown}
+                      {!folded && shown.length < line.text.length && t > line.at && (
+                        <i className="lp-caret" />
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="lp-inbox" data-in={queued}>
+              <span className="lp-inbox-head">
+                <IconClock />
+                Inbox · 1 waiting
+              </span>
+              <div className="lp-msg">
+                <span className="lp-msg-who">{LATE_LINE.who}</span>
+                <span className="lp-msg-body">{LATE_LINE.text}</span>
+              </div>
+              <p className="lp-inbox-note">
+                Sent while the agent was working. It joins the next turn instead
+                of splitting this one.
+              </p>
+            </div>
           </div>
 
           <div className="lp-merge-join">
@@ -553,6 +597,7 @@ function ChapterMerge() {
           </div>
 
           <div className="lp-turnwrap">
+            <span className="lp-turn-cap">One turn, as the agent receives it</span>
             <div className="lp-turn">
               {MERGE_LINES.map((line, i) => (
                 <span
@@ -567,22 +612,36 @@ function ChapterMerge() {
                 </span>
               ))}
             </div>
-            <div className="lp-reply">
-              <span className="lp-reply-who">Agent</span>
-              <span className="lp-reply-text">
+            <div className="lp-agent">
+              <span className="lp-agent-who">Agent</span>
+              {t >= TOOL_AT && (
+                <span className="lp-tool">
+                  <span className="lp-tool-name">Read File</span>
+                  <span className="lp-tool-sum">src/server/auth.ts</span>
+                  <span
+                    className="lp-pip"
+                    data-status={t >= REPLY_AT ? "ok" : "running"}
+                  />
+                  <span className="lp-tool-status">
+                    {t >= REPLY_AT ? "Done" : "Running"}
+                  </span>
+                  {t >= REPLY_AT && <span className="lp-tool-hint">34 Lines</span>}
+                </span>
+              )}
+              <span className="lp-agent-text">
                 {t < REPLY_AT ? (
-                  t > TURN_AT + 900 ? (
+                  t > TURN_AT + 800 ? (
                     <i className="lp-dots" />
                   ) : null
                 ) : (
-                  typed(MERGE_REPLY, t, REPLY_AT, 44)
+                  typed(MERGE_REPLY, t, REPLY_AT, 46)
                 )}
               </span>
             </div>
           </div>
         </div>
         <div className="lp-panel-bar lp-panel-foot">
-          <span>Three messages · one turn</span>
+          <span>Four messages · two turns · none dropped</span>
           <button
             type="button"
             className="lp-linkbtn"
@@ -598,16 +657,38 @@ function ChapterMerge() {
 
 /* --------------------------------------------------- chapter 2: the vote */
 
-type VoteKind = "approve" | "deny";
+/**
+ * The three answers a gate actually takes, named as the room names them.
+ *
+ * `grant` is an approval that also asks for the same call to stop needing a
+ * vote for a while, so it counts toward approval and is counted again on its
+ * own. See `Vote` and `tally` in `src/shared/protocol.ts`.
+ */
+type VoteKind = "approve" | "deny" | "grant";
+
+/**
+ * Three voters present, so the bar is two.
+ *
+ * `thresholdFor` is a strict majority of the voting-eligible people in the
+ * room, and approve and deny clear the same bar, which is why the third
+ * person here never has to vote at all once two agree. Viewers are left out of
+ * the count entirely rather than merely barred from voting.
+ */
+const VOTERS = 3;
+const BAR = 2;
+
+/** The standing approval `grant` asks for, as the room's own header reports it. */
+const GRANT_WINDOW_MINUTES = 15;
+const GRANT_USES = 10;
 
 function ChapterVote() {
   const [mine, setMine] = useState<VoteKind | null>(null);
-  const [others, setOthers] = useState<VoteKind[]>([]);
-  const timers = useRef<number[]>([]);
+  const [second, setSecond] = useState<VoteKind | null>(null);
+  const timer = useRef<number | null>(null);
 
   useEffect(
     () => () => {
-      for (const id of timers.current) clearTimeout(id);
+      if (timer.current !== null) clearTimeout(timer.current);
     },
     [],
   );
@@ -615,46 +696,48 @@ function ChapterVote() {
   const cast = (kind: VoteKind) => {
     if (mine) return;
     setMine(kind);
-    // Ana agrees, Ravi doesn't: the visitor's own vote is what decides it.
-    timers.current.push(
-      window.setTimeout(() => setOthers([kind]), 800),
-      window.setTimeout(
-        () => setOthers([kind, kind === "approve" ? "deny" : "approve"]),
-        1600,
-      ),
-    );
+    // Ravi answers the same way, which takes it to the bar. Mia is still in the
+    // room and never votes: two agreeing is the whole decision.
+    timer.current = window.setTimeout(() => setSecond(kind), 900);
   };
 
   const reset = () => {
-    for (const id of timers.current) clearTimeout(id);
-    timers.current = [];
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
     setMine(null);
-    setOthers([]);
+    setSecond(null);
   };
 
-  const all = mine ? [mine, ...others] : [];
-  const approve = all.filter((v) => v === "approve").length;
+  const all = [mine, second].filter((v): v is VoteKind => v !== null);
+  const approve = all.filter((v) => v === "approve" || v === "grant").length;
   const deny = all.filter((v) => v === "deny").length;
-  const settled = all.length === 3;
-  const state = settled ? (approve > deny ? "applied" : "denied") : "open";
+  const grant = all.filter((v) => v === "grant").length;
+  const settled = approve >= BAR || deny >= BAR;
+  const state = settled ? (approve >= BAR ? "applied" : "denied") : "open";
+  const standing = settled && grant >= BAR;
 
   const outcomeText = settled
-    ? approve > deny
-      ? "Approved 2 to 1 · the write went through"
-      : "Denied 2 to 1 · nothing was written"
+    ? approve >= BAR
+      ? `Approved ${approve} of ${BAR} · the edit was applied`
+      : `Denied ${deny} of ${BAR} · nothing was written`
     : mine
-      ? "Waiting on the room"
-      : "Open · needs a majority";
+      ? `Waiting on the room · 1 of ${BAR}`
+      : `Open · ${BAR} of ${VOTERS} decides it`;
 
   return (
     <DemoPanel
       label="Sample room"
-      right={<span className="lp-presence">3 members · majority</span>}
+      right={<span className="lp-presence">{VOTERS} voters · {BAR} to decide</span>}
     >
       <div className="lp-approval">
         <div className="lp-approval-top">
-          <span className="lp-approval-tool">write_file</span>
-          <span className="lp-approval-sub">src/server/auth.ts · 2 lines</span>
+          <span className="lp-approval-tool">Edit File</span>
+          <span className="lp-approval-sub">
+            Move the auth check into requireSession
+          </span>
+        </div>
+        <div className="lp-approval-path">
+          File: <code>src/server/auth.ts</code>
         </div>
         <div className="lp-diff" data-state={state}>
           <div className="lp-diff-row lp-diff-old">
@@ -679,7 +762,7 @@ function ChapterVote() {
             <IconCheck />
             Approve
             <span className="lp-vote-count" data-num>
-              {approve}
+              {approve}/{BAR}
             </span>
           </button>
           <button
@@ -694,19 +777,52 @@ function ChapterVote() {
             <IconDeny />
             Deny
             <span className="lp-vote-count" data-num>
-              {deny}
+              {deny}/{BAR}
             </span>
           </button>
-          <span className="lp-vote-spacer" />
+          {/* The third answer, sitting with the other two rather than in a
+              menu. It is a vote, and it needs the same two people. */}
+          <button
+            type="button"
+            className="lp-vote"
+            data-kind="grant"
+            data-cast={mine === "grant"}
+            data-muted={mine !== null && mine !== "grant"}
+            aria-disabled={mine !== null}
+            onClick={() => cast("grant")}
+          >
+            <IconClock />
+            Approve &amp; stop asking
+            <span className="lp-vote-count" data-num>
+              {grant}/{BAR}
+            </span>
+          </button>
+        </div>
+        <div className="lp-outcome-row">
           <span className="lp-outcome" data-state={state} role="status">
             <span className="lp-outcome-pip" />
             {outcomeText}
           </span>
+          {settled && (
+            <button type="button" className="lp-linkbtn" onClick={reset}>
+              Vote again
+            </button>
+          )}
         </div>
-        {settled && (
-          <button type="button" className="lp-linkbtn" onClick={reset}>
-            Vote again
-          </button>
+        {standing && (
+          <div className="lp-grants" role="status">
+            <span className="lp-grants-head">Running without asking</span>
+            <span className="lp-grant">
+              <span className="lp-grant-tool">edit_file</span>
+              <span className="lp-grant-hint" data-num>
+                {GRANT_WINDOW_MINUTES} min left · {GRANT_USES} of {GRANT_USES} uses
+              </span>
+            </span>
+            <span className="lp-grant-note">
+              It lapses on its own, and anyone in the room can take it back
+              before then.
+            </span>
+          </div>
         )}
       </div>
     </DemoPanel>
@@ -716,11 +832,11 @@ function ChapterVote() {
 /* -------------------------------------------- chapter 3: the durable turn */
 
 const TURN_NODES = [
-  { time: "14:02", label: "The agent proposes the write.", quiet: false },
-  { time: "14:03", label: "Two votes land. One short.", quiet: false },
-  { time: "Paused", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
+  { time: "14:02", label: "The agent asks to edit auth.ts.", quiet: false },
+  { time: "14:03", label: "Ravi approves. One short of the two it needs.", quiet: false },
+  { time: "", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
   { time: "16:41", label: "Mia opens the link and approves.", quiet: false },
-  { time: "16:42", label: "The same turn resumes and finishes.", quiet: false },
+  { time: "16:41", label: "The same turn resumes and the edit lands.", quiet: false },
 ];
 
 function ChapterDurable() {
@@ -773,12 +889,9 @@ function ChapterDurable() {
         }
       >
         <div className="lp-timeline">
-          <div className="lp-track">
-            <div
-              className="lp-track-fill"
-              style={{ width: `${Math.min(100, progress * 100)}%` }}
-            />
-          </div>
+          {/* The track is made of the nodes' own segments rather than drawn
+              once behind them, so the hours nothing happened can be a dashed
+              stretch instead of a gap the eye reads as an error. */}
           <ol className="lp-nodes">
             {TURN_NODES.map((node, i) => (
               <li
@@ -787,7 +900,9 @@ function ChapterDurable() {
                 data-lit={i < lit}
                 data-quiet={node.quiet}
               >
-                <span className="lp-node-dot" />
+                <span className="lp-node-rail">
+                  <span className="lp-node-dot" />
+                </span>
                 <span className="lp-node-time" data-num>
                   {node.time}
                 </span>
@@ -795,6 +910,10 @@ function ChapterDurable() {
               </li>
             ))}
           </ol>
+        </div>
+        <div className="lp-panel-bar lp-panel-foot">
+          <span>Saved state, not a held-open request</span>
+          <span className="lp-presence">resumed in a later invocation</span>
         </div>
       </DemoPanel>
     </div>
@@ -890,6 +1009,12 @@ function ChapterWorkspace() {
             </div>
           ))}
         </div>
+        {/* A workspace is one person's disk or one team's repository, so the
+            room's transcript being shared does not make its contents shared. */}
+        <div className="lp-panel-bar lp-panel-foot">
+          <span>Owners and admins see contents</span>
+          <span className="lp-presence">editors and viewers see the path</span>
+        </div>
       </DemoPanel>
     </div>
   );
@@ -897,38 +1022,129 @@ function ChapterWorkspace() {
 
 /* ----------------------------------------- chapter 4b: workflow builder */
 
+/**
+ * The room's agent graph, at the size a page can read.
+ *
+ * One fixed coordinate space holds the whole canvas: positions AND card sizes
+ * are in these units, and the container carries the same aspect ratio, so the
+ * wires attach to the cards' real edges at every width. Positioning cards in
+ * percentages while sizing them in pixels is what left the wires hanging in
+ * space, because nothing could work out where a card's right edge was.
+ */
+const WF_CANVAS = { w: 760, h: 392 };
+const WF_CARD = { w: 168, h: 120 };
+
+type DemoServer = {
+  name: string;
+  url: string;
+  /** Whose credential the server runs on. Both modes are real. */
+  mode: string;
+  /** Said out loud when the app cannot actually reach the server yet. */
+  note?: string;
+};
+
 type WorkflowCard = {
   id: string;
   title: string;
   model: string;
+  /** Fits the card's two lines. */
   brief: string;
+  /** The whole brief, for the inspector, which has the room for it. */
+  detail: string;
   x: number;
   y: number;
   lead?: boolean;
+  servers: DemoServer[];
 };
 
 const WORKFLOW_CARDS: WorkflowCard[] = [
-  { id: "lead", title: "Lead", model: "Opus 5", brief: "Breaks the request into focused tasks.", x: 8, y: 38, lead: true },
-  { id: "research", title: "Researcher", model: "Haiku 4.5", brief: "Finds and cites the right sources.", x: 56, y: 15 },
-  { id: "critic", title: "Critic", model: "Sonnet 5", brief: "Checks the result before it returns.", x: 56, y: 60 },
+  {
+    id: "lead",
+    title: "Planner",
+    model: "Opus 5",
+    brief: "Breaks the request into focused tasks.",
+    detail:
+      "Breaks the request into focused tasks and synthesises what comes back. Weighs the critic's notes before using a finding.",
+    x: 16,
+    y: 136,
+    lead: true,
+    servers: [],
+  },
+  {
+    id: "research",
+    title: "Researcher",
+    model: "Haiku 4.5",
+    brief: "Reads sources properly, not skimming.",
+    detail:
+      "Reads sources properly rather than skimming. Quotes and cites. Shares none of the lead's context, so the brief has to stand on its own.",
+    x: 296,
+    y: 36,
+    servers: [
+      { name: "Linear", url: "mcp.linear.app/mcp", mode: "Shared by the room" },
+      {
+        name: "Sentry",
+        url: "mcp.sentry.dev/mcp",
+        mode: "Each person's own",
+        note: "OAuth-only, which this app cannot do yet. The picker says so rather than wiring up a server that never answers.",
+      },
+    ],
+  },
+  {
+    id: "critic",
+    title: "Critic",
+    model: "Sonnet 5",
+    brief: "Checks the result before it returns.",
+    detail:
+      "Checks the work for factual errors, unsupported claims, and parts of the brief it did not answer. Does not rewrite it.",
+    x: 576,
+    y: 236,
+    servers: [],
+  },
 ];
+
+/**
+ * Three of the four link kinds change what actually runs; the fourth only
+ * changes what the agents are told. The room's own editor draws that
+ * distinction, so the page does too. A link that looked like wiring but only
+ * reworded a prompt would be a lie about the system.
+ */
+const WF_KINDS = [
+  { kind: "delegates", label: "delegates to" },
+  { kind: "reviews", label: "is reviewed by" },
+  { kind: "handoff", label: "hands off to" },
+  { kind: "custom", label: "relates to", prose: true },
+];
+
+const WF_EDGES = [
+  { id: "e1", from: "lead", to: "research", kind: "delegates" },
+  { id: "e2", from: "research", to: "critic", kind: "reviews" },
+];
+
+const wfPct = (value: number, of: number) => `${(value / of) * 100}%`;
 
 function ChapterWorkflowBuilder() {
   const [cards, setCards] = useState(WORKFLOW_CARDS);
-  const [selected, setSelected] = useState("lead");
+  const [selected, setSelected] = useState("research");
   const [prompt, setPrompt] = useState("");
   const [workflowUpdated, setWorkflowUpdated] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
 
+  const byId = (id: string) => cards.find((card) => card.id === id);
+  const active = byId(selected) ?? cards[0]!;
+
+  const clampX = (v: number) => Math.max(0, Math.min(WF_CANVAS.w - WF_CARD.w, v));
+  const clampY = (v: number) => Math.max(0, Math.min(WF_CANVAS.h - WF_CARD.h, v));
+
   const startDragging = (event: ReactPointerEvent<HTMLButtonElement>, card: WorkflowCard) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const cardBox = event.currentTarget.getBoundingClientRect();
+    const box = canvas.getBoundingClientRect();
+    const scale = box.width / WF_CANVAS.w;
     dragRef.current = {
       id: card.id,
-      offsetX: event.clientX - cardBox.left,
-      offsetY: event.clientY - cardBox.top,
+      offsetX: (event.clientX - box.left) / scale - card.x,
+      offsetY: (event.clientY - box.top) / scale - card.y,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelected(card.id);
@@ -938,12 +1154,13 @@ function ChapterWorkflowBuilder() {
     const canvas = canvasRef.current;
     const drag = dragRef.current;
     if (!canvas || !drag) return;
-    const canvasBox = canvas.getBoundingClientRect();
-    const x = ((event.clientX - canvasBox.left - drag.offsetX) / canvasBox.width) * 100;
-    const y = ((event.clientY - canvasBox.top - drag.offsetY) / canvasBox.height) * 100;
-    setCards((current) => current.map((item) => item.id === drag.id
-      ? { ...item, x: Math.max(2, Math.min(66, x)), y: Math.max(4, Math.min(72, y)) }
-      : item));
+    const box = canvas.getBoundingClientRect();
+    const scale = box.width / WF_CANVAS.w;
+    const x = clampX((event.clientX - box.left) / scale - drag.offsetX);
+    const y = clampY((event.clientY - box.top) / scale - drag.offsetY);
+    setCards((current) =>
+      current.map((item) => (item.id === drag.id ? { ...item, x, y } : item)),
+    );
   };
 
   const finishDragging = () => {
@@ -957,86 +1174,267 @@ function ChapterWorkflowBuilder() {
     setPrompt("");
   };
 
-  const lead = cards.find((card) => card.lead) ?? cards[0];
-  const researcher = cards.find((card) => card.id === "research");
-  const critic = cards.find((card) => card.id === "critic");
+  /**
+   * Right edge of the source to the left edge of the target, which is how the
+   * room's own editor lays a wire out. Both points come from the cards' live
+   * positions, so dragging one moves the wire with it.
+   */
+  const wireOf = (edge: (typeof WF_EDGES)[number]) => {
+    const from = byId(edge.from);
+    const to = byId(edge.to);
+    if (!from || !to) return null;
+    const x1 = from.x + WF_CARD.w;
+    const y1 = from.y + WF_CARD.h / 2;
+    const x2 = to.x;
+    const y2 = to.y + WF_CARD.h / 2;
+    const bend = Math.max(28, Math.abs(x2 - x1) / 2);
+    return {
+      id: edge.id,
+      kind: edge.kind,
+      d: `M${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
+      mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+    };
+  };
 
-  const connectionPath = (from: WorkflowCard, to: WorkflowCard) =>
-    `M ${from.x + 22} ${from.y + 14} C ${(from.x + to.x) / 2 + 8} ${from.y + 14}, ${(from.x + to.x) / 2 - 2} ${to.y + 14}, ${to.x} ${to.y + 14}`;
-
-  const handoffLabel = lead && researcher
-    ? { left: `${Math.min(70, (lead.x + researcher.x) / 2 + 8)}%`, top: `${(lead.y + researcher.y) / 2 + 4}%` }
-    : undefined;
-  const reviewLabel = researcher && critic
-    ? { left: `${Math.min(70, (researcher.x + critic.x) / 2 + 8)}%`, top: `${(researcher.y + critic.y) / 2 + 6}%` }
-    : undefined;
+  const wires = WF_EDGES.map(wireOf).filter((w): w is NonNullable<typeof w> => w !== null);
 
   return (
     <div className="lp-workflow-builder">
       <div className="lp-workflow-builder-head">
-        <div><span className="lp-feature-kicker">Workflow builder</span><strong>Shape the team around the task.</strong></div>
-        <span className="lp-workflow-drag-hint">Drag cards to change the handoff and review path</span>
+        <strong>Shape the team around the task.</strong>
+        <span className="lp-workflow-drag-hint">
+          Drag a card, or move it with the arrow keys
+        </span>
       </div>
       <div className="lp-workflow-layout">
         <aside className="lp-workflow-chat">
           <span className="lp-workflow-chat-label">Workflow chat</span>
-          <h3>Customize the workflow in chat.</h3>
-          <p>Describe a change in plain language. The assistant can draft a new step, adjust a role, or change how work is handed off.</p>
+          <h3>Describe the change instead of drawing it.</h3>
+          <p>
+            The room can ask for a new teammate, a different model, or another
+            link in plain language, and the draft comes back for review.
+          </p>
           <div className="lp-workflow-bubble">Add a fact checker after the researcher.</div>
-          {workflowUpdated && <div className="lp-workflow-result" role="status">Workflow change drafted for review.</div>}
+          {workflowUpdated && (
+            <div className="lp-workflow-result" role="status">
+              Workflow change drafted for review.
+            </div>
+          )}
           <form className="lp-workflow-form" onSubmit={updateWorkflow}>
-            <input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe a workflow change" aria-label="Describe a workflow change" />
-            <button type="submit" className="lp-btn lp-btn--primary">Update workflow</button>
+            <input
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="Describe a change"
+              aria-label="Describe a workflow change"
+            />
+            <button type="submit" className="lp-btn lp-btn--primary">
+              Update workflow
+            </button>
           </form>
         </aside>
-        <div className="lp-workflow-canvas" ref={canvasRef} onPointerMove={moveCard} onPointerUp={finishDragging} onPointerCancel={finishDragging}>
-          <svg className="lp-workflow-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            {lead && researcher && <path d={connectionPath(lead, researcher)} />}
-            {researcher && critic && <path d={connectionPath(researcher, critic)} />}
+
+        <div
+          className="lp-workflow-canvas"
+          ref={canvasRef}
+          onPointerMove={moveCard}
+          onPointerUp={finishDragging}
+          onPointerCancel={finishDragging}
+        >
+          <svg
+            className="lp-workflow-lines"
+            viewBox={`0 0 ${WF_CANVAS.w} ${WF_CANVAS.h}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <defs>
+              {WF_KINDS.map((k) => (
+                <marker
+                  key={k.kind}
+                  id={`lp-wf-arrow-${k.kind}`}
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" className={`lp-wire-${k.kind}`} />
+                </marker>
+              ))}
+            </defs>
+            {wires.map((w) => (
+              <path
+                key={w.id}
+                d={w.d}
+                className={`lp-workflow-wire lp-wire-${w.kind}`}
+                markerEnd={`url(#lp-wf-arrow-${w.kind})`}
+              />
+            ))}
           </svg>
+
+          {wires.map((w) => (
+            <span
+              key={w.id}
+              className={`lp-workflow-link lp-wire-${w.kind}`}
+              style={{
+                left: wfPct(w.mid.x, WF_CANVAS.w),
+                top: wfPct(w.mid.y, WF_CANVAS.h),
+              }}
+              aria-hidden="true"
+            >
+              {WF_KINDS.find((k) => k.kind === w.kind)?.label}
+            </span>
+          ))}
+
           {cards.map((card) => (
             <button
               type="button"
-              className={`lp-workflow-card${card.lead ? " lp-workflow-card--lead" : ""}`}
+              className="lp-workflow-card"
+              data-lead={card.lead === true}
               data-selected={selected === card.id}
               aria-pressed={selected === card.id}
+              aria-label={`${card.title}, ${card.lead ? "lead" : "teammate"}, on ${card.model}`}
               key={card.id}
-              style={{ left: `${card.x}%`, top: `${card.y}%` }}
+              style={{
+                left: wfPct(card.x, WF_CANVAS.w),
+                top: wfPct(card.y, WF_CANVAS.h),
+                width: wfPct(WF_CARD.w, WF_CANVAS.w),
+                height: wfPct(WF_CARD.h, WF_CANVAS.h),
+              }}
               onClick={() => setSelected(card.id)}
               onPointerDown={(event) => startDragging(event, card)}
               onKeyDown={(event) => {
-                const step = 3;
                 if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
                 event.preventDefault();
-                setCards((current) => current.map((item) => item.id === card.id ? {
-                  ...item,
-                  x: Math.max(2, Math.min(72, item.x + (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0))),
-                  y: Math.max(4, Math.min(78, item.y + (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0))),
-                } : item));
+                const step = event.shiftKey ? 40 : 16;
+                setCards((current) =>
+                  current.map((item) =>
+                    item.id === card.id
+                      ? {
+                          ...item,
+                          x: clampX(
+                            item.x +
+                              (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0),
+                          ),
+                          y: clampY(
+                            item.y +
+                              (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0),
+                          ),
+                        }
+                      : item,
+                  ),
+                );
               }}
             >
-              <span className="lp-workflow-card-top"><strong>{card.title}</strong><span>{card.lead ? "Lead" : "Agent"}</span></span>
+              <span className="lp-workflow-card-top">
+                <strong>{card.title}</strong>
+                {card.lead && <span className="lp-workflow-badge">Lead</span>}
+              </span>
               <small>{card.model}</small>
-              <span>{card.brief}</span>
+              <span className="lp-workflow-card-brief">{card.brief}</span>
+              {card.servers.length > 0 && (
+                <span className="lp-workflow-card-tools">
+                  <IconServer />
+                  {card.servers.length} MCP
+                </span>
+              )}
             </button>
           ))}
-          {handoffLabel && <span className="lp-workflow-link lp-workflow-link--handoff" style={handoffLabel}>hands off to</span>}
-          {reviewLabel && <span className="lp-workflow-link lp-workflow-link--review" style={reviewLabel}>is reviewed by</span>}
-          <div className="lp-workflow-canvas-foot"><span className="lp-workflow-live" /> Changes preview live in the room</div>
         </div>
       </div>
-      <p className="lp-note">Move a card with your mouse or arrow keys. Grants can give the workflow access to approved MCP tools while user-scoped permissions stay in place.</p>
+
+      <div className="lp-workflow-inspect" aria-live="polite">
+        <div className="lp-workflow-inspect-agent">
+          <span className="lp-workflow-inspect-head">
+            <strong>{active.title}</strong>
+            <span className="lp-workflow-chip">{active.model}</span>
+          </span>
+          <p>{active.detail}</p>
+        </div>
+        <div className="lp-workflow-inspect-servers">
+          <span className="lp-workflow-inspect-label">MCP servers</span>
+          {active.servers.length === 0 ? (
+            <p className="lp-workflow-empty">
+              None on this agent. Pick the researcher to see two.
+            </p>
+          ) : (
+            <ul>
+              {active.servers.map((server) => (
+                <li key={server.name}>
+                  <span className="lp-workflow-server-top">
+                    <IconServer />
+                    <strong>{server.name}</strong>
+                    <span className="lp-workflow-mode">{server.mode}</span>
+                  </span>
+                  <span className="lp-workflow-server-url">{server.url}</span>
+                  {server.note && (
+                    <span className="lp-workflow-server-note">{server.note}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="lp-workflow-legend">
+        {WF_KINDS.map((k) => (
+          <span className="lp-workflow-legend-item" key={k.kind}>
+            <span className={`lp-workflow-swatch lp-wire-${k.kind}`} />
+            {k.label}
+            {k.prose && <em>prompt only</em>}
+          </span>
+        ))}
+      </div>
+
+      <p className="lp-note">
+        A tool on somebody else's server can do anything, and the room has no way
+        to tell a read from a write among them, so an MCP call goes to the same
+        vote a file write does.
+      </p>
     </div>
   );
 }
 
 /* ------------------------------------------- chapter 5: the room's settings */
 
+/**
+ * Four lines out of a real transcript, in the shape the room actually writes
+ * them: who did it, the verb, then the settled configuration after the dash.
+ * The last one has no author because nothing anyone did caused it. The room
+ * compacts itself when the conversation outgrows the window.
+ */
 const ANNOUNCEMENTS = [
-  { time: "09:14", who: "Ana", what: "set the model to Opus 5" },
-  { time: "09:15", who: "Ravi", what: "changed writes from auto-accept to a vote" },
-  { time: "11:02", who: "Mia", what: "switched the workflow to Manager + workers" },
+  {
+    time: "09:14",
+    who: "Ana",
+    what: "changed the setup",
+    detail: "manager · Opus 5 directing Haiku 4.5 · effort high · up to 5 workers (auto)",
+  },
+  {
+    time: "09:31",
+    who: "Ravi",
+    what: "changed what the agent may do",
+    detail:
+      "ask first · majority · votes on write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
+  },
+  {
+    time: "11:02",
+    who: "Mia",
+    what: "changed the workflow",
+    detail:
+      "custom · Lead on Opus 5 · 3 teammates (Researcher A, Researcher B, Critic) · 4 links",
+  },
+  {
+    time: "14:20",
+    who: null,
+    what: "Compacted 32 earlier messages",
+    detail: "the conversation passed 120,000 tokens. The last 12 are kept verbatim.",
+  },
 ];
+
+/** The header gauge's real numbers: what has been sent, and what it cost. */
+const GAUGE = { used: 84_300, limit: 120_000, usd: "0.412" };
 
 function ChapterRoom() {
   const [ref, seen] = useInView<HTMLDivElement>();
@@ -1047,37 +1445,53 @@ function ChapterRoom() {
           {ANNOUNCEMENTS.map((line, i) => (
             <p
               className="lp-announce-line"
-              key={line.what}
+              key={line.what + line.time}
               data-in={seen}
               style={{ transitionDelay: `${i * 130}ms` }}
             >
               <span className="lp-announce-time" data-num>
                 {line.time}
               </span>
-              <span>
-                <strong>{line.who}</strong> {line.what}
+              <span className="lp-announce-body">
+                <span className="lp-announce-what">
+                  {line.who ? (
+                    <>
+                      <strong>{line.who}</strong> {line.what}
+                    </>
+                  ) : (
+                    line.what
+                  )}
+                </span>
+                <span className="lp-announce-detail"> — {line.detail}</span>
               </span>
             </p>
           ))}
         </div>
       </DemoPanel>
-      <DemoPanel label="Room spend">
+      <DemoPanel label="Room header">
         <div className="lp-gaugewrap">
           <div className="lp-gauge-row">
             <span className="lp-gauge-value" data-num>
-              41%
+              {GAUGE.used.toLocaleString("en-US")}
             </span>
-            <span className="lp-gauge-cap">of today's room budget</span>
+            <span className="lp-gauge-cap" data-num>
+              of {GAUGE.limit.toLocaleString("en-US")} tokens
+            </span>
+            <span className="lp-gauge-cost" data-num>
+              ${GAUGE.usd}
+            </span>
           </div>
           <div className="lp-gauge-track">
             <div
               className="lp-gauge-fill"
-              style={{ transform: `scaleX(${seen ? 0.41 : 0})` }}
+              style={{ transform: `scaleX(${seen ? GAUGE.used / GAUGE.limit : 0})` }}
             />
           </div>
           <p className="lp-note">
-            Tokens are the real bill, so the room watches them together in the
-            header, not one person discovering the number later.
+            The conversation is the bill. Every turn re-sends all of it. Both
+            numbers sit in the room&rsquo;s header where everyone can see them,
+            and when the prompt outgrows the window the room compacts the older
+            half and keeps the last twelve messages verbatim.
           </p>
         </div>
       </DemoPanel>
@@ -1299,10 +1713,11 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Three people typed at once. The agent got one message.</h2>
               <p className="lp-body">
-                Every line is tagged with who said it and folded into a single
-                turn. Anything sent while the agent is working queues up and
-                joins the next one. No turn is split down the middle, and
-                nothing anyone says is quietly discarded.
+                Every line is tagged with who said it and folded into one turn,
+                so the agent answers the room rather than the last person to
+                press enter. A line sent while it is still working waits in the
+                room&rsquo;s inbox and joins the next turn. No turn is split
+                down the middle, and nothing anyone says is quietly discarded.
               </p>
             </Reveal>
             <Reveal delay={1}>
@@ -1317,12 +1732,15 @@ export function LandingPage({
               <h2 className="lp-h2">A write is a proposal.</h2>
               <p className="lp-body">
                 When the agent reaches for a file or the shared document, the
-                call stops and becomes something the room can see and vote on.
-                Rooms that would rather move fast can set auto-accept and let
-                writes through. That is a decision the room makes out loud,
-                not a default it discovers afterwards.
+                call stops and becomes something the room can see. There are
+                three answers, not two: approve it, deny it, or approve it and
+                stop being asked for a while. A room in a hurry can move the
+                whole policy to auto-accept, out loud, in the transcript, never
+                as a default it discovers afterwards.
               </p>
-              <p className="lp-note">Cast a vote below. Yours decides it.</p>
+              <p className="lp-note">
+                Cast a vote. Two of the three people here settle it either way.
+              </p>
             </Reveal>
             <Reveal delay={1}>
               <ChapterVote />
@@ -1335,10 +1753,11 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">The turn waits. Even if you don't.</h2>
               <p className="lp-body">
-                A paused turn isn't a request held open somewhere hoping you
-                come back. It's saved state. The room can go quiet for hours,
-                the last vote can arrive from someone else's phone, and the same
-                turn picks up exactly where it stopped.
+                A paused turn isn&rsquo;t a request held open somewhere hoping
+                you come back. It is saved state. The room can go quiet for
+                hours and hibernate, the deciding vote can arrive from someone
+                else&rsquo;s phone in a different invocation, and the same turn
+                picks up exactly where it stopped.
               </p>
             </Reveal>
             <Reveal delay={1}>
@@ -1347,7 +1766,7 @@ export function LandingPage({
           </div>
         </section>
 
-        <section className="lp-act lp-act--tint lp-act--workflow">
+        <section className="lp-act lp-act--stage lp-act--workflow" id="team">
           <div className="lp-inner lp-chapter">
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Agents can work together in one workflow.</h2>
@@ -1360,9 +1779,9 @@ export function LandingPage({
             </Reveal>
             <Reveal delay={1}>
               <div className="lp-feature-grid">
-                <article className="lp-feature-card"><span className="lp-feature-kicker">Coordinate</span><h3>One lead, several specialists</h3><p>Use a workflow that matches the way your team actually works.</p></article>
-                <article className="lp-feature-card"><span className="lp-feature-kicker">Review</span><h3>Everyone sees the same turn</h3><p>Agent work returns to the room, where people can follow the reasoning and decide what happens next.</p></article>
-                <article className="lp-feature-card"><span className="lp-feature-kicker">Continue</span><h3>Durable by default</h3><p>Long-running work can pause and resume without losing the room’s context.</p></article>
+                <article className="lp-feature-card"><h3>One lead, several specialists</h3><p>Up to eight agents and sixteen links, or the two built-in shapes if the room would rather not draw one.</p></article>
+                <article className="lp-feature-card"><h3>Everyone sees the same turn</h3><p>Delegated work returns into the room&rsquo;s one conversation, with the reviewer&rsquo;s notes attached to the result the lead receives.</p></article>
+                <article className="lp-feature-card"><h3>Durable by default</h3><p>A turn is saved state, so a fan-out can pause on a vote and finish hours later in a different invocation.</p></article>
               </div>
             </Reveal>
             <Reveal delay={2}>
@@ -1372,7 +1791,7 @@ export function LandingPage({
         </section>
 
         <section className="lp-act lp-act--tint">
-          <div className="lp-inner lp-chapter lp-chapter--split lp-chapter--split-rev">
+          <div className="lp-inner lp-chapter lp-chapter--split">
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Point it at a folder. Or at a repo.</h2>
               <p className="lp-body">
@@ -1393,7 +1812,6 @@ export function LandingPage({
         <section className="lp-act">
           <div className="lp-inner lp-chapter lp-chapter--split">
             <Reveal className="lp-chapter-head">
-              <span className="lp-eyebrow">Live IDE activity</span>
               <h2 className="lp-h2">See where the work is happening.</h2>
               <p className="lp-body">
                 When teammates use the IDE, the room can show the file they
@@ -1415,20 +1833,20 @@ export function LandingPage({
         <section className="lp-act lp-act--tint">
           <div className="lp-inner lp-chapter">
             <Reveal className="lp-chapter-head">
-              <span className="lp-eyebrow">Tools and control</span>
               <h2 className="lp-h2">More capability, with clear boundaries.</h2>
               <p className="lp-body">
-                Browse an MCP catalog, grant a workflow access to the tools it
-                needs, and keep every connection scoped to the user and room.
-                Security is part of the product surface, with infrastructure
-                supported by Cloudflare, Stripe, and Sentry.
+                Pick a server from the catalogue, hand it to one agent, and
+                decide whether it runs on the room&rsquo;s credential or on each
+                person&rsquo;s own. Nothing about that loosens the gate: the
+                room cannot tell a read from a write on somebody else&rsquo;s
+                server, so an MCP call is voted on like a file write.
               </p>
             </Reveal>
             <Reveal delay={1}>
               <div className="lp-feature-grid">
-                <article className="lp-feature-card"><span className="lp-feature-kicker">MCP catalog</span><h3>Connect the tools you already use</h3><p>See available MCP servers in one place, then choose which approved tools can continue a workflow.</p></article>
-                <article className="lp-feature-card"><span className="lp-feature-kicker">User-scoped permissions</span><h3>Grants stay intentional</h3><p>Access follows the person and the room. A workflow only receives the permissions it was given.</p></article>
-                <article className="lp-feature-card"><span className="lp-feature-kicker">Agent history</span><h3>Clearly recorded from start to finish</h3><p>Tool calls, workflow steps, approvals, and outcomes remain visible in the room history.</p></article>
+                <article className="lp-feature-card"><h3>A catalogue, not a URL you have to know</h3><p>Linear, Stripe, Sentry and Cloudflare&rsquo;s own servers, each listed with the credential it actually takes. A server this app cannot reach yet says so instead of failing quietly.</p></article>
+                <article className="lp-feature-card"><h3>Shared credential, or your own</h3><p>A server can run on one token for the whole room, or on a token per person so the agent acts as whoever asked. The token never leaves the room&rsquo;s storage.</p></article>
+                <article className="lp-feature-card"><h3>Standing approval that ends by itself</h3><p>Approving and asking to stop being asked gives the agent fifteen minutes and ten uses. The room can see it in the header, and anyone can take it back.</p></article>
               </div>
             </Reveal>
           </div>
@@ -1439,10 +1857,10 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Settings belong to the room, not to you.</h2>
               <p className="lp-body">
-                The model, the spend policy and the workflow are shared, and
-                every change is announced in the transcript with the name of
-                whoever made it. Changes only land while the agent is idle, so
-                nobody moves the floor mid-turn.
+                The model, the permissions and the workflow belong to the room,
+                and every change is announced in the transcript with the name of
+                whoever made it and the setup it landed on. Changes only take
+                while the agent is idle, so nobody moves the floor mid-turn.
               </p>
             </Reveal>
             <Reveal delay={1}>
