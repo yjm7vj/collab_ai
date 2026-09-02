@@ -1572,7 +1572,10 @@ input:focus, textarea:focus {
 .project-invite-row > div:first-child span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-invite-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .project-invite-row.revoked { opacity: .62; }
-.form-error { margin: 0; color: var(--danger, #ff6b6b); }
+/* `--danger` is not a token in this system, so the fallback was always the one
+   that applied — one hard-coded red in both themes. `--bad` is the real one,
+   and it inverts with the theme like everything else. */
+.form-error { margin: 0; color: var(--bad); }
 .modal-body h3 {
   margin: 0 0 12px;
   font-size: 12px;

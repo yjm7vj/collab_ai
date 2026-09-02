@@ -22,7 +22,7 @@ import {
   type DocumentRevision,
   type DecisionRecord,
   type Grant,
-  grantIsLive,
+  liveGrants,
   type PendingTool,
   type Presence as PresenceUser,
   type Vote,
@@ -1733,7 +1733,7 @@ export function GrantStrip({
   canRevoke,
   onRevoke,
 }: {
-  grants: Grant[];
+  grants: Grant[] | undefined;
   canRevoke: boolean;
   onRevoke: (id: string) => void;
 }) {
@@ -1744,8 +1744,10 @@ export function GrantStrip({
     return () => clearInterval(timer);
   }, []);
 
+  // `?? []` inside liveGrants: this renders from synced RoomState, and a room
+  // last persisted before grants existed sends no such field.
   const now = Date.now();
-  const live = grants.filter((g) => grantIsLive(g, now));
+  const live = liveGrants(grants, now);
   if (live.length === 0) return null;
 
   return (

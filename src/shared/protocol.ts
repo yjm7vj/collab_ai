@@ -190,9 +190,25 @@ export function grantIsLive(g: Grant, now: number): boolean {
   return g.expiresAt > now && g.usedCount < g.maxUses;
 }
 
-/** The live grant covering this tool, if the room has given one. */
-export function grantFor(grants: Grant[], tool: string, now: number): Grant | undefined {
-  return grants.find((g) => g.tool === tool && grantIsLive(g, now));
+/**
+ * The live grant covering this tool, if the room has given one.
+ *
+ * Takes `undefined` because it is handed `RoomState.grants`, and a room whose
+ * state was persisted before this field existed has no such property. Every
+ * caller reads straight off synced or stored state, so the tolerance belongs
+ * here rather than at each of them.
+ */
+export function grantFor(
+  grants: Grant[] | undefined,
+  tool: string,
+  now: number,
+): Grant | undefined {
+  return (grants ?? []).find((g) => g.tool === tool && grantIsLive(g, now));
+}
+
+/** Live grants only, safe against state that predates the field. */
+export function liveGrants(grants: Grant[] | undefined, now: number): Grant[] {
+  return (grants ?? []).filter((g) => grantIsLive(g, now));
 }
 
 /**

@@ -62,6 +62,7 @@ const CLIENT_FS_TIMEOUT_MS = FS_LIMITS.timeoutMs + 5_000;
 export function RoomView({
   roomId,
   token,
+  sessionCookie,
   displayName,
   onDisplayNameChange,
   onSignOut,
@@ -75,6 +76,12 @@ export function RoomView({
 }: {
   roomId: string;
   token: string;
+  /**
+   * Whether this tab has a session cookie. When it does the socket carries no
+   * credential in its URL at all — the browser attaches the cookie to the
+   * upgrade — which keeps a week-long room token out of the request logs.
+   */
+  sessionCookie: boolean;
   displayName: string;
   onDisplayNameChange?: (name: string) => void;
   onSignOut?: () => void;
@@ -318,7 +325,9 @@ export function RoomView({
   const agent = useAgent({
     agent: "room",
     name: roomId,
-    query: { tk: token },
+    // Empty once a session cookie exists. The fallback is only for a tab that
+    // could not establish one; the Worker accepts either.
+    query: sessionCookie ? {} : { tk: token },
     onStateUpdate: (s: RoomState) => {
       setState(s);
       onWorkspaceChange(roomId, s.workspace);
@@ -984,7 +993,7 @@ export function RoomView({
           chat={workflowChat}
           onChatSend={sendWorkflowChat}
           onChatReset={resetWorkflowChat}
-          mcpTokensSet={state.mcpTokensSet}
+          mcpTokensSet={state.mcpTokensSet ?? []}
           onSetMcpToken={setMcpToken}
           me={me}
         />
@@ -1073,7 +1082,7 @@ export function RoomView({
 
           {state.workers.length > 0 && <WorkerStrip workers={state.workers} />}
 
-          <GrantStrip grants={state.grants} canRevoke={mayVote} onRevoke={revokeGrant} />
+          <GrantStrip grants={state.grants ?? []} canRevoke={mayVote} onRevoke={revokeGrant} />
 
           {state.pending.length > 0 && (
             <div className="approvals">
