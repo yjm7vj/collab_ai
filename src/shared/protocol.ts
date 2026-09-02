@@ -621,7 +621,17 @@ export const IDENTITY_MARKER = "identity";
 export type CreateRoomRequest = { uid: string; name: string; title?: string; identity?: string };
 export type CreateRoomResponse = { roomId: string; token: string; role: string };
 
-export type JoinRoomRequest = { roomId: string; uid: string; name: string; code?: string; identity?: string };
+/**
+ * `claim` is the browser-local uid this browser used before it had an account.
+ *
+ * Rooms made before this deployment had sign-in are owned by that uid rather
+ * than by any account, so signing in derived a different uid and shut the
+ * creator out of their own room. Sending the old one lets the room link the
+ * two. It is a claim and not a credential: the room honours it only for a uid
+ * that is already a member, and only ever adopts the role that member already
+ * had. See the claim block in Room#onRequest's /admit.
+ */
+export type JoinRoomRequest = { roomId: string; uid: string; name: string; code?: string; identity?: string; claim?: string };
 export type JoinRoomResponse = { token: string; role: string };
 
 /** Why admission was refused. Shown to the person trying to get in. */

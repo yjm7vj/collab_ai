@@ -398,6 +398,7 @@ export default {
       let uid: string;
       let name: string;
       let avatar = "";
+      let identityUsed = false;
       if (body.identity !== undefined) {
         const identity = await identityFrom(env, body.identity);
         if (!identity) return json({ error: "sign_in_required" }, 401);
@@ -406,6 +407,7 @@ export default {
         uid = identity.uid;
         name = identity.name;
         avatar = identity.avatar;
+        identityUsed = true;
       } else if (signInRequired(env)) {
         // Closes unauthenticated room joining on a deployment that has
         // sign-in switched on: no identity and no fallback allowed.
@@ -420,10 +422,15 @@ export default {
         return json({ error: "bad_request" }, 400);
       }
 
+      // Only meaningful when a signed identity chose the uid above. With
+      // sign-in off the browser-local uid IS the uid, so there is nothing to
+      // link and forwarding it would just be the same value twice.
+      const claim = identityUsed ? String(body.claim ?? "") : "";
+
       const stub = await roomStub(env, roomId);
       const admitRes = await stub.fetch("https://room/admit", {
         method: "POST",
-        body: JSON.stringify({ uid, name, avatar, code: body.code }),
+        body: JSON.stringify({ uid, name, avatar, code: body.code, claim }),
         headers: {
           "content-type": "application/json",
           "x-internal-auth": env.ROOM_SECRET,

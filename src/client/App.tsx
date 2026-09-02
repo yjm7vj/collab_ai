@@ -57,6 +57,18 @@ function myUid(): string {
 
 const PROJECTS_KEY = "collab_ai:projects";
 const ROOMS_KEY = "collab_ai:rooms";
+/**
+ * Which account the cached sidebar above belongs to.
+ *
+ * The cache is one browser's, but /api/sidebar files whatever it is handed
+ * under whoever is signed in, and it files it as a bookmark — a row there is
+ * not membership, and the room re-checks membership on every join. So a
+ * sidebar carried across a sign-in lands rooms in an account that cannot open
+ * them, which reads as "this is my room" and refuses to let you in.
+ *
+ * Same marker, and the same reasoning, as OWNER_KEY in ./presets.
+ */
+const SIDEBAR_OWNER_KEY = "collab_ai:sidebar:owner";
 
 /**
  * `updatedAt` is what makes two browsers able to disagree and settle.
@@ -513,6 +525,43 @@ export function App() {
   const sent = useRef<SentIds>({ rooms: new Set(), projects: new Set() });
 
   /**
+   * Forget a sidebar cached for somebody else.
+   *
+   * A sidebar built while signed out has no owner recorded and belongs to
+   * whoever signs in next — carrying it up is the point of syncing at all. A
+   * sidebar last synced as another account is a different matter, and is
+   * dropped before anything can be pushed under the new one's name. Without
+   * this, signing in with a second provider quietly republished the first
+   * account's rooms into the second's sidebar, where they showed up looking
+   * like the person's own and then refused them at the door.
+   *
+   * The ref is cleared as well as the state because the push below reads the
+   * ref, and a setState is not visible there until the next render.
+   */
+  const claimSidebarCache = useCallback((accountUid: string | null) => {
+    let owner: string | null = null;
+    try {
+      owner = localStorage.getItem(SIDEBAR_OWNER_KEY);
+    } catch {
+      // Unreadable storage: treat the cache as unowned rather than refusing
+      // to sync. The merge on the way back is safe either way.
+    }
+    if (owner && owner !== accountUid) {
+      sidebar.current = { projects: [], rooms: [] };
+      pushed.current = null;
+      sent.current = { rooms: new Set(), projects: new Set() };
+      setProjects([]);
+      setRooms([]);
+    }
+    try {
+      if (accountUid) localStorage.setItem(SIDEBAR_OWNER_KEY, accountUid);
+    } catch {
+      // Same reasoning as persistSidebar: losing the marker costs a merge,
+      // not data.
+    }
+  }, []);
+
+  /**
    * Push this browser's sidebar to the account and adopt what comes back.
    *
    * Rooms and projects used to live only in localStorage, which is why signing
@@ -534,6 +583,9 @@ export function App() {
         // No identity, no account to sync with: a deployment with sign-in off
         // keeps exactly the browser-local sidebar it has always had.
         if (!identityToken) return;
+        // Before the snapshot is read, so a cache belonging to another
+        // account is gone rather than pushed under this one's name.
+        claimSidebarCache(readIdentity(identityToken)?.uid ?? null);
         const snapshot = syncSnapshot(sidebar.current.projects, sidebar.current.rooms);
         const body = JSON.stringify(snapshot);
         if (!options?.force && !removing && body === pushed.current) return;
@@ -576,7 +628,7 @@ export function App() {
       queue.current = queue.current.then(run, run);
       return queue.current;
     },
-    [],
+    [claimSidebarCache],
   );
 
   const identityUid = identity?.uid ?? null;
@@ -795,6 +847,11 @@ export function App() {
             name: displayName,
             code,
             identity: storedIdentity() ?? undefined,
+            // The uid this browser had before it had an account. Rooms made
+            // back then are owned by it, so it is the only thing that can
+            // prove a room predating sign-in belongs to whoever is signing
+            // in now. The room ignores it unless it is already a member.
+            claim: uid,
           } satisfies JoinRoomRequest),
         });
         if (!res.ok) {

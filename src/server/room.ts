@@ -1211,6 +1211,8 @@ export class Room extends Agent<Env, RoomState> {
       avatar?: string;
       title?: string;
       code?: string;
+      /** A prior uid whose membership should move to `uid`. See /admit. */
+      claim?: string;
       installationId?: string;
       token?: string;
       login?: string;
@@ -1253,6 +1255,35 @@ export class Room extends Agent<Env, RoomState> {
       if (existing !== null) {
         this.sql`UPDATE members SET name = ${name}, avatar = ${avatar}, last_seen = ${now} WHERE uid = ${uid}`;
         return json({ role: existing, title: room.title });
+      }
+
+      // A room made before this deployment had sign-in is owned by the
+      // browser-local uid that created it. That uid is not an account, so
+      // signing in derived a different one and locked the creator out of
+      // their own room — the room was still theirs, and there was no longer
+      // any way to say so. A claim is how they say it.
+      //
+      // Possession of the old uid is the entire proof, which is exactly the
+      // proof that uid carried on the day the room was made: back then it was
+      // the only thing /admit ever had. So this restores the access that
+      // model granted and does not widen it.
+      //
+      // It MOVES the membership rather than copying it, so one person can
+      // never end up in the room twice. And it is unreachable once the caller
+      // is already a member — the check above returns first — so it can never
+      // be used to trade a role somebody already holds for a better one.
+      //
+      // Deliberately above the `locked` check: locked means the room is not
+      // taking new members, and this is not a new member arriving.
+      const claim = String(body.claim ?? "");
+      if (claim && claim !== uid && UID_RE.test(claim)) {
+        const claimed = this.#memberRole(claim);
+        if (claimed !== null) {
+          this.sql`UPDATE members SET uid = ${uid}, name = ${name}, avatar = ${avatar}, last_seen = ${now}
+                   WHERE uid = ${claim}`;
+          this.#system(`${name} signed in and reclaimed their place in this room`);
+          return json({ role: claimed, title: room.title });
+        }
       }
 
       if (room.visibility === "locked") return json({ error: "locked" }, 403);
