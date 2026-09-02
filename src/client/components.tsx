@@ -31,6 +31,7 @@ import {
 import { inlineMarkdown } from "./markdown";
 import type { WorkspaceInfo } from "../shared/workspace";
 import type { FsRequest, FsResponse } from "../shared/workspace";
+import type { ProjectInviteRole, ProjectInviteSummary } from "../shared/project-invites";
 import { IdePanel } from "./IdePanel";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { contextUsage } from "../shared/context";
@@ -267,6 +268,7 @@ export function Landing({
 
 export function JoinGate({
   roomId,
+  projectInvite = false,
   initialName,
   busy,
   problem,
@@ -277,6 +279,7 @@ export function JoinGate({
   onToggleTheme,
 }: {
   roomId: string;
+  projectInvite?: boolean;
   initialName: string;
   busy: boolean;
   problem: string | null;
@@ -301,9 +304,9 @@ export function JoinGate({
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         </div>
         <p className="gate-sub">
-          You've been invited to a room.
+          {projectInvite ? "You've been invited to a project." : "You've been invited to a room."}
           <br />
-          Room {roomId.slice(0, 6)}...
+          {projectInvite ? "Choose the rooms you have access to." : `Room ${roomId.slice(0, 6)}...`}
         </p>
         {identityName ? (
           <p className="gate-signed-in">
@@ -325,7 +328,7 @@ export function JoinGate({
           />
         )}
         <button type="submit" disabled={(!identityName && !value.trim()) || busy}>
-          {busy ? "Joining..." : "Join Room"}
+          {busy ? "Joining..." : projectInvite ? "Join Project" : "Join Room"}
         </button>
         {problem && <p className="gate-error">{problem}</p>}
         <p className="gate-foot">
@@ -506,6 +509,7 @@ export function SidePane({
   onArchiveProject,
   onRestoreProject,
   onDeleteProject,
+  onInviteProject,
 }: {
   activeRoomId?: string;
   busy: boolean;
@@ -530,6 +534,7 @@ export function SidePane({
   onArchiveProject: (projectId: string) => void;
   onRestoreProject: (projectId: string) => void;
   onDeleteProject: (projectId: string) => void;
+  onInviteProject: (project: SideProject) => void;
 }) {
   const [addingProject, setAddingProject] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -833,6 +838,10 @@ export function SidePane({
                         }}>Rename project</button>
                         <button type="button" role="menuitem" onClick={() => {
                           setOpenProjectMenu(null);
+                          onInviteProject(project);
+                        }}>Invite to project</button>
+                        <button type="button" role="menuitem" onClick={() => {
+                          setOpenProjectMenu(null);
                           onArchiveProject(project.id);
                         }}>Archive project</button>
                         <button type="button" role="menuitem" onClick={() => {
@@ -1012,6 +1021,97 @@ export function SidePane({
 
       </nav>
     </aside>
+  );
+}
+
+export function ProjectInvitePanel({
+  project,
+  onCreate,
+  onList,
+  onUpdate,
+  onRevoke,
+  onClose,
+}: {
+  project: SideProject;
+  onCreate: (rooms: string[], role: ProjectInviteRole) => Promise<ProjectInviteSummary | null>;
+  onList: () => Promise<ProjectInviteSummary[]>;
+  onUpdate: (code: string, rooms: string[], role: ProjectInviteRole) => Promise<ProjectInviteSummary | null>;
+  onRevoke: (code: string) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const availableRooms = project.rooms.filter((room) => !room.archived);
+  const [selectedRooms, setSelectedRooms] = useState<string[]>(availableRooms.map((room) => room.roomId));
+  const [role, setRole] = useState<ProjectInviteRole>("viewer");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [invites, setInvites] = useState<ProjectInviteSummary[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [createdLink, setCreatedLink] = useState<string | null>(null);
+
+  const refresh = async () => {
+    setBusy(true);
+    setError(null);
+    try { setInvites(await onList()); } catch { setError("Could not load project invites."); }
+    setBusy(false);
+  };
+  useEffect(() => { void refresh(); }, []);
+
+  const toggleRoom = (roomId: string) => setSelectedRooms((current) => current.includes(roomId) ? current.filter((id) => id !== roomId) : [...current, roomId]);
+  const beginCreate = () => {
+    setEditing(null);
+    setRole("viewer");
+    setSelectedRooms(availableRooms.map((room) => room.roomId));
+    setCreatedLink(null);
+    setError(null);
+  };
+  const editInvite = (invite: ProjectInviteSummary) => {
+    setEditing(invite.code);
+    setRole(invite.role);
+    setSelectedRooms(invite.rooms.map((room) => room.roomId));
+    setCreatedLink(null);
+    setError(null);
+  };
+  const submit = async () => {
+    if (selectedRooms.length === 0) { setError("Select at least one room."); return; }
+    setBusy(true);
+    setError(null);
+    const result = editing ? await onUpdate(editing, selectedRooms, role) : await onCreate(selectedRooms, role);
+    if (!result) setError("The project invite could not be saved.");
+    else {
+      setInvites((current) => editing ? current.map((invite) => invite.code === result.code ? result : invite) : [result, ...current]);
+      if (!editing) setCreatedLink(`${location.origin}/#/p/${result.code}`);
+      setEditing(null);
+    }
+    setBusy(false);
+  };
+  const revoke = async (code: string) => {
+    if (!window.confirm("Revoke this project invite? Existing members will keep their access.")) return;
+    setBusy(true);
+    if (await onRevoke(code)) setInvites((current) => current.map((invite) => invite.code === code ? { ...invite, revoked: true } : invite));
+    else setError("The project invite could not be revoked.");
+    setBusy(false);
+  };
+  const copy = (code: string) => { void navigator.clipboard.writeText(`${location.origin}/#/p/${code}`); };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal project-invite-modal" role="dialog" aria-label={`Invite to ${project.name}`} onClick={(event) => event.stopPropagation()}>
+        <header className="modal-head"><div><h2>Invite to {project.name}</h2><p className="field-note">Choose the rooms this link can open. You can edit or revoke it later.</p></div><button className="icon" onClick={onClose} aria-label="Close">✕</button></header>
+        <div className="modal-body project-invite-body">
+          {availableRooms.length === 0 ? <div className="side-empty"><strong>Add a room before inviting someone.</strong><span>Project invites need at least one room to grant access to.</span></div> : <>
+            <section className="project-invite-form">
+              <div className="field-label">Rooms this invite can access</div>
+              <div className="project-invite-rooms">{availableRooms.map((room) => <label key={room.roomId}><input type="checkbox" checked={selectedRooms.includes(room.roomId)} onChange={() => toggleRoom(room.roomId)} />{room.label}</label>)}</div>
+              <label className="field-label">Access level<select value={role} onChange={(event) => setRole(event.target.value as ProjectInviteRole)}><option value="viewer">Viewer</option><option value="editor">Editor</option></select></label>
+              <div className="side-form-actions"><button type="button" onClick={beginCreate} disabled={busy}>New invite</button><button type="button" className="primary" onClick={() => void submit()} disabled={busy || selectedRooms.length === 0}>{busy ? "Saving..." : editing ? "Save permissions" : "Create invite"}</button></div>
+              {createdLink && <div className="project-invite-link"><span>{createdLink}</span><button type="button" onClick={() => copy(createdLink.slice(createdLink.lastIndexOf("/") + 1))}>Copy link</button></div>}
+              {error && <p className="form-error">{error}</p>}
+            </section>
+            <section><div className="field-label">Existing project invites</div>{invites.length === 0 && !busy && <p className="field-note">No invites created yet.</p>}{invites.map((invite) => <div className={`project-invite-row ${invite.revoked ? "revoked" : ""}`} key={invite.code}><div><strong>{invite.revoked ? "Revoked invite" : `${invite.role} access`}</strong><span>{invite.rooms.map((room) => room.label).join(", ")}</span></div><div className="project-invite-actions"><button type="button" onClick={() => copy(invite.code)} disabled={invite.revoked}>Copy link</button><button type="button" onClick={() => editInvite(invite)} disabled={invite.revoked}>Edit</button><button type="button" onClick={() => void revoke(invite.code)} disabled={invite.revoked || busy}>Revoke</button></div></div>)}</section>
+          </>}
+        </div>
+      </div>
+    </div>
   );
 }
 
