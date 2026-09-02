@@ -1865,7 +1865,6 @@ export function LandingPage({
         <section className="lp-act lp-act--tint lp-act--mcp">
           <div className="lp-inner lp-chapter">
             <Reveal className="lp-chapter-head">
-              <span className="lp-feature-kicker">MCP servers</span>
               <h2 className="lp-h2">Give workflows the tools they need.</h2>
               <p className="lp-body">
                 MCP servers stay in their own section so the workflow stays easy

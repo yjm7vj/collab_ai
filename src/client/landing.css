@@ -1581,6 +1581,10 @@ html:has(.lp) {
   border-radius: var(--lp-r-xl);
   background: color-mix(in srgb, var(--panel) 72%, var(--bg));
 }
+.lp-act--mcp .lp-h2 {
+  font-size: clamp(2.4rem, 4.2vw, 3.6rem);
+  max-width: 16ch;
+}
 
 /* The room's workflow editor at page scale. It lives only on a stage act, so
    it speaks the stage vocabulary throughout; on a pale ground its ink would be
