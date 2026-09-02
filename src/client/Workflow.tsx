@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MODELS, modelInfo } from "../shared/models";
+import { MCP_CATALOG, authNote, catalogEntry } from "../shared/mcpCatalog";
 import type { WorkflowChatTurn } from "../shared/protocol";
 import {
   CARD,
@@ -1099,19 +1100,42 @@ function NodeInspector({
                 ) : (
                   <span className="field-note">Apply the workflow to set a token here.</span>
                 ))}
+              <McpServerNote url={s.url} />
             </div>
           ))}
         </div>
         {canEdit && mcpServers.length < GRAPH_LIMITS.mcpServersPerNode && (
-          <button
-            onClick={() =>
-              onPatch({
-                mcpServers: [...mcpServers, { id: newId(), name: "", url: "" }],
-              })
-            }
-          >
-            Add MCP Server
-          </button>
+          <div className="wf-mcp-add">
+            <select
+              value=""
+              aria-label="Add an MCP server"
+              onChange={(e) => {
+                const entry = catalogEntry(e.target.value);
+                onPatch({
+                  mcpServers: [
+                    ...mcpServers,
+                    entry
+                      ? { id: newId(), name: entry.label, url: entry.url }
+                      : { id: newId(), name: "", url: "" },
+                  ],
+                });
+                // Snap back to the prompt so the same server can be picked twice
+                // (two accounts on one service is a real thing people want).
+                e.target.value = "";
+              }}
+            >
+              <option value="" disabled>
+                Add a server…
+              </option>
+              {MCP_CATALOG.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.label}
+                  {entry.auth === "oauth" ? " (OAuth — not supported yet)" : ""}
+                </option>
+              ))}
+              <option value="__custom">Custom…</option>
+            </select>
+          </div>
         )}
         <span className="field-note">
           Remote MCP servers only — this agent calls their tools directly. Tools from a
@@ -1123,6 +1147,22 @@ function NodeInspector({
         <button onClick={onStartLink}>Draw a link from {node.name}</button>
       )}
     </div>
+  );
+}
+
+/**
+ * What we know about the server at this address, when it's one from the
+ * catalogue. Says out loud when a server can't work yet — an OAuth-only server
+ * wired up here will fail at the first tool call, and finding that out now is
+ * cheaper than finding it out mid-turn.
+ */
+function McpServerNote({ url }: { url: string }) {
+  const entry = MCP_CATALOG.find((e) => e.url === url.trim());
+  if (!entry) return null;
+  return (
+    <span className={`field-note wf-mcp-note ${entry.auth === "oauth" ? "wf-mcp-note-warn" : ""}`}>
+      {entry.blurb} {authNote(entry.auth)}
+    </span>
   );
 }
 

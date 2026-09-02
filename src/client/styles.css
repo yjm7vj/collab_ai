@@ -2827,6 +2827,11 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
 .wf-mcp-url { flex: 1 1 160px; font-family: var(--mono); font-size: 12px; }
 .wf-mcp-token { display: inline-flex; gap: 6px; align-items: center; }
 .wf-mcp-token input { width: 140px; }
+.wf-mcp-add { display: flex; }
+.wf-mcp-note { flex-basis: 100%; }
+/* An OAuth-only server can be wired up but will never connect — that has to
+   read as a warning, not as ordinary help text. */
+.wf-mcp-note-warn { color: var(--warn); }
 
 .wf-empty h3 { margin: 0 0 8px; }
 .wf-empty p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-dim); }
