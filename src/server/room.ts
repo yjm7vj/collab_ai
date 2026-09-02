@@ -92,6 +92,7 @@ import {
   workerSystemFor,
   type ModelConfig,
   type Usage,
+  type WorkerMcpServer,
   type WorkerTask,
 } from "./model";
 import {
@@ -401,6 +402,19 @@ export class Room extends Agent<Env, RoomState> {
       installation_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )`;
+    // Bearer tokens for the MCP servers wired to a custom-workflow agent
+    // (see workflow.ts's AgentNode#mcpServers, which carries no credential
+    // for exactly this reason). Keyed by (node id, server id) rather than by
+    // room, since a graph can carry several agents each with their own
+    // servers. Read fresh in #delegate and handed straight to the model
+    // call — never put in RoomState, which syncs to every connected client.
+    this.sql`CREATE TABLE IF NOT EXISTS mcp_tokens (
+      node_id TEXT NOT NULL,
+      server_id TEXT NOT NULL,
+      token TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (node_id, server_id)
+    )`;
     this.#schemaReady = true;
   }
 
@@ -422,6 +436,45 @@ export class Room extends Agent<Env, RoomState> {
 
   #kvDel(key: string) {
     this.sql`DELETE FROM kv WHERE k = ${key}`;
+  }
+
+  /** Store (or, given an empty string, clear) one MCP server's bearer token. */
+  #setMcpToken(nodeId: string, serverId: string, token: string) {
+    if (token === "") {
+      this.sql`DELETE FROM mcp_tokens WHERE node_id = ${nodeId} AND server_id = ${serverId}`;
+      return;
+    }
+    this.sql`INSERT INTO mcp_tokens (node_id, server_id, token, updated_at)
+             VALUES (${nodeId}, ${serverId}, ${token}, ${Date.now()})
+             ON CONFLICT(node_id, server_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`;
+  }
+
+  /** This node's stored tokens, server id -> token. Read fresh; never cached. */
+  #mcpTokensFor(nodeId: string): Map<string, string> {
+    const rows = this.sql<{ server_id: string; token: string }>`
+      SELECT server_id, token FROM mcp_tokens WHERE node_id = ${nodeId}`;
+    return new Map(rows.map((r) => [r.server_id, r.token] as const));
+  }
+
+  /**
+   * Which (node, server) pairs have a token stored, as `"nodeId:serverId"`
+   * keys — safe to put in RoomState because it carries no token value, only
+   * whether one exists.
+   */
+  #mcpTokensSet(): string[] {
+    const rows = this.sql<{ node_id: string; server_id: string }>`SELECT node_id, server_id FROM mcp_tokens`;
+    return rows.map((r) => `${r.node_id}:${r.server_id}`);
+  }
+
+  /** A node's MCP servers, each resolved with its stored token (if any). */
+  #mcpServersFor(node: AgentNode): WorkerMcpServer[] {
+    if (node.mcpServers.length === 0) return [];
+    const tokens = this.#mcpTokensFor(node.id);
+    return node.mcpServers.map((s) => ({
+      name: s.name,
+      url: s.url,
+      ...(tokens.get(s.id) ? { authorizationToken: tokens.get(s.id) } : {}),
+    }));
   }
 
   #convo(): MessageParam[] {
@@ -1295,6 +1348,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onSay(connection, msg.text);
       case "vote":
         return this.#onVote(connection, msg.toolUseId, msg.vote);
+      case "set_mcp_token":
+        return this.#onSetMcpToken(connection, msg.nodeId, msg.serverId, msg.token);
       case "interrupt":
         return this.#onInterrupt(connection);
       case "settings":
@@ -2463,6 +2518,24 @@ export class Room extends Agent<Env, RoomState> {
     await this.#settleIfDecided();
   }
 
+  async #onSetMcpToken(connection: Connection, nodeId: string, serverId: string, token: string) {
+    if (
+      !this.#allow(
+        connection,
+        "workflow",
+        "You need to be an editor or above to change an agent's MCP servers.",
+      )
+    )
+      return;
+
+    const node = this.#graph().nodes.find((n) => n.id === nodeId);
+    const server = node?.mcpServers.find((s) => s.id === serverId);
+    if (!server) return; // stale UI — the server was removed from the graph already
+
+    this.#setMcpToken(nodeId, serverId, token);
+    this.setState({ ...this.state, mcpTokensSet: this.#mcpTokensSet() });
+  }
+
   async #onInterrupt(connection: Connection) {
     if (!this.#allow(connection, "speak", "You're a viewer in this room, so you can't stop the agent.")) return;
     const name = this.#nameOf(connection);
@@ -2744,7 +2817,13 @@ export class Room extends Agent<Env, RoomState> {
             task,
             ctx,
             workerToolsFor(this.#policy(), node?.model ?? settings.workerModel),
-            node && graph ? { model: node.model, system: workerSystemFor(graph, node) } : null,
+            node && graph
+              ? {
+                  model: node.model,
+                  system: workerSystemFor(graph, node),
+                  mcpServers: this.#mcpServersFor(node),
+                }
+              : null,
           );
           r.usage.forEach((u) => this.#recordUsage(u));
 

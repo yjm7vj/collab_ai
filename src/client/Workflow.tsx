@@ -76,6 +76,8 @@ export function WorkflowPanel({
   chat,
   onChatSend,
   onChatReset,
+  mcpTokensSet,
+  onSetMcpToken,
 }: {
   graph: WorkflowGraph;
   /** Whether the room is currently running on this graph. */
@@ -91,6 +93,9 @@ export function WorkflowPanel({
   chat: WorkflowChatState;
   onChatSend: (text: string, graph: WorkflowGraph) => void;
   onChatReset: () => void;
+  /** `"nodeId:serverId"` keys with a stored MCP token — see room.ts#mcpTokensSet. */
+  mcpTokensSet: string[];
+  onSetMcpToken: (nodeId: string, serverId: string, token: string) => void;
 }) {
   const [draft, setDraft] = useState<WorkflowGraph>(graph);
   const [useCustom, setUseCustom] = useState(active);
@@ -205,6 +210,7 @@ export function WorkflowPanel({
       prompt: "",
       x: Math.min(MAX_POS.x, 660 + (taken % 2) * 300),
       y: Math.min(MAX_POS.y, 120 + Math.floor(taken / 2) * 180),
+      mcpServers: [],
     };
     setDraft((d) => ({ ...d, nodes: [...d.nodes, node] }));
     setSelected({ kind: "node", id });
@@ -744,6 +750,14 @@ export function WorkflowPanel({
               onPatch={(patch) => patchNode(selNode.id, patch)}
               onDelete={() => removeNode(selNode.id)}
               onStartLink={() => setLinking(selNode.id)}
+              // Token entry targets the room's currently-applied graph, not this
+              // unsaved draft — a server row added here has no token to set
+              // until Apply gives it somewhere real to live.
+              savedServerIds={
+                new Set(graph.nodes.find((n) => n.id === selNode.id)?.mcpServers.map((s) => s.id) ?? [])
+              }
+              mcpTokensSet={mcpTokensSet}
+              onSetMcpToken={onSetMcpToken}
             />
           )}
           {selEdge && (
@@ -943,6 +957,9 @@ function NodeInspector({
   onPatch,
   onDelete,
   onStartLink,
+  savedServerIds,
+  mcpTokensSet,
+  onSetMcpToken,
 }: {
   node: AgentNode;
   graph: WorkflowGraph;
@@ -951,6 +968,10 @@ function NodeInspector({
   onPatch: (patch: Partial<AgentNode>) => void;
   onDelete: () => void;
   onStartLink: () => void;
+  /** MCP server ids that exist in the room's applied graph, not just this draft. */
+  savedServerIds: Set<string>;
+  mcpTokensSet: string[];
+  onSetMcpToken: (nodeId: string, serverId: string, token: string) => void;
 }) {
   const isLead = node.id === graph.leadId;
   // The catalogue already knows which models are fit to lead and which are fit
@@ -1023,10 +1044,117 @@ function NodeInspector({
         </span>
       </label>
 
+      {!isLead && (
+        <div className="field">
+          <span className="field-label">MCP Servers</span>
+          <div className="wf-mcp-list">
+            {node.mcpServers.map((s) => (
+              <div className="wf-mcp-row" key={s.id}>
+                <input
+                  className="wf-mcp-name"
+                  value={s.name}
+                  disabled={!canEdit}
+                  maxLength={GRAPH_LIMITS.mcpNameChars}
+                  placeholder="Name"
+                  onChange={(e) =>
+                    onPatch({
+                      mcpServers: node.mcpServers.map((x) =>
+                        x.id === s.id ? { ...x, name: e.target.value } : x,
+                      ),
+                    })
+                  }
+                />
+                <input
+                  className="wf-mcp-url"
+                  value={s.url}
+                  disabled={!canEdit}
+                  maxLength={GRAPH_LIMITS.mcpUrlChars}
+                  placeholder="https://…"
+                  onChange={(e) =>
+                    onPatch({
+                      mcpServers: node.mcpServers.map((x) =>
+                        x.id === s.id ? { ...x, url: e.target.value } : x,
+                      ),
+                    })
+                  }
+                />
+                {canEdit && (
+                  <button
+                    className="wf-danger"
+                    onClick={() =>
+                      onPatch({ mcpServers: node.mcpServers.filter((x) => x.id !== s.id) })
+                    }
+                  >
+                    Remove
+                  </button>
+                )}
+                {canEdit &&
+                  (savedServerIds.has(s.id) ? (
+                    <McpTokenField
+                      hasToken={mcpTokensSet.includes(`${node.id}:${s.id}`)}
+                      onSave={(token) => onSetMcpToken(node.id, s.id, token)}
+                    />
+                  ) : (
+                    <span className="field-note">Apply the workflow to set a token here.</span>
+                  ))}
+              </div>
+            ))}
+          </div>
+          {canEdit && node.mcpServers.length < GRAPH_LIMITS.mcpServersPerNode && (
+            <button
+              onClick={() =>
+                onPatch({
+                  mcpServers: [...node.mcpServers, { id: newId(), name: "", url: "" }],
+                })
+              }
+            >
+              Add MCP Server
+            </button>
+          )}
+          <span className="field-note">
+            Remote MCP servers only — this agent calls their tools directly when it runs as a
+            delegate. Tools from a connected server run without a room vote, so only add servers
+            you trust.
+          </span>
+        </div>
+      )}
+
       {canEdit && (
         <button onClick={onStartLink}>Draw a link from {node.name}</button>
       )}
     </div>
+  );
+}
+
+/** A password-style input that only sends its value on explicit Save — never on every keystroke. */
+function McpTokenField({ hasToken, onSave }: { hasToken: boolean; onSave: (token: string) => void }) {
+  const [draft, setDraft] = useState("");
+  return (
+    <span className="wf-mcp-token">
+      <input
+        type="password"
+        value={draft}
+        placeholder={hasToken ? "Token set — replace" : "Token (optional)"}
+        onChange={(e) => setDraft(e.target.value)}
+      />
+      <button
+        disabled={draft === ""}
+        onClick={() => {
+          onSave(draft);
+          setDraft("");
+        }}
+      >
+        Save
+      </button>
+      {hasToken && (
+        <button
+          className="wf-danger"
+          onClick={() => onSave("")}
+        >
+          Clear
+        </button>
+      )}
+    </span>
   );
 }
 

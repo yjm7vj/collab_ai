@@ -142,6 +142,13 @@ export type RoomState = {
   context: { messages: number; tokens: number };
   /** Running spend at list price, accumulated from real usage. */
   cost: CostLedger;
+  /**
+   * Which (node, server) pairs in `graph` have an MCP bearer token stored,
+   * as `"nodeId:serverId"` keys. Carries no token value — only whether one
+   * exists — so it's safe to sync, unlike the token itself (room-local SQL
+   * only, never on the wire).
+   */
+  mcpTokensSet: string[];
 };
 
 /** One delegated subtask, surfaced so the room can watch the fan-out. */
@@ -174,6 +181,7 @@ export const INITIAL_ROOM_STATE: RoomState = {
   workers: [],
   context: { messages: 0, tokens: 0 },
   cost: EMPTY_LEDGER,
+  mcpTokensSet: [],
 };
 
 /** One rendered piece of an agent turn. */
@@ -313,6 +321,8 @@ export type ClientMsg =
   | { t: "rename"; name: string }
   | { t: "say"; text: string }
   | { t: "vote"; toolUseId: string; vote: string }
+  /** Set (or, with an empty string, clear) one MCP server's bearer token. */
+  | { t: "set_mcp_token"; nodeId: string; serverId: string; token: string }
   | { t: "interrupt" }
   /** Replace the room's configuration. Server re-validates before applying. */
   | { t: "settings"; settings: RoomSettings }

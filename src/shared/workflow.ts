@@ -37,6 +37,20 @@ export type AgentNode = {
   /** Canvas position, in graph units. */
   x: number;
   y: number;
+  /**
+   * Remote MCP servers this agent can call tools on, when it runs as a
+   * delegate (see `room.ts#delegate`). Never carries a credential — a bearer
+   * token lives in the room's own storage, keyed by (node id, server id),
+   * because this type is synced to every connected client.
+   */
+  mcpServers: McpServerRef[];
+};
+
+/** One remote MCP server wired to an agent. Public — no token here. */
+export type McpServerRef = {
+  id: string;
+  name: string;
+  url: string;
 };
 
 /**
@@ -90,6 +104,10 @@ export const GRAPH_LIMITS = {
   handoffDepth: 2,
   /** Reviewers consulted per worker result. Beyond this they are ignored. */
   reviewers: 2,
+  /** Remote MCP servers one agent may hold. */
+  mcpServersPerNode: 3,
+  mcpNameChars: 40,
+  mcpUrlChars: 300,
 } as const;
 
 /**
@@ -185,7 +203,7 @@ const node = (
   x: number,
   y: number,
   prompt = "",
-): AgentNode => ({ id, name, model, prompt, x, y });
+): AgentNode => ({ id, name, model, prompt, x, y, mcpServers: [] });
 
 const edge = (
   id: string,
@@ -338,7 +356,14 @@ export const DEFAULT_GRAPH: WorkflowGraph = GRAPH_PRESETS.find((p) => p.id === "
 export function graphKey(x: WorkflowGraph): string {
   return JSON.stringify({
     lead: x.nodes.find((n) => n.id === x.leadId)?.name ?? "",
-    nodes: x.nodes.map((n) => [n.name, n.model, n.prompt]).sort(),
+    nodes: x.nodes
+      .map((n) => [
+        n.name,
+        n.model,
+        n.prompt,
+        n.mcpServers.map((s) => `${s.name}|${s.url}`).sort().join(","),
+      ])
+      .sort(),
     edges: x.edges
       .map((e) => [
         x.nodes.find((n) => n.id === e.from)?.name ?? "",
@@ -499,6 +524,30 @@ function cloneGraph(g: WorkflowGraph): WorkflowGraph {
 }
 
 /**
+ * Coerce a node's `mcpServers` into something safe to run. Only remote,
+ * https-reachable servers are accepted — this app has no way to run a local
+ * stdio MCP server, and accepting a non-https URL here would just produce a
+ * server that always fails when the agent tries to use it.
+ */
+function sanitizeMcpServers(value: unknown): McpServerRef[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: McpServerRef[] = [];
+  for (const item of value) {
+    if (out.length >= GRAPH_LIMITS.mcpServersPerNode) break;
+    const r = (item ?? {}) as Partial<McpServerRef>;
+    const id = typeof r.id === "string" && ID_RE.test(r.id) ? r.id : "";
+    if (!id || seen.has(id)) continue;
+    const url = text(r.url, GRAPH_LIMITS.mcpUrlChars).trim();
+    if (!url.startsWith("https://")) continue;
+    const name = text(r.name, GRAPH_LIMITS.mcpNameChars).trim() || "MCP Server";
+    seen.add(id);
+    out.push({ id, name, url });
+  }
+  return out;
+}
+
+/**
  * Coerce anything a client sends into a runnable graph.
  *
  * Every rule here exists because the graph decides which models get called and
@@ -538,6 +587,7 @@ export function sanitizeGraph(input: unknown): WorkflowGraph {
       prompt: text(r.prompt, GRAPH_LIMITS.promptChars),
       x: clamp(r.x, 0, MAX_POS.x, 100),
       y: clamp(r.y, 0, MAX_POS.y, 100),
+      mcpServers: sanitizeMcpServers(r.mcpServers),
     });
   }
 

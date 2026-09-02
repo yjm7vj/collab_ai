@@ -138,6 +138,75 @@ check(
   { x: only.x, y: only.y },
 );
 
+console.log("\nsanitizeGraph — mcpServers");
+
+const mcpOverflow = sanitizeGraph({
+  leadId: "a",
+  nodes: [
+    {
+      id: "a",
+      name: "A",
+      model: "claude-opus-5",
+      prompt: "",
+      x: 0,
+      y: 0,
+      mcpServers: [
+        { id: "s1", name: "one", url: "https://one.example/mcp" },
+        { id: "s2", name: "two", url: "https://two.example/mcp" },
+        { id: "s3", name: "three", url: "https://three.example/mcp" },
+        { id: "s4", name: "four", url: "https://four.example/mcp" },
+        { id: "s1", name: "dup", url: "https://dup.example/mcp" }, // dupe id, dropped
+        { id: "s5", name: "not https", url: "http://insecure.example/mcp" }, // rejected
+        { id: "", name: "no id", url: "https://noid.example/mcp" }, // rejected
+      ],
+    },
+  ],
+  edges: [],
+});
+const mcpNode = mcpOverflow.nodes[0]!;
+check(
+  "server count is capped",
+  mcpNode.mcpServers.length === GRAPH_LIMITS.mcpServersPerNode,
+  mcpNode.mcpServers.length,
+);
+check(
+  "a duplicate id does not overwrite the first",
+  mcpNode.mcpServers.find((s) => s.id === "s1")?.name === "one",
+);
+check(
+  "a non-https url is rejected",
+  mcpNode.mcpServers.every((s) => s.url.startsWith("https://")),
+);
+check(
+  "a server missing an id is rejected",
+  mcpNode.mcpServers.every((s) => s.id !== ""),
+);
+
+const withoutServer = sanitizeGraph({
+  leadId: "a",
+  nodes: [{ id: "a", name: "A", model: "claude-opus-5", prompt: "", x: 0, y: 0, mcpServers: [] }],
+  edges: [],
+});
+const differentServer = sanitizeGraph({
+  leadId: "a",
+  nodes: [
+    {
+      id: "a",
+      name: "A",
+      model: "claude-opus-5",
+      prompt: "",
+      x: 0,
+      y: 0,
+      mcpServers: [{ id: "s1", name: "one", url: "https://one.example/mcp" }],
+    },
+  ],
+  edges: [],
+});
+check(
+  "graphKey changes when mcpServers changes",
+  graphKey(withoutServer) !== graphKey(differentServer),
+);
+
 // A graph saved before the card had a known size can hold a corner inside the
 // canvas but too near its edge. Those are pulled back rather than left hanging.
 const nearEdge = sanitizeGraph({

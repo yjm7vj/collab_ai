@@ -345,6 +345,11 @@ export function RoomView({
     [send],
   );
   const interrupt = useCallback(() => send({ t: "interrupt" }), [send]);
+  const setMcpToken = useCallback(
+    (nodeId: string, serverId: string, token: string) =>
+      send({ t: "set_mcp_token", nodeId, serverId, token }),
+    [send],
+  );
   const applySettings = useCallback(
     (s: RoomSettings) => send({ t: "settings", settings: s }),
     [send],
@@ -927,6 +932,8 @@ export function RoomView({
           chat={workflowChat}
           onChatSend={sendWorkflowChat}
           onChatReset={resetWorkflowChat}
+          mcpTokensSet={state.mcpTokensSet}
+          onSetMcpToken={setMcpToken}
         />
       )}
 

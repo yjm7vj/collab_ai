@@ -27,6 +27,14 @@ import {
 } from "../shared/workflow";
 import { execute, type ToolCtx } from "./tools";
 
+/**
+ * One remote MCP server, resolved with its bearer token (if any) freshly
+ * read from room storage — see room.ts#delegate and #mcpTokensFor. Never
+ * logged, never put anywhere that gets synced or persisted beyond the call
+ * it's used for.
+ */
+export type WorkerMcpServer = { name: string; url: string; authorizationToken?: string };
+
 export const SYSTEM_PROMPT = `You are the shared agent of a live room that several people are talking to at the same time. This is not a private one-to-one chat, and that changes how you should behave.
 
 # Reading the room
@@ -412,6 +420,7 @@ function buildParams(
   messages: MessageParam[],
   cache: CacheMode,
   maxTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+  mcpServers?: WorkerMcpServer[],
 ) {
   const info = modelInfo(model);
   const ttl = cache === "long" ? { ttl: "1h" as const } : {};
@@ -428,9 +437,26 @@ function buildParams(
             // survives whatever happens later in `messages`.
             { type: "text", text: system, cache_control: { type: "ephemeral", ...ttl } },
           ],
-    tools,
+    tools:
+      mcpServers && mcpServers.length > 0
+        ? [...tools, ...mcpServers.map((s) => ({ type: "mcp_toolset", mcp_server_name: s.name }))]
+        : tools,
     messages,
   };
+
+  // MCP connector — resolves tool calls against these servers inside the API
+  // call itself, server-side at Anthropic. See room.ts#delegate for where
+  // `mcpServers` comes from and why the bearer token never reaches this
+  // module's caller as anything but a value passed straight through.
+  if (mcpServers && mcpServers.length > 0) {
+    params.mcp_servers = mcpServers.map((s) => ({
+      type: "url",
+      url: s.url,
+      name: s.name,
+      ...(s.authorizationToken ? { authorization_token: s.authorizationToken } : {}),
+    }));
+    params.betas = ["mcp-client-2025-11-20"];
+  }
 
   // Automatic caching for the conversation tail. The breakpoint lands on the
   // last block and moves forward as the conversation grows, so each round reads
@@ -568,7 +594,7 @@ export async function runWorker(
    * Which teammate this is, under a custom graph. Null means the built-in
    * manager workflow, where every worker is the same anonymous one.
    */
-  agent: { model: string; system: string } | null = null,
+  agent: { model: string; system: string; mcpServers?: WorkerMcpServer[] } | null = null,
   maxRounds = 6,
 ): Promise<WorkerResult> {
   if (cfg.apiKey === "mock") {
@@ -587,6 +613,7 @@ export async function runWorker(
   const api = client(cfg);
   const model = agent?.model ?? settings.workerModel;
   const system = agent?.system ?? WORKER_SYSTEM;
+  const mcpServers = agent?.mcpServers;
 
   for (let round = 0; round < maxRounds; round++) {
     const params = buildParams(
@@ -597,8 +624,13 @@ export async function runWorker(
       tools,
       messages,
       "short",
+      undefined,
+      mcpServers,
     );
-    const message = (await api.messages.create(params as never)) as Message;
+    // Always the beta namespace: identical to the plain endpoint when no
+    // beta-only params are set (no mcpServers here), and required when they
+    // are (see buildParams' `betas`).
+    const message = (await api.beta.messages.create(params as never)) as unknown as Message;
     usage.push(readUsage(message, model));
     messages.push({ role: "assistant", content: message.content });
 
