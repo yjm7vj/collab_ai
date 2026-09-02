@@ -1233,6 +1233,18 @@ input:focus, textarea:focus {
 .vote.deny.cast { border-color: var(--bad); color: var(--bad); }
 .voted { font-size: 12px; color: var(--ink-faint); }
 
+.choice-question { font-size: 13px; color: var(--ink); line-height: 1.4; }
+.choice-options { flex-direction: column; align-items: stretch; }
+.vote.option {
+  justify-content: space-between;
+  text-align: left;
+  width: 100%;
+}
+.vote.option.cast { border-color: var(--accent); color: var(--accent); }
+.option-text { display: grid; gap: 2px; }
+.option-label { font-size: 13px; }
+.option-desc { font-size: 11px; color: var(--ink-faint); }
+
 /* -------------------------------------------------------------- composer */
 
 .composer {

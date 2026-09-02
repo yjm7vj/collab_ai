@@ -10,6 +10,7 @@ import {
 import {
   INVITABLE_ROLES,
   REDACTED,
+  optionTally,
   tally,
   type AgentBlock,
   type Entry,
@@ -67,6 +68,7 @@ const TOOL_LABELS: Record<string, string> = {
   write_file: "Create File",
   edit_file: "Edit File",
   delete_file: "Delete File",
+  ask_room: "Ask The Room",
 };
 
 function toolLabel(name: string): string {
@@ -1418,6 +1420,53 @@ export function ApprovalCard({
           You can't see this file's contents, so an owner or admin has to decide this one.
         </div>
       )}
+    </div>
+  );
+}
+
+/** A question the agent put to the room, one button per option. */
+export function ChoiceCard({
+  pending,
+  me,
+  onVote,
+  canDecide,
+}: {
+  pending: PendingTool;
+  me: string | null;
+  onVote: (toolUseId: string, optionId: string) => void;
+  canDecide: boolean;
+}) {
+  const options = pending.options ?? [];
+  const counts = optionTally(pending);
+  const mine = me ? pending.votes[me] : undefined;
+  const input = pending.input as { question?: string } | null;
+  const mineLabel = options.find((o) => o.id === mine)?.label;
+
+  return (
+    <div className="approval choice">
+      <div className="approval-top">
+        <span className="approval-tool">{toolLabel(pending.name)}</span>
+      </div>
+      <div className="choice-question">{String(input?.question ?? pending.summary)}</div>
+      <div className="approval-actions choice-options">
+        {options.map((opt) => (
+          <button
+            key={opt.id}
+            className={`vote option ${mine === opt.id ? "cast" : ""}`}
+            onClick={() => onVote(pending.toolUseId, opt.id)}
+            disabled={!canDecide}
+          >
+            <span className="option-text">
+              <span className="option-label">{opt.label}</span>
+              {opt.description && <span className="option-desc">{opt.description}</span>}
+            </span>
+            <span className="count">
+              {counts[opt.id] ?? 0}/{pending.threshold}
+            </span>
+          </button>
+        ))}
+      </div>
+      {mineLabel && <span className="voted">You Voted For {mineLabel}</span>}
     </div>
   );
 }

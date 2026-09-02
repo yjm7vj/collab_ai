@@ -288,6 +288,36 @@ export const TOOL_DEFS = [
       required: ["path"],
     },
   },
+  {
+    name: "ask_room",
+    description:
+      "Ask the room to decide between options, when the direction genuinely " +
+      "forks and it isn't yours to pick. Always goes to a vote — use it for " +
+      "real decisions, sparingly, not for routine confirmations or anything " +
+      "already covered by a gated write.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        question: {
+          type: "string",
+          description: "The question, framed so any option below answers it.",
+        },
+        options: {
+          type: "array",
+          description: "At least two choices the room can pick from.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Short label for this choice." },
+              description: { type: "string", description: "One line of detail, optional." },
+            },
+            required: ["label"],
+          },
+        },
+      },
+      required: ["question", "options"],
+    },
+  },
 ];
 
 /** Solo workflow: the full set, no delegation. */
@@ -313,6 +343,9 @@ const WORKER_EXCLUDED = new Set([
   "write_file",
   "edit_file",
   "delete_file",
+  // Workers report their findings back to the lead, not the room directly —
+  // they have no channel to put a question to a vote.
+  "ask_room",
 ]);
 export const WORKER_TOOLS = TOOL_DEFS.filter(
   (t) => !("name" in t) || !WORKER_EXCLUDED.has(t.name as string),
@@ -423,6 +456,30 @@ export function workerToolsFor(policy: AccessPolicy, modelId: string): unknown[]
   });
 }
 
+export type AskRoomOption = { id: string; label: string; description?: string };
+
+/**
+ * Validates and normalizes an `ask_room` call's input into option records
+ * with a stable id (the option's position), or null if the call is malformed
+ * — a missing question, or fewer than two labeled options.
+ */
+export function parseAskRoomOptions(input: any): AskRoomOption[] | null {
+  const question = input?.question;
+  if (typeof question !== "string" || question.trim() === "") return null;
+
+  const raw = input?.options;
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+
+  const options: AskRoomOption[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const label = raw[i]?.label;
+    if (typeof label !== "string" || label.trim() === "") return null;
+    const description = typeof raw[i]?.description === "string" ? raw[i].description : undefined;
+    options.push({ id: String(i), label, description });
+  }
+  return options;
+}
+
 /** One-line description of what a gated call will do, shown on the vote card. */
 export function summarize(name: string, input: any): string {
   switch (name) {
@@ -461,6 +518,10 @@ export function summarize(name: string, input: any): string {
     }
     case "delete_file":
       return `Delete ${String(input?.path ?? "")}`;
+    case "ask_room": {
+      const question = String(input?.question ?? "");
+      return question ? `Ask the room: ${preview(question, 80)}` : "Ask the room";
+    }
     case "delegate": {
       const tasks: any[] = Array.isArray(input?.tasks) ? input.tasks : [];
       if (tasks.length === 0) return "Delegate nothing";

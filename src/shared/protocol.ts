@@ -57,12 +57,21 @@ export type PendingTool = {
   input: unknown;
   /** Human-readable description of the effect, rendered on the vote card. */
   summary: string;
-  /** Member uid -> vote. One vote per person, however many tabs they have open. */
-  votes: Record<string, Vote>;
+  /**
+   * Member uid -> vote. One vote per person, however many tabs they have
+   * open. `"approve"`/`"deny"` for an ordinary gate; an option id (below)
+   * for a question the agent asked the room to decide.
+   */
+  votes: Record<string, string>;
   /** Votes needed to decide, fixed when the request was raised. */
   threshold: number;
   /** True when deciding this needs sight of file contents. */
   sensitive?: boolean;
+  /**
+   * Present when this is a question the agent asked the room to choose
+   * between, rather than an approve/deny gate on an action it wants to take.
+   */
+  options?: { id: string; label: string; description?: string }[];
 };
 
 export type RoomStatus = "idle" | "thinking" | "awaiting_approval";
@@ -303,7 +312,7 @@ export type ClientMsg =
   /** Change your display name. Identity itself comes from the socket's token. */
   | { t: "rename"; name: string }
   | { t: "say"; text: string }
-  | { t: "vote"; toolUseId: string; vote: Vote }
+  | { t: "vote"; toolUseId: string; vote: string }
   | { t: "interrupt" }
   /** Replace the room's configuration. Server re-validates before applying. */
   | { t: "settings"; settings: RoomSettings }
@@ -401,9 +410,16 @@ export function tally(p: PendingTool): { approve: number; deny: number } {
   let deny = 0;
   for (const v of Object.values(p.votes)) {
     if (v === "approve") approve++;
-    else deny++;
+    else if (v === "deny") deny++;
   }
   return { approve, deny };
+}
+
+/** Per-option vote counts for a question the agent asked the room. */
+export function optionTally(p: PendingTool): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const v of Object.values(p.votes)) counts[v] = (counts[v] ?? 0) + 1;
+  return counts;
 }
 
 /* ------------------------------------------------- room creation and joining */

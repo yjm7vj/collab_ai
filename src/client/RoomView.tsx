@@ -12,7 +12,6 @@ import {
   type DocumentRevision,
   type RoomState,
   type ServerMsg,
-  type Vote,
   type WorkflowChatTurn,
 } from "../shared/protocol";
 import { modelInfo, type RoomSettings } from "../shared/models";
@@ -21,6 +20,7 @@ import { asRole, can, canSeeFileContents, type Role } from "../shared/access";
 import type { AccessPolicy } from "../shared/access";
 import {
   ApprovalCard,
+  ChoiceCard,
   Composer,
   ContextGauge,
   DocPanel,
@@ -341,7 +341,7 @@ export function RoomView({
 
   const say = useCallback((text: string) => send({ t: "say", text }), [send]);
   const vote = useCallback(
-    (toolUseId: string, v: Vote) => send({ t: "vote", toolUseId, vote: v }),
+    (toolUseId: string, v: string) => send({ t: "vote", toolUseId, vote: v }),
     [send],
   );
   const interrupt = useCallback(() => send({ t: "interrupt" }), [send]);
@@ -1006,7 +1006,7 @@ export function RoomView({
           {state.pending.length > 0 && (
             <div className="approvals">
               <div className="approvals-head">
-                Approval Needed
+                {state.pending.every((p) => p.options) ? "The Agent Is Asking" : "Approval Needed"}
                 {/*
                   The server computes the threshold from eligible voters and the
                   approval rule (e.g. owner_only needs one vote regardless of
@@ -1019,15 +1019,19 @@ export function RoomView({
                   {state.pending[0]!.threshold === 1 ? "Person" : "People"} Required
                 </span>
               </div>
-              {state.pending.map((p) => (
-                <ApprovalCard
-                  key={p.toolUseId}
-                  pending={p}
-                  me={me}
-                  onVote={vote}
-                  canDecide={mayVote && (!p.sensitive || canSeeFileContents(myRole))}
-                />
-              ))}
+              {state.pending.map((p) =>
+                p.options ? (
+                  <ChoiceCard key={p.toolUseId} pending={p} me={me} onVote={vote} canDecide={mayVote} />
+                ) : (
+                  <ApprovalCard
+                    key={p.toolUseId}
+                    pending={p}
+                    me={me}
+                    onVote={vote}
+                    canDecide={mayVote && (!p.sensitive || canSeeFileContents(myRole))}
+                  />
+                ),
+              )}
             </div>
           )}
 

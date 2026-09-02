@@ -24,6 +24,7 @@ import {
   INVITABLE_ROLES,
   UID_RE,
   colorFor,
+  optionTally,
   tally,
   type AgentBlock,
   type ClientMsg,
@@ -96,6 +97,7 @@ import {
 import {
   execute,
   gatedFor,
+  parseAskRoomOptions,
   summarize as summarizeCall,
   toolsForRoom,
   workerToolsFor,
@@ -2422,7 +2424,7 @@ export class Room extends Agent<Env, RoomState> {
     if (this.state.status === "idle") await this.#startTurn();
   }
 
-  async #onVote(connection: Connection, toolUseId: string, vote: "approve" | "deny") {
+  async #onVote(connection: Connection, toolUseId: string, vote: string) {
     if (!this.#allow(connection, "vote", "You're a viewer in this room, so you can't vote.")) return;
 
     const target = this.state.pending.find((p) => p.toolUseId === toolUseId);
@@ -2442,7 +2444,15 @@ export class Room extends Agent<Env, RoomState> {
 
     // Ignore votes for calls that are no longer open — a stale click from a
     // client whose view hadn't caught up yet.
-    if (!this.state.pending.some((p) => p.toolUseId === toolUseId)) return;
+    if (!target) return;
+
+    // A gate takes approve/deny; a question the agent put to the room takes
+    // one of its own option ids. Reject anything else rather than storing a
+    // vote that can never be tallied.
+    const validVote = target.options
+      ? target.options.some((o) => o.id === vote)
+      : vote === "approve" || vote === "deny";
+    if (!validVote) return;
 
     const pending = this.state.pending.map((p) =>
       p.toolUseId === toolUseId
@@ -3044,7 +3054,38 @@ export class Room extends Agent<Env, RoomState> {
             status: "running",
           });
 
-          if (gatedNames.has(call.name)) {
+          if (call.name === "ask_room") {
+            // Not policy-gated — this always parks for a vote, regardless of
+            // what the room's write-approval policy says.
+            const options = parseAskRoomOptions(call.input);
+            if (!options) {
+              const outcome: ToolOutcome = {
+                ok: false,
+                text: "ask_room requires a `question` and at least two `options`, each with a `label`.",
+              };
+              results.push({
+                type: "tool_result",
+                tool_use_id: call.id,
+                content: outcome.text,
+                is_error: true,
+              });
+              const block = entry.blocks.at(-1)!;
+              if (block.type === "tool") {
+                block.status = "error";
+                block.result = outcome.text;
+              }
+            } else {
+              gated.push({
+                toolUseId: call.id,
+                name: call.name,
+                input: call.input,
+                summary: summarizeCall(call.name, call.input),
+                votes: {},
+                threshold: approvalThreshold(this.#policy().approval, this.#eligible(false)),
+                options,
+              });
+            }
+          } else if (gatedNames.has(call.name)) {
             const sensitive = isFileContentTool(call.name);
             gated.push({
               toolUseId: call.id,
@@ -3121,16 +3162,16 @@ export class Room extends Agent<Env, RoomState> {
       console.error("agent turn failed", err);
       // Say it inside the agent's own entry, not as a system line beside it: a
       // turn that fails before producing a block leaves that entry empty, and
-      // an empty agent entry is what the transcript draws its spinner for. The
-      // exception itself stays in the logs — the room only needs to know the
-      // turn is over.
+      // an empty agent entry is what the transcript draws its spinner for.
+      const message = err instanceof Error ? err.message : String(err);
+      const text = `Agent hit an error: ${message}`;
       const stored = this.#turn();
       const entry = stored ? this.#getEntry(stored.entryId) : null;
       if (entry?.kind === "agent") {
-        entry.blocks.push({ type: "text", text: "Agent hit an error." });
+        entry.blocks.push({ type: "text", text });
         this.#patch(entry);
       } else {
-        this.#system("Agent hit an error.");
+        this.#system(text);
       }
     }
 
@@ -3227,12 +3268,23 @@ export class Room extends Agent<Env, RoomState> {
     const turn = this.#turn();
     if (!turn || this.state.pending.length === 0) return;
 
-    const verdicts: { p: PendingTool; approved: boolean }[] = [];
+    type Verdict =
+      | { kind: "gate"; p: PendingTool; approved: boolean }
+      | { kind: "choice"; p: PendingTool; option: { id: string; label: string } };
+
+    const verdicts: Verdict[] = [];
     for (const p of this.state.pending) {
-      const { approve, deny } = tally(p);
-      if (approve >= p.threshold) verdicts.push({ p, approved: true });
-      else if (deny >= p.threshold) verdicts.push({ p, approved: false });
-      else return; // at least one still undecided — keep waiting
+      if (p.options) {
+        const counts = optionTally(p);
+        const winner = p.options.find((o) => (counts[o.id] ?? 0) >= p.threshold);
+        if (!winner) return; // at least one still undecided — keep waiting
+        verdicts.push({ kind: "choice", p, option: winner });
+      } else {
+        const { approve, deny } = tally(p);
+        if (approve >= p.threshold) verdicts.push({ kind: "gate", p, approved: true });
+        else if (deny >= p.threshold) verdicts.push({ kind: "gate", p, approved: false });
+        else return; // at least one still undecided — keep waiting
+      }
     }
 
     const entry = this.#getEntry(turn.entryId);
@@ -3242,9 +3294,12 @@ export class Room extends Agent<Env, RoomState> {
     try {
       const results: ToolResultBlockParam[] = uniqueToolResults([...turn.carried]);
       const docs = this.#docBuffer(turn.authorUid, turn.authorName);
-      for (const { p, approved } of verdicts) {
+      for (const v of verdicts) {
+        const p = v.p;
         let outcome: ToolOutcome;
-        if (!approved) {
+        if (v.kind === "choice") {
+          outcome = { ok: true, text: `The room chose: "${v.option.label}"` };
+        } else if (!v.approved) {
           outcome = {
             ok: false,
             text:
@@ -3272,7 +3327,7 @@ export class Room extends Agent<Env, RoomState> {
           (b) => b.type === "tool" && b.toolUseId === p.toolUseId,
         );
         if (block && block.type === "tool") {
-          block.status = approved ? (outcome.ok ? "ok" : "error") : "denied";
+          block.status = v.kind === "choice" ? "ok" : v.approved ? (outcome.ok ? "ok" : "error") : "denied";
           block.result = outcome.text;
           block.sensitive = isFileContentTool(p.name);
         }
