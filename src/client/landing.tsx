@@ -1212,6 +1212,27 @@ export function LandingPage({
         </section>
 
         <section className="lp-act lp-act--tint">
+          <div className="lp-inner lp-chapter">
+            <Reveal className="lp-chapter-head">
+              <h2 className="lp-h2">Agents can work together in one workflow.</h2>
+              <p className="lp-body">
+                Build a team for the room instead of relying on one agent to do
+                everything. A lead agent can break work into focused tasks,
+                coordinate teammates, and bring their results back into the
+                same shared conversation.
+              </p>
+            </Reveal>
+            <Reveal delay={1}>
+              <div className="lp-feature-grid">
+                <article className="lp-feature-card"><span className="lp-feature-kicker">Coordinate</span><h3>One lead, several specialists</h3><p>Use a workflow that matches the way your team actually works.</p></article>
+                <article className="lp-feature-card"><span className="lp-feature-kicker">Review</span><h3>Everyone sees the same turn</h3><p>Agent work returns to the room, where people can follow the reasoning and decide what happens next.</p></article>
+                <article className="lp-feature-card"><span className="lp-feature-kicker">Continue</span><h3>Durable by default</h3><p>Long-running work can pause and resume without losing the room’s context.</p></article>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
+        <section className="lp-act lp-act--tint">
           <div className="lp-inner lp-chapter lp-chapter--split lp-chapter--split-rev">
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Point it at a folder. Or at a repo.</h2>
@@ -1219,11 +1240,35 @@ export function LandingPage({
                 A room can work against a folder on one member's machine,
                 relayed live to everyone else, or against a GitHub repository
                 through a connected app — branches, contents, pull requests. The
-                voting rule doesn't change with the provider.
+                voting rule doesn't change with the provider. The built-in code
+                workspace lets the room browse and edit both public and private
+                repositories without leaving the conversation.
               </p>
             </Reveal>
             <Reveal delay={1}>
               <ChapterWorkspace />
+            </Reveal>
+          </div>
+        </section>
+
+        <section className="lp-act">
+          <div className="lp-inner lp-chapter lp-chapter--split">
+            <Reveal className="lp-chapter-head">
+              <span className="lp-eyebrow">Live IDE activity</span>
+              <h2 className="lp-h2">See where the work is happening.</h2>
+              <p className="lp-body">
+                When teammates use the IDE, the room can show the file they
+                opened, where their cursor is, and what they saved. It gives
+                everyone a shared sense of progress without taking control away
+                from the person doing the work.
+              </p>
+            </Reveal>
+            <Reveal delay={1}>
+              <div className="lp-activity-demo">
+                <div><span className="lp-activity-avatar">M</span><strong>Mia</strong><span>opened</span><code>src/server/room.ts</code></div>
+                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 148</span><code>src/client/RoomView.tsx</code></div>
+                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 code passages</span></div>
+              </div>
             </Reveal>
           </div>
         </section>
@@ -1320,6 +1365,22 @@ export function LandingPage({
           <img src="/collab-logo.svg" alt="" width={20} height={20} />
           <span>Rooms, transcripts and votes live in one durable object per room.</span>
           <span className="lp-foot-spacer" />
+          <details className="lp-legal" id="privacy">
+            <summary>Privacy policy</summary>
+            <div className="lp-legal-body">
+              <p>Huddle.AI uses the information needed to provide shared rooms, including your display name and, when you sign in with a provider, your profile avatar. Messages, agent activity, votes, and room settings are shared with members of that room.</p>
+              <p>If you connect a local folder or GitHub repository, the agent can process the files you authorize. File content may appear in the room transcript when the room has permission to view it. Do not connect data you are not authorized to share.</p>
+              <p>We do not ask for provider passwords. OAuth credentials and workspace access are handled by the connected service and are not displayed in the room. Contact the Huddle.AI team with privacy questions.</p>
+            </div>
+          </details>
+          <details className="lp-legal" id="terms">
+            <summary>Terms and conditions</summary>
+            <div className="lp-legal-body">
+              <p>By using Huddle.AI, you agree to use it lawfully, respect the access rights of other people, and only connect repositories, folders, and documents you are authorized to use.</p>
+              <p>Room owners and admins control membership, connected workspaces, and agent permissions. Review proposed changes before approving them. Huddle.AI does not guarantee that agent output or code changes are correct, secure, or suitable for production.</p>
+              <p>You are responsible for your account activity, the data you share, and any changes you approve. We may change or suspend the service to protect users or maintain the platform.</p>
+            </div>
+          </details>
         </div>
       </footer>
     </div>

@@ -1211,16 +1211,28 @@ export function RoomView({
             onClose={() => setShowDocument(false)}
           />
         )}
-        {!showDocument && (
-          <button
-            type="button"
-            className="doc-reopen"
-            onClick={() => setShowDocument(true)}
-            aria-label="Open shared document"
-          >
-            Open Document
-          </button>
-        )}
+        <div className="room-actions">
+          {mayInvite && (
+            <button
+              type="button"
+              className="room-action-invite"
+              onClick={openInvites}
+              aria-label="Invite people to this room"
+            >
+              Invite
+            </button>
+          )}
+          {!showDocument && (
+            <button
+              type="button"
+              className="doc-reopen"
+              onClick={() => setShowDocument(true)}
+              aria-label="Open shared document"
+            >
+              Open Document
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

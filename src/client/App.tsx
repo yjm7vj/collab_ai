@@ -463,6 +463,12 @@ export function App() {
   const [rooms, setRooms] = useState<SidebarRoom[]>(storedRooms);
   const [inviteProject, setInviteProject] = useState<SidebarProject | null>(null);
   const { theme, toggleTheme } = useTheme();
+  const landingPreview = useMemo(
+    () =>
+      (location.hostname === "localhost" || location.hostname === "127.0.0.1") &&
+      new URLSearchParams(location.search).get("landing") === "1",
+    [],
+  );
 
   /**
    * A mirror of the sidebar for createRoom to name against. It picks the name
@@ -1202,7 +1208,7 @@ export function App() {
   // at someone on their way to the waitlist.
   if (gated) return null;
 
-  if (!identity && route.kind === "landing") {
+  if ((landingPreview || !identity) && route.kind === "landing") {
     return (
       <LandingPage
         cta={{

@@ -1272,6 +1272,46 @@ html:has(.lp) {
   gap: 12px;
 }
 
+.lp-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.lp-feature-card {
+  min-height: 150px;
+  padding: 20px;
+  border: 1px solid var(--lp-stage-line-soft);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lp-stage-fill) 70%, transparent);
+}
+.lp-feature-card h3 { margin: 10px 0 8px; font-size: 18px; color: var(--lp-stage-ink); }
+.lp-feature-card p { margin: 0; color: var(--lp-stage-faint); line-height: 1.55; }
+.lp-feature-kicker, .lp-eyebrow { color: var(--lp-stage-ok); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.lp-activity-demo {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--lp-stage-line-soft);
+  border-radius: 12px;
+  background: var(--lp-stage-fill);
+  color: var(--lp-stage-faint);
+  font-size: 13px;
+}
+.lp-activity-demo > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.lp-activity-demo strong { color: var(--lp-stage-ink); }
+.lp-activity-demo code { color: var(--lp-stage-ok); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.lp-activity-avatar { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #5e7cf2; color: white; font-size: 11px; font-weight: 700; }
+.lp-activity-avatar--alt { background: #bd6ca7; }
+.lp-activity-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--lp-stage-ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-stage-ok) 16%, transparent); }
+.lp-legal { flex: 1 1 100%; border-top: 1px solid var(--lp-stage-line-soft); padding-top: 14px; }
+.lp-legal summary { cursor: pointer; color: var(--lp-stage-ink); font-weight: 650; }
+.lp-legal-body { max-width: 760px; padding-top: 12px; color: var(--lp-stage-faint); line-height: 1.6; }
+.lp-legal-body p { margin: 0 0 10px; }
+
+@media (max-width: 760px) {
+  .lp-feature-grid { grid-template-columns: 1fr; }
+}
+
 /* --------------------------------------------------------------- footer */
 
 .lp-foot {
