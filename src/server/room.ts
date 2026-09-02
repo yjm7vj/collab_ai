@@ -28,6 +28,7 @@ import {
   tally,
   type AgentBlock,
   type ClientMsg,
+  type DecisionRecord,
   type Entry,
   type GithubStatus,
   type InviteSummary,
@@ -306,6 +307,24 @@ export const SHARED_MCP_UID = "*";
  */
 const MCP_TOOL_CACHE_MS = 10 * 60 * 1000;
 
+/**
+ * Tools that change something, and so belong in the consent record however
+ * they were authorised. Reads are deliberately excluded — see the call site.
+ */
+const MUTATING_TOOLS = new Set([
+  "write_doc", "edit_doc", "write_file", "edit_file", "delete_file", "delegate",
+]);
+
+/** Votes come back out of SQL as JSON; a corrupt row loses its votes, not the record. */
+function parseVotes(raw: string): DecisionRecord["votes"] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export class Room extends Agent<Env, RoomState> {
   initialState: RoomState = INITIAL_ROOM_STATE;
 
@@ -429,6 +448,31 @@ export class Room extends Agent<Env, RoomState> {
       uid TEXT NOT NULL,
       installation_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    )`;
+    // Who authorised what the agent did.
+    //
+    // The transcript already says an action happened; this says on whose
+    // authority. Every action the agent takes that could change something is
+    // recorded here with the arguments it ran with, the verdict, and — when
+    // there was a vote — how each person voted. Actions that ran unattended
+    // because the room's policy allowed it are recorded too, with verdict
+    // 'unattended': a record that quietly omitted those would misrepresent the
+    // room as having approved things nobody was ever asked about, which is
+    // worse than having no record at all.
+    //
+    // Append-only by intent. Nothing in the app updates or deletes a row.
+    this.sql`CREATE TABLE IF NOT EXISTS decisions (
+      id TEXT PRIMARY KEY,
+      ts INTEGER NOT NULL,
+      tool_use_id TEXT NOT NULL,
+      tool TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      args TEXT NOT NULL,
+      verdict TEXT NOT NULL,
+      threshold INTEGER NOT NULL,
+      votes TEXT NOT NULL,
+      asked_by TEXT NOT NULL,
+      policy_mode TEXT NOT NULL
     )`;
     // Bearer tokens for the MCP servers wired to an agent (see workflow.ts's
     // AgentNode#mcpServers, which carries no credential for exactly this
@@ -870,6 +914,70 @@ export class Room extends Agent<Env, RoomState> {
       joinedAt: r.joined_at,
       lastSeen: r.last_seen,
       online: online.has(r.uid),
+    }));
+  }
+
+  /**
+   * Write one line into the room's consent record.
+   *
+   * Called at the moment an action is settled, whether by a vote or by a policy
+   * that let it run unattended. The arguments are stored as they were actually
+   * sent — the point of the record is that it can be checked afterwards against
+   * what the room believed it was approving.
+   */
+  #recordDecision(args: {
+    toolUseId: string;
+    tool: string;
+    summary: string;
+    input: unknown;
+    verdict: DecisionRecord["verdict"];
+    threshold: number;
+    votes: Record<string, string>;
+  }) {
+    let serialized = "{}";
+    try {
+      serialized = JSON.stringify(args.input ?? {});
+    } catch {
+      serialized = '"(arguments could not be recorded)"';
+    }
+
+    const votes = JSON.stringify(
+      Object.entries(args.votes).map(([uid, vote]) => ({
+        uid,
+        // Resolved now rather than at read time: a member can leave the room,
+        // and a record that forgets who approved something is not a record.
+        name: this.#memberName(uid) ?? "someone who has left",
+        vote,
+      })),
+    );
+
+    const turn = this.#turn();
+    this.sql`INSERT INTO decisions
+             (id, ts, tool_use_id, tool, summary, args, verdict, threshold, votes, asked_by, policy_mode)
+             VALUES (${crypto.randomUUID()}, ${Date.now()}, ${args.toolUseId}, ${args.tool},
+                     ${args.summary}, ${serialized}, ${args.verdict}, ${args.threshold},
+                     ${votes}, ${turn?.authorName ?? "unknown"}, ${this.#policy().mode})`;
+  }
+
+  /** The room's consent record, newest first. */
+  #decisions(): DecisionRecord[] {
+    return this.sql<{
+      id: string; ts: number; tool_use_id: string; tool: string; summary: string;
+      args: string; verdict: string; threshold: number; votes: string;
+      asked_by: string; policy_mode: string;
+    }>`SELECT * FROM decisions ORDER BY ts DESC LIMIT 500`.map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      tool: r.tool,
+      summary: r.summary,
+      args: r.args,
+      verdict: (r.verdict === "approved" || r.verdict === "denied"
+        ? r.verdict
+        : "unattended") as DecisionRecord["verdict"],
+      threshold: r.threshold,
+      votes: parseVotes(r.votes),
+      askedBy: r.asked_by,
+      policyMode: r.policy_mode,
     }));
   }
 
@@ -1502,6 +1610,8 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onMemberList(connection);
       case "revision.list":
         return this.#onRevisionList(connection, msg.uid);
+      case "decision.list":
+        return this.#onDecisionList(connection);
       case "member.role":
         return this.#onMemberRole(connection, msg.uid, msg.role);
       case "member.remove":
@@ -1798,6 +1908,19 @@ export class Room extends Agent<Env, RoomState> {
       return;
     }
     connection.send(JSON.stringify({ t: "revisions", uid: targetUid, revisions: this.#revisions(targetUid) } satisfies ServerMsg));
+  }
+
+  /**
+   * Hand back the room's consent record.
+   *
+   * Any member may read it, viewers included. It says what was done in a room
+   * they belong to and on whose authority — withholding that from someone in
+   * the room would defeat the point of keeping it.
+   */
+  async #onDecisionList(connection: Connection) {
+    const uid = this.#uidOf(connection);
+    if (!uid || !this.#memberRole(uid)) return;
+    connection.send(JSON.stringify({ t: "decisions", decisions: this.#decisions() } satisfies ServerMsg));
   }
 
   /**
@@ -3411,6 +3534,17 @@ export class Room extends Agent<Env, RoomState> {
               const parsed = parseMcpToolName(call.name);
               const res = await callTool(target, parsed?.tool ?? call.name, call.input);
               const text = res.ok ? res.text : res.error;
+              // Nobody was asked, so the record says so rather than leaving a
+              // call to an external service with no authority attached to it.
+              this.#recordDecision({
+                toolUseId: call.id,
+                tool: call.name,
+                summary: summarizeMcpCall(target.name, call.name, call.input),
+                input: call.input,
+                verdict: "unattended",
+                threshold: 0,
+                votes: {},
+              });
               results.push({
                 type: "tool_result",
                 tool_use_id: call.id,
@@ -3460,6 +3594,23 @@ export class Room extends Agent<Env, RoomState> {
               outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
             } else {
               outcome = execute(call.name, call.input, docs);
+            }
+
+            // A mutating tool that reached here ran because the room's policy
+            // let it, not because anyone approved it — which is exactly the
+            // case the record must not omit. Reads are left out: the record is
+            // about authority to change things, and a record padded with every
+            // file listing is one nobody will read.
+            if (MUTATING_TOOLS.has(call.name)) {
+              this.#recordDecision({
+                toolUseId: call.id,
+                tool: call.name,
+                summary: summarizeCall(call.name, call.input),
+                input: call.input,
+                verdict: "unattended",
+                threshold: 0,
+                votes: {},
+              });
             }
 
             results.push({
@@ -3647,6 +3798,24 @@ export class Room extends Agent<Env, RoomState> {
       const docs = this.#docBuffer(turn.authorUid, turn.authorName);
       for (const v of verdicts) {
         const p = v.p;
+
+        // The record is written before the action runs, and records the
+        // decision rather than the outcome: the room authorised this call, and
+        // that stays true whether the call then succeeded or failed. A question
+        // the room answered is not an authority to act, so it is not recorded
+        // here — `ask_room` changes nothing on its own.
+        if (v.kind === "gate") {
+          this.#recordDecision({
+            toolUseId: p.toolUseId,
+            tool: p.name,
+            summary: p.summary,
+            input: p.input,
+            verdict: v.approved ? "approved" : "denied",
+            threshold: p.threshold,
+            votes: p.votes,
+          });
+        }
+
         let outcome: ToolOutcome;
         if (v.kind === "choice") {
           outcome = { ok: true, text: `The room chose: "${v.option.label}"` };

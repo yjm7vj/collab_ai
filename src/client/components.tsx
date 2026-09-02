@@ -20,6 +20,7 @@ import {
   type InviteSummary,
   type MemberSummary,
   type DocumentRevision,
+  type DecisionRecord,
   type PendingTool,
   type Presence as PresenceUser,
   type Vote,
@@ -1588,6 +1589,112 @@ export function RevisionHistoryPanel({
                   <span className="hint">{item.author} · {new Date(item.ts).toLocaleString()}</span>
                 </summary>
                 <pre className="revision-body">{item.doc || "(empty document)"}</pre>
+              </details>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/* ------------------------------------------------- the consent record */
+
+/**
+ * Who authorised what the agent did.
+ *
+ * Deliberately not a filtered view: an action that ran unattended sits in the
+ * same list as one the room voted through, because the honest answer to "who
+ * approved this?" is sometimes "nobody was asked", and a record that hid those
+ * would be worse than no record. The counts at the top say how the balance
+ * falls, which is the number worth watching.
+ */
+export function ConsentRecordPanel({
+  decisions,
+  onClose,
+}: {
+  decisions: DecisionRecord[];
+  onClose: () => void;
+}) {
+  const counts = {
+    approved: decisions.filter((d) => d.verdict === "approved").length,
+    denied: decisions.filter((d) => d.verdict === "denied").length,
+    unattended: decisions.filter((d) => d.verdict === "unattended").length,
+  };
+
+  const exportRecord = () => {
+    const blob = new Blob([JSON.stringify(decisions, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `consent-record-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <section className="modal consent-panel" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h2>Consent record</h2>
+            <p className="hint">
+              Every action that could change something, and the authority it ran on.
+            </p>
+          </div>
+          <button type="button" className="icon" onClick={onClose} aria-label="Close consent record">×</button>
+        </div>
+
+        <div className="consent-counts">
+          <span className="consent-count"><strong>{counts.approved}</strong> approved</span>
+          <span className="consent-count"><strong>{counts.denied}</strong> refused</span>
+          <span className={`consent-count ${counts.unattended > 0 ? "consent-count-warn" : ""}`}>
+            <strong>{counts.unattended}</strong> ran unattended
+          </span>
+          {decisions.length > 0 && (
+            <button type="button" onClick={exportRecord}>Export</button>
+          )}
+        </div>
+
+        {decisions.length === 0 ? (
+          <div className="empty">
+            <p>Nothing yet. Actions appear here once the agent proposes something.</p>
+          </div>
+        ) : (
+          <div className="consent-list">
+            {decisions.map((d) => (
+              <details key={d.id} className={`consent-item consent-${d.verdict}`}>
+                <summary>
+                  <span className={`consent-verdict consent-verdict-${d.verdict}`}>
+                    {d.verdict === "approved" ? "Approved" : d.verdict === "denied" ? "Refused" : "Unattended"}
+                  </span>
+                  <span className="consent-summary">{d.summary}</span>
+                  <span className="hint">{new Date(d.ts).toLocaleString()}</span>
+                </summary>
+                <div className="consent-detail">
+                  <div className="hint">
+                    Asked by {d.askedBy} · tool <code>{d.tool}</code> · room in {d.policyMode} mode
+                  </div>
+                  {d.verdict === "unattended" ? (
+                    <div className="hint">
+                      No vote was taken — the room's permissions allowed this without asking.
+                    </div>
+                  ) : (
+                    <div className="consent-votes">
+                      {d.votes.length === 0 ? (
+                        <span className="hint">No votes recorded.</span>
+                      ) : (
+                        d.votes.map((v) => (
+                          <span key={v.uid} className={`consent-vote consent-vote-${v.vote}`}>
+                            {v.name} · {v.vote}
+                          </span>
+                        ))
+                      )}
+                      <span className="hint">{d.threshold} needed</span>
+                    </div>
+                  )}
+                  <pre className="consent-args">{d.args}</pre>
+                </div>
               </details>
             ))}
           </div>

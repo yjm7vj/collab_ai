@@ -151,6 +151,34 @@ export type RoomState = {
   mcpTokensSet: string[];
 };
 
+/**
+ * One recorded answer to "who authorised this?".
+ *
+ * The unit of the room's consent record: an action the agent took that could
+ * change something, the arguments it actually ran with, and the authority it
+ * ran on. `unattended` is not a gap in the record — it is the room's policy
+ * having allowed the action without asking, which is a fact about the
+ * authority and belongs in the record as much as a vote does.
+ */
+export type DecisionRecord = {
+  id: string;
+  ts: number;
+  /** The tool as the agent called it, e.g. `edit_file` or `mcp__linear__create_issue`. */
+  tool: string;
+  /** The one-line description the room saw on the card. */
+  summary: string;
+  /** The arguments the call actually ran with, as JSON. */
+  args: string;
+  verdict: "approved" | "denied" | "unattended";
+  /** Votes needed at the time. 0 for an unattended action. */
+  threshold: number;
+  votes: { uid: string; name: string; vote: string }[];
+  /** Who spoke the turn this action came out of. */
+  askedBy: string;
+  /** The room's permission mode when this ran, so the record explains itself. */
+  policyMode: string;
+};
+
 /** One delegated subtask, surfaced so the room can watch the fan-out. */
 export type WorkerStatus = {
   id: string;
@@ -257,6 +285,7 @@ export type ServerMsg =
   | { t: "members"; members: MemberSummary[] }
   /** Document snapshots, sent only to owners and admins. */
   | { t: "revisions"; uid: string; revisions: DocumentRevision[] }
+  | { t: "decisions"; decisions: DecisionRecord[] }
   /** Sent only to the workspace host's socket. Never broadcast. */
   | { t: "fs.req"; id: string; req: FsRequest }
   /** A file request made by the room's code workspace UI. Sent only to its requester. */
@@ -346,6 +375,8 @@ export type ClientMsg =
   | { t: "invite.list" }
   | { t: "member.list" }
   | { t: "revision.list"; uid: string }
+  /** Ask for the room's consent record — who authorised what the agent did. */
+  | { t: "decision.list" }
   /** Change someone's role. The server re-checks that the actor outranks them. */
   | { t: "member.role"; uid: string; role: Role }
   /** Remove someone from the room and close their sockets. */

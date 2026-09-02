@@ -2812,6 +2812,75 @@ input[type="range"] { accent-color: var(--accent); padding: 0; }
   line-height: 1.5;
 }
 
+/* ---------------------------------------------------------- consent record */
+
+.consent-panel { max-width: 760px; width: 100%; }
+.consent-counts {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+.consent-count strong { font-family: var(--mono); color: var(--ink); }
+/* An action nobody was asked about is the number worth noticing, so it is the
+   one that changes colour once it stops being zero. */
+.consent-count-warn strong { color: var(--warn); }
+.consent-counts button { margin-left: auto; }
+
+.consent-list { display: grid; gap: 8px; max-height: 60vh; overflow-y: auto; padding-top: 12px; }
+.consent-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.consent-item summary {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.consent-summary { flex: 1 1 220px; overflow-wrap: anywhere; }
+.consent-verdict {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.consent-verdict-approved { background: var(--ok-bg, var(--panel-3)); color: var(--ok); }
+.consent-verdict-denied { background: var(--danger-bg); color: var(--bad); }
+.consent-verdict-unattended { background: var(--panel-3); color: var(--warn); }
+
+.consent-detail { display: grid; gap: 8px; padding: 0 12px 12px; }
+.consent-votes { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+.consent-vote {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+.consent-vote-approve { border-color: var(--ok); color: var(--ok); }
+.consent-vote-deny { border-color: var(--bad); color: var(--bad); }
+.consent-args {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .wf-mcp-list { display: grid; gap: 8px; margin-bottom: 8px; }
 .wf-mcp-row {
   display: flex;

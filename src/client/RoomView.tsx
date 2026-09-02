@@ -10,6 +10,7 @@ import {
   type InviteSummary,
   type MemberSummary,
   type DocumentRevision,
+  type DecisionRecord,
   type RoomState,
   type ServerMsg,
   type WorkflowChatTurn,
@@ -28,6 +29,7 @@ import {
   MembersPanel,
   PermissionsPanel,
   RevisionHistoryPanel,
+  ConsentRecordPanel,
   Transcript,
   WorkerStrip,
   WorkspacePanel,
@@ -117,6 +119,8 @@ export function RoomView({
   const [revisions, setRevisions] = useState<DocumentRevision[]>([]);
   const [revisionUid, setRevisionUid] = useState<string | null>(null);
   const [showRevisionHistory, setShowRevisionHistory] = useState(false);
+  const [decisions, setDecisions] = useState<DecisionRecord[]>([]);
+  const [showConsentRecord, setShowConsentRecord] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<"connections" | "ide">("connections");
@@ -198,6 +202,10 @@ export function RoomView({
         setRevisions(msg.revisions);
         setRevisionUid(msg.uid);
         setShowRevisionHistory(true);
+        break;
+      case "decisions":
+        setDecisions(msg.decisions);
+        setShowConsentRecord(true);
         break;
       case "history":
         setEntries(msg.entries);
@@ -852,6 +860,19 @@ export function RoomView({
                       Permissions
                     </button>
                   )}
+                  {/* Not gated on a capability: the record says what was done
+                      in a room you are in, and on whose authority. Hiding that
+                      from a member of the room would defeat keeping it. */}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowSettingsMenu(false);
+                      send({ t: "decision.list" });
+                    }}
+                  >
+                    Consent record
+                  </button>
                 </section>
 
                 <section className="settings-menu-section">
@@ -1029,6 +1050,13 @@ export function RoomView({
           userName={members.find((member) => member.uid === revisionUid)?.name ?? "User"}
           isOwn={revisionUid === me}
           onClose={() => setShowRevisionHistory(false)}
+        />
+      )}
+
+      {showConsentRecord && (
+        <ConsentRecordPanel
+          decisions={decisions}
+          onClose={() => setShowConsentRecord(false)}
         />
       )}
 
