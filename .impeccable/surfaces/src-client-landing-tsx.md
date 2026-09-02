@@ -55,11 +55,22 @@ the exact shape `describeSettings` / `describePolicy` / `describeGraph` write
 them, and the header gauge's real pair of numbers — prompt tokens against the
 compaction limit, and spend at list price.
 
-Two claims the page deliberately keeps rather than smooths over, because they
-are what the room actually does: an MCP call is gated like a file write, since
-the room cannot tell a read from a write on somebody else's server; and a
-catalogue server that speaks only OAuth says so instead of being wired up to
-fail quietly.
+One claim the page deliberately keeps rather than smooths over, because it is
+what the room actually does: an MCP call is gated like a file write, since the
+room cannot tell a read from a write on somebody else's server.
+
+The workflow chapter runs the room's second way of editing a graph rather than
+describing it: the chat types a sentence, sends it, and the canvas gains the
+agent it asked for, with the agent and link counts moving against the graph's
+real limits. A visitor who types their own line applies the same change instead
+of pretending to draft a different one, because nothing here is talking to a
+model.
+
+The page does not carry the catalogue's per-server auth caveats. Which servers
+this app can reach today is a build detail that moves while the app is still
+being built, and a pre-launch page should not advertise a limitation its
+authors are in the middle of closing. The editor still says so, where it is
+load-bearing.
 
 ## Direction
 

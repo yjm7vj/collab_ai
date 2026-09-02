@@ -1602,7 +1602,26 @@ html:has(.lp) {
   font-weight: 700;
   letter-spacing: -0.015em;
 }
+/* Right-hand slot in the head: the live count against the graph's real limits,
+   and the control that runs the chat's change again. */
+.lp-workflow-head-right {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.lp-workflow-count {
+  color: var(--lp-stage-faint);
+  font-size: var(--lp-fs-meta);
+}
+.lp-workflow-head-right .lp-linkbtn {
+  color: var(--lp-stage-accent);
+}
+/* Sits with the legend, because it describes the canvas rather than the head. */
 .lp-workflow-drag-hint {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
   color: var(--lp-stage-faint);
   font-size: var(--lp-fs-meta);
 }
@@ -1637,6 +1656,17 @@ html:has(.lp) {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* The exchange, in the order it happens: what was asked, the wait, the answer.
+   Reserved so the panel does not jump as each one lands. */
+.lp-workflow-thread {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 132px;
+}
+.lp-workflow-pending {
+  padding: 10px 12px;
+}
 .lp-workflow-bubble,
 .lp-workflow-result {
   padding: 10px 12px;
@@ -1657,6 +1687,19 @@ html:has(.lp) {
   display: grid;
   gap: 8px;
   margin-top: auto;
+}
+/* The caret rides at the end of the typed value, so the field reads as being
+   typed into rather than as having text pasted in. */
+.lp-workflow-field {
+  position: relative;
+  display: block;
+}
+.lp-workflow-field .lp-caret {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  margin-top: -0.5em;
+  background: var(--lp-stage-accent);
 }
 .lp-workflow-form input {
   width: 100%;
@@ -1755,6 +1798,39 @@ html:has(.lp) {
 }
 .lp-workflow-card:active {
   cursor: grabbing;
+}
+/* What the chat just drafted. One short arrival, in the page's own easing;
+   the reveal grammar elsewhere is an entrance, this is a state change. */
+.lp-workflow-card[data-new="true"] {
+  animation: lp-wf-land 520ms var(--lp-ease) both;
+}
+@keyframes lp-wf-land {
+  from { opacity: 0; transform: translateY(-10px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.lp-workflow-wire[data-new="true"] {
+  stroke-dasharray: 400;
+  animation: lp-wf-draw 620ms var(--lp-ease) both;
+}
+@keyframes lp-wf-draw {
+  from { stroke-dashoffset: 400; }
+  to { stroke-dashoffset: 0; }
+}
+/* The label is centred on its wire by a transform, so its arrival has to carry
+   that transform through every keyframe. Reusing the card's animation reset it
+   to none and slid the label onto the card it names. */
+@keyframes lp-wf-land-link {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateY(-10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+.lp-workflow-link[data-new="true"] {
+  animation: lp-wf-land-link 520ms 260ms var(--lp-ease) both;
 }
 .lp-workflow-card:hover {
   background: color-mix(in srgb, var(--lp-stage-2) 82%, var(--lp-stage-ink));
@@ -1916,12 +1992,6 @@ html:has(.lp) {
   color: var(--lp-stage-faint);
   font-size: var(--lp-fs-meta);
   overflow-wrap: anywhere;
-}
-/* A limitation, not a failure: the app's own chip-warn reasoning, in prose. */
-.lp-workflow-server-note {
-  color: var(--lp-stage-warn);
-  font-size: var(--lp-fs-meta);
-  line-height: 1.5;
 }
 
 .lp-workflow-legend {
@@ -2122,7 +2192,12 @@ html:has(.lp) {
   .lp *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
+    /* Staggered arrivals hold their start frame for the length of the delay,
+       so a demo that is meant to be finished before any motion runs has to
+       drop the delays too, not only the durations. */
+    animation-delay: 0.001ms !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0.001ms !important;
   }
   .lp-reveal { opacity: 1; transform: none; }
   .lp-cue-rail::after { display: none; }

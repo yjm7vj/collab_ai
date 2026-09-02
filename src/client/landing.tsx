@@ -1030,6 +1030,12 @@ function ChapterWorkspace() {
  * wires attach to the cards' real edges at every width. Positioning cards in
  * percentages while sizing them in pixels is what left the wires hanging in
  * space, because nothing could work out where a card's right edge was.
+ *
+ * The chapter runs the room's other way of editing a graph as well: the
+ * workflow chat drafts a change from a sentence, so the demo types one and the
+ * canvas gains the agent it asked for. The visitor can send their own line
+ * instead, which applies the same change rather than pretending to draft a
+ * different one.
  */
 const WF_CANVAS = { w: 760, h: 392 };
 const WF_CARD = { w: 168, h: 120 };
@@ -1039,8 +1045,6 @@ type DemoServer = {
   url: string;
   /** Whose credential the server runs on. Both modes are real. */
   mode: string;
-  /** Said out loud when the app cannot actually reach the server yet. */
-  note?: string;
 };
 
 type WorkflowCard = {
@@ -1054,6 +1058,8 @@ type WorkflowCard = {
   x: number;
   y: number;
   lead?: boolean;
+  /** False until the chat has drafted it onto the canvas. */
+  drafted?: boolean;
   servers: DemoServer[];
 };
 
@@ -1081,12 +1087,7 @@ const WORKFLOW_CARDS: WorkflowCard[] = [
     y: 36,
     servers: [
       { name: "Linear", url: "mcp.linear.app/mcp", mode: "Shared by the room" },
-      {
-        name: "Sentry",
-        url: "mcp.sentry.dev/mcp",
-        mode: "Each person's own",
-        note: "OAuth-only, which this app cannot do yet. The picker says so rather than wiring up a server that never answers.",
-      },
+      { name: "Sentry", url: "mcp.sentry.dev/mcp", mode: "Each person's own" },
     ],
   },
   {
@@ -1098,6 +1099,18 @@ const WORKFLOW_CARDS: WorkflowCard[] = [
       "Checks the work for factual errors, unsupported claims, and parts of the brief it did not answer. Does not rewrite it.",
     x: 576,
     y: 236,
+    servers: [],
+  },
+  {
+    id: "factcheck",
+    title: "Fact checker",
+    model: "Haiku 4.5",
+    brief: "Verifies each claim against its source.",
+    detail:
+      "Takes every claim the researcher made and checks it against the source it cites. Reports the ones that do not hold rather than rewriting them.",
+    x: 576,
+    y: 36,
+    drafted: true,
     servers: [],
   },
 ];
@@ -1116,22 +1129,50 @@ const WF_KINDS = [
 ];
 
 const WF_EDGES = [
-  { id: "e1", from: "lead", to: "research", kind: "delegates" },
-  { id: "e2", from: "research", to: "critic", kind: "reviews" },
+  { id: "e1", from: "lead", to: "research", kind: "delegates", drafted: false },
+  { id: "e2", from: "research", to: "critic", kind: "reviews", drafted: false },
+  { id: "e3", from: "research", to: "factcheck", kind: "reviews", drafted: true },
 ];
+
+/** What the chat types, and what the canvas then does about it. */
+const WF_ASK = "Add a fact checker after the researcher.";
+
+const ASK_AT = 700;
+const SEND_AT = 2600;
+const WF_REPLY_AT = 3500;
+const DRAFT_AT = 4100;
+const WF_END = 11000;
 
 const wfPct = (value: number, of: number) => `${(value / of) * 100}%`;
 
 function ChapterWorkflowBuilder() {
+  const reduced = useReducedMotion();
+  const [seenRef, seen] = useInView<HTMLDivElement>("-15% 0px -15% 0px");
+  const [run, setRun] = useState(0);
+  const t = useTimeline(seen, WF_END, reduced, run);
+
   const [cards, setCards] = useState(WORKFLOW_CARDS);
   const [selected, setSelected] = useState("research");
-  const [prompt, setPrompt] = useState("");
-  const [workflowUpdated, setWorkflowUpdated] = useState(false);
+  const [typedPrompt, setTypedPrompt] = useState("");
+  // Once the visitor takes the field, the script stops driving it.
+  const [manual, setManual] = useState(false);
+  const [sentByHand, setSentByHand] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
 
-  const byId = (id: string) => cards.find((card) => card.id === id);
-  const active = byId(selected) ?? cards[0]!;
+  const scripted = !manual && !sentByHand;
+  const sent = sentByHand || (scripted && t >= SEND_AT);
+  const sending = scripted && t >= SEND_AT && t < WF_REPLY_AT;
+  const replied = sentByHand || (scripted && t >= WF_REPLY_AT);
+  const drafted = sentByHand || (scripted && t >= DRAFT_AT);
+
+  const asked = sentByHand ? typedPrompt || WF_ASK : WF_ASK;
+  const field = sent ? "" : scripted ? typed(WF_ASK, t, ASK_AT, 30) : typedPrompt;
+
+  const live = cards.filter((card) => !card.drafted || drafted);
+  const liveEdges = WF_EDGES.filter((edge) => !edge.drafted || drafted);
+  const byId = (id: string) => live.find((card) => card.id === id);
+  const active = byId(selected) ?? live[0]!;
 
   const clampX = (v: number) => Math.max(0, Math.min(WF_CANVAS.w - WF_CARD.w, v));
   const clampY = (v: number) => Math.max(0, Math.min(WF_CANVAS.h - WF_CARD.h, v));
@@ -1169,9 +1210,17 @@ function ChapterWorkflowBuilder() {
 
   const updateWorkflow = (event: FormEvent) => {
     event.preventDefault();
-    if (!prompt.trim()) return;
-    setWorkflowUpdated(true);
-    setPrompt("");
+    if (!field.trim() && !typedPrompt.trim()) return;
+    setSentByHand(true);
+  };
+
+  const replay = () => {
+    setCards(WORKFLOW_CARDS);
+    setSelected("research");
+    setTypedPrompt("");
+    setManual(false);
+    setSentByHand(false);
+    setRun((n) => n + 1);
   };
 
   /**
@@ -1191,21 +1240,30 @@ function ChapterWorkflowBuilder() {
     return {
       id: edge.id,
       kind: edge.kind,
+      drafted: edge.drafted,
       d: `M${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
       mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
     };
   };
 
-  const wires = WF_EDGES.map(wireOf).filter((w): w is NonNullable<typeof w> => w !== null);
+  const wires = liveEdges
+    .map(wireOf)
+    .filter((w): w is NonNullable<ReturnType<typeof wireOf>> => w !== null);
 
   return (
-    <div className="lp-workflow-builder">
+    <div className="lp-workflow-builder" ref={seenRef}>
       <div className="lp-workflow-builder-head">
         <strong>Shape the team around the task.</strong>
-        <span className="lp-workflow-drag-hint">
-          Drag a card, or move it with the arrow keys
+        <span className="lp-workflow-head-right">
+          <span className="lp-workflow-count" data-num>
+            {live.length} of 8 agents · {liveEdges.length} of 16 links
+          </span>
+          <button type="button" className="lp-linkbtn" onClick={replay}>
+            Replay
+          </button>
         </span>
       </div>
+
       <div className="lp-workflow-layout">
         <aside className="lp-workflow-chat">
           <span className="lp-workflow-chat-label">Workflow chat</span>
@@ -1214,21 +1272,37 @@ function ChapterWorkflowBuilder() {
             The room can ask for a new teammate, a different model, or another
             link in plain language, and the draft comes back for review.
           </p>
-          <div className="lp-workflow-bubble">Add a fact checker after the researcher.</div>
-          {workflowUpdated && (
-            <div className="lp-workflow-result" role="status">
-              Workflow change drafted for review.
-            </div>
-          )}
+          <div className="lp-workflow-thread">
+            {sent && <div className="lp-workflow-bubble">{asked}</div>}
+            {sending && (
+              <div className="lp-workflow-pending" role="status">
+                <i className="lp-dots" />
+              </div>
+            )}
+            {replied && (
+              <div className="lp-workflow-result" role="status">
+                Added Fact checker on Haiku 4.5, reviewing the researcher.
+                Drafted for review.
+              </div>
+            )}
+          </div>
           <form className="lp-workflow-form" onSubmit={updateWorkflow}>
-            <input
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="Describe a change"
-              aria-label="Describe a workflow change"
-            />
-            <button type="submit" className="lp-btn lp-btn--primary">
-              Update workflow
+            <span className="lp-workflow-field">
+              <input
+                value={field}
+                onChange={(event) => {
+                  setManual(true);
+                  setTypedPrompt(event.target.value);
+                }}
+                placeholder="Describe a change"
+                aria-label="Describe a workflow change"
+              />
+              {scripted && !sent && t > ASK_AT && field.length < WF_ASK.length && (
+                <i className="lp-caret" aria-hidden="true" />
+              )}
+            </span>
+            <button type="submit" className="lp-btn lp-btn--primary" disabled={sending}>
+              {sending ? "Updating…" : "Update workflow"}
             </button>
           </form>
         </aside>
@@ -1267,6 +1341,7 @@ function ChapterWorkflowBuilder() {
                 key={w.id}
                 d={w.d}
                 className={`lp-workflow-wire lp-wire-${w.kind}`}
+                data-new={w.drafted === true}
                 markerEnd={`url(#lp-wf-arrow-${w.kind})`}
               />
             ))}
@@ -1276,6 +1351,7 @@ function ChapterWorkflowBuilder() {
             <span
               key={w.id}
               className={`lp-workflow-link lp-wire-${w.kind}`}
+              data-new={w.drafted === true}
               style={{
                 left: wfPct(w.mid.x, WF_CANVAS.w),
                 top: wfPct(w.mid.y, WF_CANVAS.h),
@@ -1286,11 +1362,12 @@ function ChapterWorkflowBuilder() {
             </span>
           ))}
 
-          {cards.map((card) => (
+          {live.map((card) => (
             <button
               type="button"
               className="lp-workflow-card"
               data-lead={card.lead === true}
+              data-new={card.drafted === true}
               data-selected={selected === card.id}
               aria-pressed={selected === card.id}
               aria-label={`${card.title}, ${card.lead ? "lead" : "teammate"}, on ${card.model}`}
@@ -1367,9 +1444,6 @@ function ChapterWorkflowBuilder() {
                     <span className="lp-workflow-mode">{server.mode}</span>
                   </span>
                   <span className="lp-workflow-server-url">{server.url}</span>
-                  {server.note && (
-                    <span className="lp-workflow-server-note">{server.note}</span>
-                  )}
                 </li>
               ))}
             </ul>
@@ -1385,6 +1459,9 @@ function ChapterWorkflowBuilder() {
             {k.prose && <em>prompt only</em>}
           </span>
         ))}
+        <span className="lp-workflow-drag-hint">
+          Drag a card, or move it with the arrow keys
+        </span>
       </div>
 
       <p className="lp-note">
