@@ -718,9 +718,9 @@ function ChapterVote() {
 const TURN_NODES = [
   { time: "14:02", label: "The agent proposes the write.", quiet: false },
   { time: "14:03", label: "Two votes land. One short.", quiet: false },
-  { time: "", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
+  { time: "Paused", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
   { time: "16:41", label: "Mia opens the link and approves.", quiet: false },
-  { time: "16:41", label: "The same turn resumes and finishes.", quiet: false },
+  { time: "16:42", label: "The same turn resumes and finishes.", quiet: false },
 ];
 
 function ChapterDurable() {
@@ -917,14 +917,13 @@ function ChapterWorkflowBuilder() {
   const [cards, setCards] = useState(WORKFLOW_CARDS);
   const [selected, setSelected] = useState("lead");
   const [prompt, setPrompt] = useState("");
-  const [toolReady, setToolReady] = useState(false);
+  const [workflowUpdated, setWorkflowUpdated] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
 
-  const moveCard = (event: ReactPointerEvent<HTMLButtonElement>, card: WorkflowCard) => {
+  const startDragging = (event: ReactPointerEvent<HTMLButtonElement>, card: WorkflowCard) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const canvasBox = canvas.getBoundingClientRect();
     const cardBox = event.currentTarget.getBoundingClientRect();
     dragRef.current = {
       id: card.id,
@@ -933,55 +932,67 @@ function ChapterWorkflowBuilder() {
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelected(card.id);
-    const update = (next: ReactPointerEvent<HTMLButtonElement>) => {
-      if (!dragRef.current) return;
-      const x = ((next.clientX - canvasBox.left - dragRef.current.offsetX) / canvasBox.width) * 100;
-      const y = ((next.clientY - canvasBox.top - dragRef.current.offsetY) / canvasBox.height) * 100;
-      setCards((current) => current.map((item) => item.id === card.id
-        ? { ...item, x: Math.max(2, Math.min(72, x)), y: Math.max(4, Math.min(78, y)) }
-        : item));
-    };
-    const finish = () => {
-      dragRef.current = null;
-      window.removeEventListener("pointermove", update as unknown as EventListener);
-      window.removeEventListener("pointerup", finish);
-    };
-    window.addEventListener("pointermove", update as unknown as EventListener);
-    window.addEventListener("pointerup", finish, { once: true });
   };
 
-  const createTool = (event: FormEvent) => {
+  const moveCard = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const canvas = canvasRef.current;
+    const drag = dragRef.current;
+    if (!canvas || !drag) return;
+    const canvasBox = canvas.getBoundingClientRect();
+    const x = ((event.clientX - canvasBox.left - drag.offsetX) / canvasBox.width) * 100;
+    const y = ((event.clientY - canvasBox.top - drag.offsetY) / canvasBox.height) * 100;
+    setCards((current) => current.map((item) => item.id === drag.id
+      ? { ...item, x: Math.max(2, Math.min(66, x)), y: Math.max(4, Math.min(72, y)) }
+      : item));
+  };
+
+  const finishDragging = () => {
+    dragRef.current = null;
+  };
+
+  const updateWorkflow = (event: FormEvent) => {
     event.preventDefault();
     if (!prompt.trim()) return;
-    setCards((current) => current.some((card) => card.id === "source-checker")
-      ? current
-      : [...current, { id: "source-checker", title: "Source checker", model: "Custom tool", brief: "Flags claims without citations.", x: 56, y: 39 }]);
-    setToolReady(true);
+    setWorkflowUpdated(true);
     setPrompt("");
   };
+
+  const lead = cards.find((card) => card.lead) ?? cards[0];
+  const researcher = cards.find((card) => card.id === "research");
+  const critic = cards.find((card) => card.id === "critic");
+
+  const connectionPath = (from: WorkflowCard, to: WorkflowCard) =>
+    `M ${from.x + 22} ${from.y + 14} C ${(from.x + to.x) / 2 + 8} ${from.y + 14}, ${(from.x + to.x) / 2 - 2} ${to.y + 14}, ${to.x} ${to.y + 14}`;
+
+  const handoffLabel = lead && researcher
+    ? { left: `${Math.min(70, (lead.x + researcher.x) / 2 + 8)}%`, top: `${(lead.y + researcher.y) / 2 + 4}%` }
+    : undefined;
+  const reviewLabel = researcher && critic
+    ? { left: `${Math.min(70, (researcher.x + critic.x) / 2 + 8)}%`, top: `${(researcher.y + critic.y) / 2 + 6}%` }
+    : undefined;
 
   return (
     <div className="lp-workflow-builder">
       <div className="lp-workflow-builder-head">
         <div><span className="lp-feature-kicker">Workflow builder</span><strong>Shape the team around the task.</strong></div>
-        <span className="lp-workflow-drag-hint">Drag cards to reshape the workflow</span>
+        <span className="lp-workflow-drag-hint">Drag cards to change the handoff and review path</span>
       </div>
       <div className="lp-workflow-layout">
         <aside className="lp-workflow-chat">
-          <span className="lp-feature-kicker">AI workflow chat</span>
-          <h3>Create your own AI tool.</h3>
-          <p>Describe a specialist in plain language. The assistant drafts its brief and adds it to the canvas.</p>
-          <div className="lp-workflow-bubble">Add a source checker that flags claims without citations.</div>
-          {toolReady && <div className="lp-workflow-result" role="status">Source checker drafted and added to the canvas.</div>}
-          <form className="lp-workflow-form" onSubmit={createTool}>
-            <input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe a tool" aria-label="Describe a tool" />
-            <button type="submit" className="lp-btn lp-btn--primary">Create tool</button>
+          <span className="lp-workflow-chat-label">Workflow chat</span>
+          <h3>Customize the workflow in chat.</h3>
+          <p>Describe a change in plain language. The assistant can draft a new step, adjust a role, or change how work is handed off.</p>
+          <div className="lp-workflow-bubble">Add a fact checker after the researcher.</div>
+          {workflowUpdated && <div className="lp-workflow-result" role="status">Workflow change drafted for review.</div>}
+          <form className="lp-workflow-form" onSubmit={updateWorkflow}>
+            <input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe a workflow change" aria-label="Describe a workflow change" />
+            <button type="submit" className="lp-btn lp-btn--primary">Update workflow</button>
           </form>
         </aside>
-        <div className="lp-workflow-canvas" ref={canvasRef}>
+        <div className="lp-workflow-canvas" ref={canvasRef} onPointerMove={moveCard} onPointerUp={finishDragging} onPointerCancel={finishDragging}>
           <svg className="lp-workflow-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <path d="M29 50 C42 50 45 26 58 26" />
-            <path d="M29 50 C42 50 45 71 58 71" />
+            {lead && researcher && <path d={connectionPath(lead, researcher)} />}
+            {researcher && critic && <path d={connectionPath(researcher, critic)} />}
           </svg>
           {cards.map((card) => (
             <button
@@ -992,7 +1003,7 @@ function ChapterWorkflowBuilder() {
               key={card.id}
               style={{ left: `${card.x}%`, top: `${card.y}%` }}
               onClick={() => setSelected(card.id)}
-              onPointerDown={(event) => moveCard(event, card)}
+              onPointerDown={(event) => startDragging(event, card)}
               onKeyDown={(event) => {
                 const step = 3;
                 if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
@@ -1009,8 +1020,8 @@ function ChapterWorkflowBuilder() {
               <span>{card.brief}</span>
             </button>
           ))}
-          <span className="lp-workflow-link lp-workflow-link--top">delegates to</span>
-          <span className="lp-workflow-link lp-workflow-link--bottom">delegates to</span>
+          {handoffLabel && <span className="lp-workflow-link lp-workflow-link--handoff" style={handoffLabel}>hands off to</span>}
+          {reviewLabel && <span className="lp-workflow-link lp-workflow-link--review" style={reviewLabel}>is reviewed by</span>}
           <div className="lp-workflow-canvas-foot"><span className="lp-workflow-live" /> Changes preview live in the room</div>
         </div>
       </div>
@@ -1336,7 +1347,7 @@ export function LandingPage({
           </div>
         </section>
 
-        <section className="lp-act lp-act--tint">
+        <section className="lp-act lp-act--tint lp-act--workflow">
           <div className="lp-inner lp-chapter">
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Agents can work together in one workflow.</h2>
