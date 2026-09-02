@@ -28,6 +28,16 @@ import { sanitizePush, type SidebarSyncResponse } from "../shared/sidebar";
 import { sanitizeLibraryPush, type LibrarySyncResponse } from "../shared/library";
 import { sanitizeSkillsPush, type SkillsSyncResponse } from "../shared/skills";
 import {
+  PROJECT_INVITE_CODE_RE,
+  PROJECT_INVITE_MAX_ROOMS,
+  type ProjectInviteRequest,
+  type ProjectInviteRoom,
+  type ProjectInviteResponse,
+  type ProjectInviteRedeemRequest,
+  type ProjectInviteRedeemResponse,
+} from "../shared/project-invites";
+import { isProjectInviteCode } from "./projectIndex";
+import {
   ROOM_ID_RE,
   UID_RE,
   IDENTITY_MARKER,
@@ -40,6 +50,7 @@ import {
 
 export { Room } from "./room";
 export { UserIndex } from "./userIndex";
+export { ProjectIndex } from "./projectIndex";
 
 // A token is a session, not a membership — membership outlives it and is
 // re-checked against the room's own member table on every connect.
@@ -63,6 +74,47 @@ async function roomStub(env: Env, roomId: string) {
  */
 function userIndex(env: Env, uid: string) {
   return env.UserIndex.get(env.UserIndex.idFromName(uid));
+}
+
+function projectIndex(env: Env) {
+  // Invite codes are the only lookup key available when a recipient opens a
+  // link, so all project invite records share one small coordination object.
+  // The room Durable Objects remain the authority for access checks.
+  return env.ProjectIndex.getByName("project-invites");
+}
+
+function projectRooms(value: unknown): ProjectInviteRoom[] {
+  if (!Array.isArray(value)) return [];
+  const rooms: ProjectInviteRoom[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const roomId = typeof rec.roomId === "string" ? rec.roomId : "";
+    const label = typeof rec.label === "string" ? rec.label.trim().slice(0, 42) : "";
+    if (!ROOM_ID_RE.test(roomId) || !label || seen.has(roomId)) continue;
+    seen.add(roomId);
+    rooms.push({ roomId, label });
+    if (rooms.length === PROJECT_INVITE_MAX_ROOMS) break;
+  }
+  return rooms;
+}
+
+async function authorizeProjectRooms(env: Env, uid: string, rooms: ProjectInviteRoom[]): Promise<boolean> {
+  if (rooms.length === 0) return false;
+  const checks = await Promise.all(rooms.map(async ({ roomId }) => {
+    try {
+      const res = await roomStub(env, roomId).then((stub) => stub.fetch("https://room/project-authorize", {
+        method: "POST",
+        body: JSON.stringify({ uid }),
+        headers: { "content-type": "application/json", "x-internal-auth": env.ROOM_SECRET },
+      }));
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }));
+  return checks.every(Boolean);
 }
 
 /**
@@ -369,6 +421,97 @@ export default {
         });
       }
       return new Response(null, { status: 204 });
+    }
+
+    if (url.pathname === "/api/project-invites") {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+      let body: ProjectInviteRequest;
+      try { body = (await request.json()) as ProjectInviteRequest; } catch { return json({ error: "bad_request" }, 400); }
+
+      const identity = await identityFrom(env, body.identity);
+      const actorUid = identity?.uid ?? (signInRequired(env) ? "" : String(body.uid ?? ""));
+      if (!UID_RE.test(actorUid)) return json({ error: "sign_in_required" }, 401);
+      if (typeof body.projectId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(body.projectId)) return json({ error: "bad_request" }, 400);
+      const rooms = projectRooms(body.rooms);
+      const index = projectIndex(env);
+      const existing = body.code && PROJECT_INVITE_CODE_RE.test(body.code) ? await index.get(body.code) : null;
+
+      if (body.action === "list") {
+        if (!(await authorizeProjectRooms(env, actorUid, rooms))) return json({ error: "forbidden" }, 403);
+        const invites = (await index.list()).filter((invite) => invite.projectId === body.projectId);
+        return json({ ok: true, invites } satisfies ProjectInviteResponse);
+      }
+
+      if (body.action === "create") {
+        const projectName = typeof body.projectName === "string" ? body.projectName.trim().slice(0, 42) : "";
+        const role = body.role === "editor" ? "editor" : body.role === "viewer" ? "viewer" : "";
+        if (!projectName || !role || rooms.length === 0 || !(await authorizeProjectRooms(env, actorUid, rooms))) return json({ error: "forbidden" }, 403);
+        const invite = await index.create({ code: newId(32), projectId: body.projectId, projectName, role, rooms });
+        return json({ ok: true, invite } satisfies ProjectInviteResponse);
+      }
+
+      if (!existing || existing.projectId !== body.projectId || existing.revoked) return json({ error: "not_found" }, 404);
+      const allRooms = projectRooms([...existing.rooms, ...rooms]);
+      if (!(await authorizeProjectRooms(env, actorUid, allRooms))) return json({ error: "forbidden" }, 403);
+
+      if (body.action === "revoke") {
+        await index.revoke(existing.code);
+        return json({ ok: true } satisfies ProjectInviteResponse);
+      }
+      if (body.action === "update") {
+        const projectName = typeof body.projectName === "string" ? body.projectName.trim().slice(0, 42) : existing.projectName;
+        const role = body.role === "editor" ? "editor" : body.role === "viewer" ? "viewer" : existing.role;
+        if (!projectName || rooms.length === 0) return json({ error: "bad_request" }, 400);
+        const invite = await index.update({ code: existing.code, projectName, role, rooms });
+        if (!invite) return json({ error: "not_found" }, 404);
+        return json({ ok: true, invite } satisfies ProjectInviteResponse);
+      }
+      return json({ error: "bad_request" }, 400);
+    }
+
+    if (url.pathname === "/api/project-invites/redeem") {
+      if (request.method !== "POST") return json({ error: "bad_request" }, 405);
+      let body: ProjectInviteRedeemRequest;
+      try { body = (await request.json()) as ProjectInviteRedeemRequest; } catch { return json({ error: "bad_request" }, 400); }
+      if (!isProjectInviteCode(body.code)) return json({ error: "bad_code" }, 403);
+
+      let uid: string;
+      let name: string;
+      let avatar = "";
+      const identity = await identityFrom(env, body.identity);
+      if (identity) {
+        uid = identity.uid;
+        name = identity.name;
+        avatar = identity.avatar;
+      } else if (signInRequired(env)) {
+        return json({ error: "sign_in_required" }, 401);
+      } else {
+        uid = String(body.uid ?? "");
+        name = String(body.name ?? "").trim().slice(0, 32) || "anon";
+        if (!UID_RE.test(uid)) return json({ error: "bad_request" }, 400);
+      }
+
+      const record = await projectIndex(env).get(body.code);
+      if (!record || record.revoked) return json({ error: "bad_code" }, 403);
+      const joined: ProjectInviteRedeemResponse["rooms"] = [];
+      for (const room of record.rooms) {
+        try {
+          const admitted = await roomStub(env, room.roomId).then((stub) => stub.fetch("https://room/project-admit", {
+            method: "POST",
+            body: JSON.stringify({ uid, name, avatar, role: record.role }),
+            headers: { "content-type": "application/json", "x-internal-auth": env.ROOM_SECRET },
+          }));
+          if (!admitted.ok) continue;
+          const result = (await admitted.json()) as { role: string };
+          const role = result.role === "owner" || result.role === "admin" || result.role === "editor" || result.role === "viewer" ? result.role : record.role;
+          joined.push({ ...room, token: await mintToken(env.ROOM_SECRET, { rid: room.roomId, uid, role, exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS }), role });
+        } catch {
+          // A deleted or unavailable room does not prevent the remaining
+          // rooms in a project invitation from being admitted.
+        }
+      }
+      if (joined.length === 0) return json({ error: "not_found" }, 404);
+      return json({ project: { id: record.projectId, name: record.projectName }, rooms: joined } satisfies ProjectInviteRedeemResponse);
     }
 
     /**

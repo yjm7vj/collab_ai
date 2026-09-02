@@ -987,6 +987,7 @@ export class Room extends Agent<Env, RoomState> {
       token?: string;
       login?: string;
       githubId?: string;
+      role?: string;
     };
     try {
       body = (await request.json()) as typeof body;
@@ -1050,6 +1051,33 @@ export class Room extends Agent<Env, RoomState> {
                VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, 'editor')`;
       this.#system(`${name} joined`);
       return json({ role: "editor", title: room.title });
+    }
+
+    if (url.pathname === "/project-authorize") {
+      const role = this.#memberRole(uid);
+      if (role === null || !can(asRole(role), "invite")) return json({ error: "forbidden" }, 403);
+      return json({ role: asRole(role) });
+    }
+
+    if (url.pathname === "/project-admit") {
+      const room = this.#room();
+      if (room === null) return json({ error: "not_found" }, 404);
+      const requestedRole = body.role === "editor" ? "editor" : body.role === "viewer" ? "viewer" : "";
+      if (!requestedRole) return json({ error: "bad_request" }, 400);
+
+      const existing = this.#memberRole(uid);
+      if (existing !== null) {
+        const existingRole = asRole(existing);
+        const rank = { viewer: 0, editor: 1, admin: 2, owner: 3 } as const;
+        const role = rank[existingRole] >= rank[requestedRole] ? existingRole : requestedRole;
+        this.sql`UPDATE members SET name = ${name}, avatar = ${avatar}, last_seen = ${now}, role = ${role} WHERE uid = ${uid}`;
+        return json({ role, title: room.title });
+      }
+
+      this.sql`INSERT INTO members (uid, name, avatar, joined_at, last_seen, role)
+               VALUES (${uid}, ${name}, ${avatar}, ${now}, ${now}, ${requestedRole})`;
+      this.#system(`${name} joined as ${requestedRole}`);
+      return json({ role: requestedRole, title: room.title });
     }
 
     if (url.pathname === "/presence-exit") {

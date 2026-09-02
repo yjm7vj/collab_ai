@@ -26,13 +26,21 @@ import type {
   SyncProject,
   SyncRoom,
 } from "../shared/sidebar";
-import { Landing, JoinGate, SidePane, SignInGate } from "./components";
+import { Landing, JoinGate, ProjectInvitePanel, SidePane, SignInGate } from "./components";
 import { LandingPage } from "./landing";
 import { isAppGated, WAITLIST_URL } from "./host";
 import { IDENTITY_KEY, readIdentity, storedIdentity } from "./identity";
 import { useTheme } from "./theme";
 import { RoomView } from "./RoomView";
 import type { WorkspaceInfo } from "../shared/workspace";
+import {
+  PROJECT_INVITE_CODE_RE,
+  type ProjectInviteRequest,
+  type ProjectInviteRedeemResponse,
+  type ProjectInviteResponse,
+  type ProjectInviteRole,
+  type ProjectInviteRoom,
+} from "../shared/project-invites";
 
 /**
  * A durable id for this browser, so a reload or a second tab is the same person.
@@ -381,7 +389,8 @@ function resolveIncomingAuth(): void {
 type Route =
   | { kind: "landing" }
   | { kind: "room"; roomId: string }
-  | { kind: "invite"; roomId: string; code: string };
+  | { kind: "invite"; roomId: string; code: string }
+  | { kind: "projectInvite"; code: string };
 
 function parseRoute(): Route {
   const raw = location.hash.replace(/^#/, "");
@@ -391,6 +400,9 @@ function parseRoute(): Route {
   }
   if (parts[0] === "j" && parts[1] && parts[2] && ROOM_ID_RE.test(parts[1])) {
     return { kind: "invite", roomId: parts[1], code: parts[2] };
+  }
+  if (parts[0] === "p" && parts[1] && PROJECT_INVITE_CODE_RE.test(parts[1])) {
+    return { kind: "projectInvite", code: parts[1] };
   }
   // Old-scheme room names (like `#lobby`) are deliberately not routable any
   // more — a guessable room name is exactly what this change removes.
@@ -449,6 +461,7 @@ export function App() {
   });
   const [projects, setProjects] = useState<SidebarProject[]>(storedProjects);
   const [rooms, setRooms] = useState<SidebarRoom[]>(storedRooms);
+  const [inviteProject, setInviteProject] = useState<SidebarProject | null>(null);
   const { theme, toggleTheme } = useTheme();
 
   /**
@@ -760,6 +773,88 @@ export function App() {
     [route, uid, syncSidebar],
   );
 
+  const projectInviteRequest = useCallback(async (body: Omit<ProjectInviteRequest, "identity" | "uid">) => {
+    const res = await fetch("/api/project-invites", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, identity: storedIdentity() ?? undefined, uid }),
+    });
+    const data = (await res.json()) as ProjectInviteResponse | { error?: string };
+    if (!res.ok) throw new Error("error" in data ? data.error ?? "request_failed" : "request_failed");
+    return data as ProjectInviteResponse;
+  }, [uid]);
+
+  const projectRooms = useCallback((project: SidebarProject): ProjectInviteRoom[] =>
+    project.rooms.filter((room) => !room.archived).map((room) => ({ roomId: room.roomId, label: room.label })), []);
+
+  const createProjectInvite = useCallback(async (roomIds: string[], role: ProjectInviteRole) => {
+    if (!inviteProject) return null;
+    try {
+      const roomMap = new Map(projectRooms(inviteProject).map((room) => [room.roomId, room]));
+      const result = await projectInviteRequest({
+        action: "create", projectId: inviteProject.id, projectName: inviteProject.name,
+        role, rooms: roomIds.map((roomId) => roomMap.get(roomId)).filter((room): room is ProjectInviteRoom => Boolean(room)),
+      });
+      return "invite" in result ? result.invite : null;
+    } catch { return null; }
+  }, [inviteProject, projectInviteRequest, projectRooms]);
+
+  const listProjectInvites = useCallback(async () => {
+    if (!inviteProject) return [];
+    const result = await projectInviteRequest({ action: "list", projectId: inviteProject.id, rooms: projectRooms(inviteProject) });
+    return "invites" in result ? result.invites : [];
+  }, [inviteProject, projectInviteRequest, projectRooms]);
+
+  const updateProjectInvite = useCallback(async (code: string, roomIds: string[], role: ProjectInviteRole) => {
+    if (!inviteProject) return null;
+    try {
+      const roomMap = new Map(projectRooms(inviteProject).map((room) => [room.roomId, room]));
+      const result = await projectInviteRequest({
+        action: "update", code, projectId: inviteProject.id, projectName: inviteProject.name,
+        role, rooms: roomIds.map((roomId) => roomMap.get(roomId)).filter((room): room is ProjectInviteRoom => Boolean(room)),
+      });
+      return "invite" in result ? result.invite : null;
+    } catch { return null; }
+  }, [inviteProject, projectInviteRequest, projectRooms]);
+
+  const revokeProjectInvite = useCallback(async (code: string) => {
+    if (!inviteProject) return false;
+    try {
+      await projectInviteRequest({ action: "revoke", code, projectId: inviteProject.id, rooms: projectRooms(inviteProject) });
+      return true;
+    } catch { return false; }
+  }, [inviteProject, projectInviteRequest, projectRooms]);
+
+  const joinProject = useCallback(async (displayName: string) => {
+    if (route.kind !== "projectInvite") return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/project-invites/redeem", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: route.code, uid, name: displayName, identity: storedIdentity() ?? undefined }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: JoinRefusal };
+        setProblem(data.error === "sign_in_required" ? "You need to sign in before joining this project." : data.error === "bad_code" ? "That project invite is no longer valid." : refusalMessage("network"));
+        return;
+      }
+      const data = (await res.json()) as ProjectInviteRedeemResponse;
+      if (data.rooms.length === 0) { setProblem("This project invite has no available rooms."); return; }
+      data.rooms.forEach((room) => writeToken(room.roomId, room.token));
+      const existing = projects.find((project) => project.id === data.project.id);
+      const joinedProject: SidebarProject = {
+        id: data.project.id, name: data.project.name, archived: false,
+        workspace: existing?.workspace ?? EMPTY_WORKSPACE, updatedAt: Date.now(),
+        rooms: data.rooms.map((room) => ({ roomId: room.roomId, label: room.label, projectId: data.project.id, archived: false, workspace: existing?.rooms.find((old) => old.roomId === room.roomId)?.workspace ?? EMPTY_WORKSPACE, updatedAt: Date.now() })),
+      };
+      setProjects((current) => current.some((project) => project.id === joinedProject.id) ? current.map((project) => project.id === joinedProject.id ? joinedProject : project) : [...current, joinedProject]);
+      localStorage.setItem("collab_ai:name", displayName); setName(displayName); setTokenEpoch((epoch) => epoch + 1);
+      await syncSidebar({ force: true });
+      location.hash = `#/r/${data.rooms.at(0)!.roomId}`;
+    } catch { setProblem(refusalMessage("network")); }
+    finally { setBusy(false); }
+  }, [projects, route, syncSidebar, uid]);
+
   // A full-page navigation, not a fetch — the provider's consent screen has
   // to actually be shown to the person, which only a real navigation can do.
   const signIn = useCallback((provider: string) => {
@@ -1012,6 +1107,15 @@ export function App() {
         onArchiveProject={archiveProject}
         onRestoreProject={restoreProject}
         onDeleteProject={deleteProject}
+        onInviteProject={(project) => {
+          const current = projects.find((candidate) => candidate.id === project.id);
+          if (current) setInviteProject(current);
+          else setInviteProject({
+            ...project,
+            rooms: project.rooms.map((room) => ({ ...room, updatedAt: Date.now() })),
+            updatedAt: Date.now(),
+          });
+        }}
       />
       {sidebarOpen && (
         <button
@@ -1022,6 +1126,16 @@ export function App() {
         />
       )}
       <main className="side-main">{content}</main>
+      {inviteProject && (
+        <ProjectInvitePanel
+          project={inviteProject}
+          onCreate={createProjectInvite}
+          onList={listProjectInvites}
+          onUpdate={updateProjectInvite}
+          onRevoke={revokeProjectInvite}
+          onClose={() => setInviteProject(null)}
+        />
+      )}
     </div>
   );
 
@@ -1081,6 +1195,24 @@ export function App() {
       />
     );
     return identity ? withSidePane(landing) : landing;
+  }
+
+  if (route.kind === "projectInvite") {
+    const join = (
+      <JoinGate
+        roomId="project"
+        projectInvite
+        initialName={name}
+        busy={busy}
+        problem={problem}
+        onJoin={joinProject}
+        identityName={identity?.name}
+        onSignOut={identity ? signOut : undefined}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
+    );
+    return identity ? withSidePane(join) : join;
   }
 
   if (token) {
