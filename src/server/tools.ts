@@ -239,6 +239,21 @@ export const TOOL_DEFS = [
     },
   },
   {
+    name: "semantic_search",
+    description:
+      "Search the indexed repository by meaning and related code concepts. " +
+      "Use this to find relevant files in a large codebase without repeatedly " +
+      "listing and rereading the repository. The IDE must index the workspace first.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Concept, behavior, symbol, or bug to find." },
+        max: { type: "integer", description: "Maximum indexed passages to return." },
+      },
+      required: ["query"],
+    },
+  },
+  {
     name: "write_file",
     description:
       "Replace a file's entire contents, creating it if missing. Destructive " +
@@ -408,6 +423,7 @@ export function workspaceGrantsFileTools(ws: WorkspaceInfo): boolean {
 /** The tools that require a live round trip to a connected workspace. */
 const WORKSPACE_TOOL_NAMES = new Set([
   "list_files", "read_file", "search_files",
+  "semantic_search",
   "write_file", "edit_file", "delete_file",
 ]);
 

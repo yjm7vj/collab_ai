@@ -17,6 +17,7 @@ import {
 import { DEFAULT_POLICY, type AccessPolicy, type Role } from "./access";
 import { DEFAULT_GRAPH, type WorkflowGraph } from "./workflow";
 import { NO_WORKSPACE, type FsRequest, type FsResponse, type WorkspaceInfo, type WorkspaceKind } from "./workspace";
+import type { IdeActivity, IdeCursor } from "./ide";
 
 /**
  * How a person can answer a gate. `grant` is an approval that also asks for
@@ -404,7 +405,11 @@ export type ServerMsg =
    */
   | { t: "github.repos"; repos: GithubRepo[]; source?: GithubRepoSource }
   /** A reply from the "describe your workflow" chat. Sent only to the asker. */
-  | { t: "workflow.chat"; reply: WorkflowChatReply };
+  | { t: "workflow.chat"; reply: WorkflowChatReply }
+  /** Ephemeral IDE presence, never persisted in the transcript. */
+  | { t: "ide.cursor"; cursor: IdeCursor }
+  /** Recent IDE activity, broadcast to room members. */
+  | { t: "ide.activity"; activity: IdeActivity };
 
 /**
  * Where a repository list came from, so the picker can say so.
@@ -511,7 +516,13 @@ export type ClientMsg =
    * message — the room holds none of it, so the client is the one source of
    * truth for a conversation that never touches `RoomState`.
    */
-  | { t: "workflow.chat"; turns: WorkflowChatTurn[]; graph: WorkflowGraph };
+  | { t: "workflow.chat"; turns: WorkflowChatTurn[]; graph: WorkflowGraph }
+  /** Publish the current editor location to the room. */
+  | { t: "ide.cursor"; cursor: Omit<IdeCursor, "uid" | "name" | "color"> }
+  /** Publish a human-readable IDE event to the room. */
+  | { t: "ide.activity"; kind: IdeActivity["kind"]; path: string; detail: string }
+  /** Add one already-read file to the room's semantic index. */
+  | { t: "ide.index"; path: string; content: string };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

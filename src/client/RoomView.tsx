@@ -52,6 +52,7 @@ import {
   saveHandle,
 } from "./workspace";
 import { FS_LIMITS, type FsRequest, type FsResponse } from "../shared/workspace";
+import type { IdeActivity, IdeCursor } from "../shared/ide";
 
 const CLIENT_FS_TIMEOUT_MS = FS_LIMITS.timeoutMs + 5_000;
 
@@ -159,6 +160,8 @@ export function RoomView({
   // descriptive — the server, not this flag, decides whether a write is ever
   // attempted; it only shapes what the workspace panel tells the user.
   const [canWrite, setCanWrite] = useState(false);
+  const [ideCursors, setIdeCursors] = useState<IdeCursor[]>([]);
+  const [ideActivity, setIdeActivity] = useState<IdeActivity[]>([]);
 
   useEffect(() => {
     if (!showSettingsMenu && !showAccountMenu) return;
@@ -205,6 +208,12 @@ export function RoomView({
         break;
       case "members":
         setMembers(msg.members);
+        break;
+      case "ide.cursor":
+        setIdeCursors((current) => [...current.filter((cursor) => cursor.uid !== msg.cursor.uid), msg.cursor]);
+        break;
+      case "ide.activity":
+        setIdeActivity((current) => [...current, msg.activity].slice(-30));
         break;
       case "revisions":
         setRevisions(msg.revisions);
@@ -600,6 +609,9 @@ export function RoomView({
       }
     });
   }, [connected, send, state.workspace.kind]);
+  const publishIdeCursor = useCallback((cursor: Omit<IdeCursor, "uid" | "name" | "color">) => send({ t: "ide.cursor", cursor }), [send]);
+  const publishIdeActivity = useCallback((kind: IdeActivity["kind"], path: string, detail: string) => send({ t: "ide.activity", kind, path, detail }), [send]);
+  const indexIdeFile = useCallback((path: string, content: string) => send({ t: "ide.index", path, content }), [send]);
   const authGithub = useCallback(() => send({ t: "github.auth" }), [send]);
   const listRepos = useCallback(() => {
     setReposLoading(true);
@@ -1028,6 +1040,11 @@ export function RoomView({
           onListRepos={listRepos}
           onSignOutGithub={signOutGithub}
           onRequest={requestWorkspace}
+          cursors={ideCursors}
+          activity={ideActivity}
+          onCursor={publishIdeCursor}
+          onActivity={publishIdeActivity}
+          onIndexFile={indexIdeFile}
           canEdit={canSeeFileContents(myRole) && (state.workspace.kind === "github" ? state.workspace.canWrite !== false : canWrite)}
           initialView={workspaceView}
           onClose={() => setShowWorkspace(false)}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { FsRequest, FsResponse, WorkspaceInfo } from "../shared/workspace";
+import type { IdeActivity, IdeCursor } from "../shared/ide";
 
 const CODE_EXTENSIONS = /\.(c|cc|cpp|css|go|h|hpp|html?|java|js|jsx|json|md|mjs|py|rb|rs|sql|sh|swift|ts|tsx|toml|vue|xml|yaml|yml)$/i;
 
@@ -13,12 +14,17 @@ function basename(path: string): string {
   return slash === -1 ? path : path.slice(slash + 1);
 }
 
-export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnections, embedded = false }: {
+export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnections, cursors = [], activity = [], onCursor, onActivity, onIndexFile, embedded = false }: {
   workspace: WorkspaceInfo;
   canEdit: boolean;
   onRequest: (req: FsRequest) => Promise<FsResponse>;
   onClose: () => void;
   onOpenConnections?: () => void;
+  cursors?: IdeCursor[];
+  activity?: IdeActivity[];
+  onCursor?: (cursor: Omit<IdeCursor, "uid" | "name" | "color">) => void;
+  onActivity?: (kind: IdeActivity["kind"], path: string, detail: string) => void;
+  onIndexFile?: (path: string, content: string) => void;
   embedded?: boolean;
 }) {
   const [files, setFiles] = useState<string[]>([]);
@@ -29,6 +35,8 @@ export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnect
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newPath, setNewPath] = useState("");
+  const [indexing, setIndexing] = useState(false);
+  const [indexStatus, setIndexStatus] = useState("");
 
   const loadFiles = useCallback(async () => {
     if (workspace.kind === "none" || !workspace.online) { setFiles([]); setSelected(""); setContent(""); setDirty(false); setError(null); return; }
@@ -43,7 +51,7 @@ export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnect
   const openFile = useCallback(async (path: string) => {
     setSelected(path); setLoading(true); setError(null);
     const response = await onRequest({ op: "read", path, offset: 0, limit: 64_000 });
-    if (!response.ok) { setError(response.error); setContent(""); } else { setContent(response.data); setDirty(false); }
+    if (!response.ok) { setError(response.error); setContent(""); } else { setContent(response.data); setDirty(false); onActivity?.("opened", path, "Opened in IDE"); }
     setLoading(false);
   }, [onRequest]);
 
@@ -51,9 +59,23 @@ export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnect
     if (!selected || !canEdit) return;
     setSaving(true); setError(null);
     const response = await onRequest({ op: "write", path: selected, content, deny: [] });
-    if (!response.ok) setError(response.error); else { setDirty(false); await loadFiles(); }
+    if (!response.ok) setError(response.error); else { setDirty(false); onActivity?.("saved", selected, "Saved changes"); await loadFiles(); }
     setSaving(false);
   }, [canEdit, content, loadFiles, onRequest, selected]);
+
+  const indexRepository = useCallback(async () => {
+    if (!onIndexFile || workspace.kind === "none" || !workspace.online) return;
+    setIndexing(true); setIndexStatus("Finding files..."); setError(null);
+    const listing = await onRequest({ op: "list", path: "", depth: 8, deny: [] });
+    if (!listing.ok) { setError(listing.error); setIndexing(false); return; }
+    const paths = filesFromListing(listing.data).slice(0, 200);
+    for (let i = 0; i < paths.length; i++) {
+      const path = paths[i]!; setIndexStatus(`Indexing ${i + 1} of ${paths.length}: ${path}`);
+      const response = await onRequest({ op: "read", path, offset: 0, limit: 64_000 });
+      if (response.ok) onIndexFile(path, response.data);
+    }
+    setIndexStatus(`Indexed ${paths.length} files`); setIndexing(false);
+  }, [onIndexFile, onRequest, workspace.kind, workspace.online]);
 
   const createFile = useCallback(async () => {
     const path = newPath.trim();
@@ -74,8 +96,9 @@ export function IdePanel({ workspace, canEdit, onRequest, onClose, onOpenConnect
     <div className={embedded ? "ide-embedded" : "modal-scrim"} onClick={embedded ? undefined : onClose}>
       <div className={embedded ? "ide-shell" : "modal ide-modal"} role="dialog" aria-label="IDE" onClick={(event) => event.stopPropagation()}>
         {embedded ? <div className="ide-context-bar"><strong>IDE</strong><span className="ide-status">{status}</span></div> : <header className="modal-head"><div><h2>IDE</h2><p className="ide-status">{status}</p></div><button className="icon" onClick={onClose} aria-label="Close IDE">✕</button></header>}
-        <div className="ide-toolbar"><button type="button" onClick={() => void loadFiles()} disabled={loading}>Refresh</button>{workspace.kind === "none" && onOpenConnections && <button type="button" className="primary" onClick={onOpenConnections}>Open Connections</button>}{canEdit && <form onSubmit={(event) => { event.preventDefault(); void createFile(); }} className="ide-new-file"><input value={newPath} onChange={(event) => setNewPath(event.target.value)} placeholder="src/new-file.ts" aria-label="New file path" /><button type="submit" disabled={!newPath.trim() || saving}>New file</button></form>}</div>
-        {workspace.kind === "none" ? <div className="ide-empty-state"><strong>Connect a workspace to edit code</strong><span>Choose a local folder or GitHub repository from Connections.</span>{onOpenConnections && <button type="button" className="primary" onClick={onOpenConnections}>Open Connections</button>}</div> : <div className="ide-body"><aside className="ide-files" aria-label="Code files"><div className="ide-files-title">Files</div>{loading && !files.length && <div className="ide-empty">Loading...</div>}{!loading && !files.length && <div className="ide-empty">No code files found.</div>}{files.map((path) => <button type="button" key={path} title={path} className={`ide-file ${selected === path ? "ide-file-selected" : ""}`} onClick={() => void openFile(path)}>{basename(path)}</button>)}</aside><section className="ide-editor" aria-label="Code editor"><div className="ide-editor-head"><span title={selected || undefined}>{(selected ? basename(selected) : "Select a file")}{dirty ? " · unsaved" : ""}</span><button type="button" className="primary" onClick={() => void saveFile()} disabled={!selected || !dirty || !canEdit || saving}>{saving ? "Saving..." : "Save"}</button></div><textarea className="ide-code" value={content} disabled={!selected || loading} onChange={(event) => { setContent(event.target.value); setDirty(true); }} spellCheck={false} aria-label={selected ? `Editing ${selected}` : "Code editor"} placeholder="Choose a code file from the left." />{error && <div className="ide-error">{error}</div>}</section></div>}
+        <div className="ide-toolbar"><button type="button" onClick={() => void loadFiles()} disabled={loading || indexing}>Refresh</button>{onIndexFile && workspace.kind !== "none" && <button type="button" onClick={() => void indexRepository()} disabled={indexing || loading}>{indexing ? "Indexing..." : "Index for Agent"}</button>}{workspace.kind === "none" && onOpenConnections && <button type="button" className="primary" onClick={onOpenConnections}>Open Connections</button>}{canEdit && <form onSubmit={(event) => { event.preventDefault(); void createFile(); }} className="ide-new-file"><input value={newPath} onChange={(event) => setNewPath(event.target.value)} placeholder="src/new-file.ts" aria-label="New file path" /><button type="submit" disabled={!newPath.trim() || saving}>New file</button></form>}</div>
+        {indexStatus && <div className="ide-index-status">{indexStatus}</div>}
+        {workspace.kind === "none" ? <div className="ide-empty-state"><strong>Connect a workspace to edit code</strong><span>Choose a local folder or GitHub repository from Connections.</span>{onOpenConnections && <button type="button" className="primary" onClick={onOpenConnections}>Open Connections</button>}</div> : <div className="ide-body"><aside className="ide-files" aria-label="Code files"><div className="ide-files-title">Files</div>{loading && !files.length && <div className="ide-empty">Loading...</div>}{!loading && !files.length && <div className="ide-empty">No code files found.</div>}{files.map((path) => <button type="button" key={path} title={path} className={`ide-file ${selected === path ? "ide-file-selected" : ""}`} onClick={() => void openFile(path)}>{basename(path)}</button>)}</aside><section className="ide-editor" aria-label="Code editor"><div className="ide-editor-head"><span title={selected || undefined}>{(selected ? basename(selected) : "Select a file")}{dirty ? " · unsaved" : ""}</span><button type="button" className="primary" onClick={() => void saveFile()} disabled={!selected || !dirty || !canEdit || saving}>{saving ? "Saving..." : "Save"}</button></div><textarea className="ide-code" value={content} disabled={!selected || loading} onSelect={(event) => { if (!selected || !onCursor) return; const before = event.currentTarget.value.slice(0, event.currentTarget.selectionStart); const lines = before.split("\n"); onCursor({ path: selected, line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 }); }} onChange={(event) => { setContent(event.target.value); setDirty(true); onActivity?.("edited", selected, "Editing in IDE"); }} spellCheck={false} aria-label={selected ? `Editing ${selected}` : "Code editor"} placeholder="Choose a code file from the left." />{error && <div className="ide-error">{error}</div>}<div className="ide-collab"><strong>Live activity</strong>{activity.slice(-6).reverse().map((item) => <div key={item.id}><span style={{ color: "var(--accent)" }}>{item.name}</span> {item.detail} <code>{item.path}</code></div>)}{cursors.filter((cursor) => cursor.uid !== "").map((cursor) => <div key={cursor.uid} className="ide-cursor-line"><span style={{ color: cursor.color }}>{cursor.name}</span> at {cursor.path}:{cursor.line}:{cursor.column}</div>)}</div></section></div>}
       </div>
     </div>
   );

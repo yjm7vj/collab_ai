@@ -100,12 +100,14 @@ export type ToolDecision = "allow" | "ask" | "deny";
 export type ToolName =
   | "read_doc" | "write_doc" | "edit_doc" | "delegate" | "web_search" | "web_fetch"
   | "list_files" | "read_file" | "search_files"
+  | "semantic_search"
   | "write_file" | "edit_file" | "delete_file"
   | "mcp";
 
 export const TOOL_NAMES: readonly ToolName[] = [
   "read_doc", "write_doc", "edit_doc", "delegate", "web_search", "web_fetch",
   "list_files", "read_file", "search_files",
+  "semantic_search",
   "write_file", "edit_file", "delete_file",
   "mcp",
 ] as const;
@@ -136,6 +138,7 @@ const ALL_ALLOW: Record<ToolName, ToolDecision> = {
   read_doc: "allow", write_doc: "allow", edit_doc: "allow",
   delegate: "allow", web_search: "allow", web_fetch: "allow",
   list_files: "allow", read_file: "allow", search_files: "allow",
+  semantic_search: "allow",
   write_file: "allow", edit_file: "allow", delete_file: "allow",
   mcp: "allow",
 };
@@ -267,7 +270,7 @@ export function canSeeFileContents(role: Role): boolean {
 
 /** Tools whose results contain workspace file contents. */
 export const FILE_CONTENT_TOOLS: readonly ToolName[] = [
-  "read_file", "search_files", "write_file", "edit_file",
+  "read_file", "search_files", "semantic_search", "write_file", "edit_file",
 ] as const;
 
 export function isFileContentTool(name: string): boolean {

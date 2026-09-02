@@ -1615,6 +1615,11 @@ input:focus, textarea:focus {
 .ide-code { min-height: 0; flex: 1; resize: none; border: 0; border-radius: 0; background: var(--panel); color: var(--ink); font-family: var(--mono); font-size: 13px; line-height: 1.55; tab-size: 2; }
 .ide-code:focus { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
 .ide-error { padding: 8px 12px; border-top: 1px solid var(--danger-line); background: var(--danger-bg); color: var(--bad); font-size: 12px; }
+.ide-index-status { flex: 0 0 auto; padding: 6px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ide-collab { flex: 0 0 auto; max-height: 150px; overflow: auto; padding: 8px 12px; border-top: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 11px; }
+.ide-collab strong { display: block; margin-bottom: 5px; color: var(--ink-dim); }
+.ide-collab code { color: var(--ink-dim); }
+.ide-cursor-line { margin-top: 4px; }
 .terminal-modal {
   width: min(1040px, 100%);
   height: min(760px, 88vh);

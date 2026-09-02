@@ -46,6 +46,7 @@ import {
   type WorkerStatus,
   redactEntry,
 } from "../shared/protocol";
+import type { IdeActivity, IdeCursor } from "../shared/ide";
 import {
   DEFAULT_POLICY,
   approvalThreshold,
@@ -413,6 +414,15 @@ export class Room extends Agent<Env, RoomState> {
       revoked_at INTEGER NOT NULL DEFAULT 0,
       label TEXT NOT NULL DEFAULT ''
     )`;
+    this.sql`CREATE TABLE IF NOT EXISTS semantic_chunks (
+      path TEXT NOT NULL,
+      chunk INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      terms TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (path, chunk)
+    )`;
+    this.sql`CREATE INDEX IF NOT EXISTS semantic_terms ON semantic_chunks (terms)`;
     // Only the installation id and repo are stored here. Installation tokens
     // are short-lived (about an hour) and are minted fresh per request, never
     // persisted — a stored token is a stored credential with an hour to be
@@ -1774,6 +1784,12 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onFsRes(connection, msg.id, msg.res);
       case "fs.client.req":
         return this.#onFsClientReq(connection, msg.id, msg.req);
+      case "ide.cursor":
+        return this.#onIdeCursor(connection, msg.cursor);
+      case "ide.activity":
+        return this.#onIdeActivity(connection, msg.kind, msg.path, msg.detail);
+      case "ide.index":
+        return this.#onIdeIndex(connection, msg.path, msg.content);
     }
   }
 
@@ -2687,6 +2703,66 @@ export class Room extends Agent<Env, RoomState> {
     const uid = this.#uidOf(connection);
     if (!uid || uid !== this.state.workspace.hostUid) return;
     this.#pending.settle(id, res);
+  }
+
+  async #onIdeCursor(connection: Connection, incoming: Omit<IdeCursor, "uid" | "name" | "color">) {
+    const uid = this.#uidOf(connection);
+    if (!uid || !canSeeFileContents(this.#roleOf(connection)) || !incoming || typeof incoming !== "object") return;
+    const path = normalizePath(String(incoming.path ?? ""));
+    if (path === null || path.length > 240) return;
+    const cursor: IdeCursor = {
+      uid,
+      name: this.#memberName(uid) ?? "someone",
+      path,
+      line: Math.max(1, Math.min(1_000_000, Math.round(Number(incoming.line) || 1))),
+      column: Math.max(1, Math.min(1_000_000, Math.round(Number(incoming.column) || 1))),
+      color: colorFor(uid),
+    };
+    this.#send({ t: "ide.cursor", cursor });
+  }
+
+  async #onIdeActivity(connection: Connection, kind: IdeActivity["kind"], rawPath: string, rawDetail: string) {
+    const uid = this.#uidOf(connection);
+    if (!uid || !canSeeFileContents(this.#roleOf(connection))) return;
+    const path = normalizePath(String(rawPath ?? ""));
+    if (path === null || path.length > 240) return;
+    const activity: IdeActivity = {
+      id: crypto.randomUUID(), uid, name: this.#memberName(uid) ?? "someone",
+      kind: kind === "saved" || kind === "indexed" || kind === "edited" ? kind : "opened",
+      path, detail: String(rawDetail ?? "").trim().slice(0, 160), at: Date.now(),
+    };
+    this.#send({ t: "ide.activity", activity });
+  }
+
+  async #onIdeIndex(connection: Connection, rawPath: string, rawContent: string) {
+    const uid = this.#uidOf(connection);
+    if (!uid || !canSeeFileContents(this.#roleOf(connection))) return;
+    const path = normalizePath(String(rawPath ?? ""));
+    const content = String(rawContent ?? "");
+    if (path === null || !path || path.length > 240 || content.length > 512_000) return;
+    const chunkSize = 12_000;
+    const chunks = Math.max(1, Math.ceil(content.length / chunkSize));
+    this.sql`DELETE FROM semantic_chunks WHERE path = ${path}`;
+    for (let chunk = 0; chunk < chunks; chunk++) {
+      const text = content.slice(chunk * chunkSize, (chunk + 1) * chunkSize);
+      const terms = [...new Set(text.toLowerCase().split(/[^a-z0-9_$]+/).filter((term) => term.length >= 2))].slice(0, 2_000).join(" ");
+      this.sql`INSERT INTO semantic_chunks (path, chunk, content, terms, updated_at) VALUES (${path}, ${chunk}, ${text}, ${terms}, ${Date.now()})`;
+    }
+    await this.#onIdeActivity(connection, "indexed", path, `Indexed ${chunks} passage${chunks === 1 ? "" : "s"}`);
+  }
+
+  #semanticSearch(rawQuery: unknown, rawMax: unknown): FsResponse {
+    const query = String(rawQuery ?? "").trim().toLowerCase();
+    if (query.length < 2) return { ok: false, error: "semantic_search needs a query with at least two characters." };
+    const terms = [...new Set(query.split(/[^a-z0-9_$]+/).filter((term) => term.length >= 2))].slice(0, 20);
+    const max = Math.max(1, Math.min(20, Math.round(Number(rawMax) || 8)));
+    const rows = this.sql<{ path: string; chunk: number; content: string; terms: string }>`SELECT path, chunk, content, terms FROM semantic_chunks`;
+    const ranked = rows.map((row) => {
+      const score = terms.reduce((sum, term) => sum + (row.terms.split(" ").includes(term) ? 1 : 0), 0);
+      return { row, score };
+    }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || a.row.path.localeCompare(b.row.path) || a.row.chunk - b.row.chunk).slice(0, max);
+    if (ranked.length === 0) return { ok: true, data: "No indexed passages matched. Ask someone with repository access to index the workspace from the IDE." };
+    return { ok: true, data: ranked.map(({ row, score }) => `## ${row.path} (passage ${row.chunk + 1}, relevance ${score}/${terms.length})\n${row.content}`).join("\n\n") };
   }
 
   /** Serve an explicit code workspace request to its requesting member. */
@@ -3752,6 +3828,10 @@ export class Room extends Agent<Env, RoomState> {
             let outcome: ToolOutcome;
             if (call.name === "delegate") {
               outcome = await this.#delegate((call.input as { tasks?: unknown })?.tasks, docs);
+            } else if (call.name === "semantic_search") {
+              const input = (call.input ?? {}) as Record<string, unknown>;
+              const res = this.#semanticSearch(input.query, input.max);
+              outcome = { ok: res.ok, text: res.ok ? res.data : res.error };
             } else if (
               call.name === "list_files" ||
               call.name === "read_file" ||

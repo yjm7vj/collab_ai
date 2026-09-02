@@ -32,6 +32,7 @@ import { inlineMarkdown } from "./markdown";
 import type { WorkspaceInfo } from "../shared/workspace";
 import type { FsRequest, FsResponse } from "../shared/workspace";
 import type { ProjectInviteRole, ProjectInviteSummary } from "../shared/project-invites";
+import type { IdeActivity, IdeCursor } from "../shared/ide";
 import { IdePanel } from "./IdePanel";
 import { modelInfo, type CostLedger, type RoomSettings } from "../shared/models";
 import { contextUsage } from "../shared/context";
@@ -2431,6 +2432,11 @@ export function WorkspacePanel({
   onListRepos,
   onSignOutGithub,
   onRequest,
+  cursors,
+  activity,
+  onCursor,
+  onActivity,
+  onIndexFile,
   canEdit,
   initialView = "connections",
   onClose,
@@ -2450,6 +2456,11 @@ export function WorkspacePanel({
   onListRepos: () => void;
   onSignOutGithub: () => void;
   onRequest: (req: FsRequest) => Promise<FsResponse>;
+  cursors?: IdeCursor[];
+  activity?: IdeActivity[];
+  onCursor?: (cursor: Omit<IdeCursor, "uid" | "name" | "color">) => void;
+  onActivity?: (kind: IdeActivity["kind"], path: string, detail: string) => void;
+  onIndexFile?: (path: string, content: string) => void;
   canEdit: boolean;
   initialView?: WorkspaceView;
   onClose: () => void;
@@ -2514,7 +2525,7 @@ export function WorkspacePanel({
           <button type="button" className={view === "ide" ? "workspace-tab active" : "workspace-tab"} onClick={() => setView("ide")}>IDE</button>
         </nav>
 
-        {view === "ide" ? <IdePanel embedded workspace={workspace} canEdit={canEdit} onRequest={onRequest} onClose={onClose} onOpenConnections={() => setView("connections")} /> : <div className="modal-body">
+        {view === "ide" ? <IdePanel embedded workspace={workspace} canEdit={canEdit} onRequest={onRequest} onClose={onClose} onOpenConnections={() => setView("connections")} cursors={cursors} activity={activity} onCursor={onCursor} onActivity={onActivity} onIndexFile={onIndexFile} /> : <div className="modal-body">
           {!attached ? (
             <div className="ws-options">
               {supported ? (
