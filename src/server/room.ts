@@ -24,8 +24,10 @@ import {
   INVITABLE_ROLES,
   UID_RE,
   colorFor,
+  completeRoomState,
   grantFor,
   grantIsLive,
+  missingRoomStateKeys,
   optionTally,
   tally,
   type AgentBlock,
@@ -3888,6 +3890,14 @@ export class Room extends Agent<Env, RoomState> {
       if (JSON.stringify(migrated) !== JSON.stringify(this.state.graph)) {
         this.setState({ ...this.state, graph: migrated });
       }
+    }
+
+    // Before anything reads it: a state persisted before a field existed comes
+    // back without that field, and every client it syncs to then has to cope
+    // with a hole. Filling it here means no reader downstream — ours or the
+    // browser's — ever sees one. See completeRoomState.
+    if (missingRoomStateKeys(this.state).length > 0) {
+      this.setState(completeRoomState(this.state));
     }
 
     // Grants lapse by the clock, so a room waking up may be carrying authority
