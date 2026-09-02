@@ -538,6 +538,8 @@ export async function runModel(
   tools: unknown[],
   hooks: StreamHooks,
   maxTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+  /** The lead node's own MCP servers, resolved with their tokens — see room.ts#advance. */
+  mcpServers?: WorkerMcpServer[],
 ): Promise<ModelResult> {
   if (cfg.apiKey === "mock") return mockTurn(settings, messages, hooks);
 
@@ -554,9 +556,13 @@ export async function runModel(
     messages,
     "long",
     maxTokens,
+    mcpServers,
   );
 
-  const stream = client(cfg).messages.stream(params as never);
+  // Always the beta namespace: identical to the plain endpoint when no
+  // beta-only params are set (no mcpServers here), and required when they
+  // are (see buildParams' `betas`).
+  const stream = client(cfg).beta.messages.stream(params as never);
 
   for await (const event of stream) {
     if (event.type === "content_block_start") {
@@ -569,7 +575,7 @@ export async function runModel(
     }
   }
 
-  const message = await stream.finalMessage();
+  const message = (await stream.finalMessage()) as unknown as Message;
   return { message, usage: readUsage(message, plan.model) };
 }
 

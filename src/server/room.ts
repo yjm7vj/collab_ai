@@ -3050,6 +3050,7 @@ export class Room extends Agent<Env, RoomState> {
             },
           },
           maxOutputTokens,
+          graph ? this.#mcpServersFor(leadOf(graph)) : undefined,
         );
 
         this.#recordUsage(usage, true);

@@ -1047,80 +1047,77 @@ function NodeInspector({
         </span>
       </label>
 
-      {!isLead && (
-        <div className="field">
-          <span className="field-label">MCP Servers</span>
-          <div className="wf-mcp-list">
-            {mcpServers.map((s) => (
-              <div className="wf-mcp-row" key={s.id}>
-                <input
-                  className="wf-mcp-name"
-                  value={s.name}
-                  disabled={!canEdit}
-                  maxLength={GRAPH_LIMITS.mcpNameChars}
-                  placeholder="Name"
-                  onChange={(e) =>
-                    onPatch({
-                      mcpServers: mcpServers.map((x) =>
-                        x.id === s.id ? { ...x, name: e.target.value } : x,
-                      ),
-                    })
+      <div className="field">
+        <span className="field-label">MCP Servers</span>
+        <div className="wf-mcp-list">
+          {mcpServers.map((s) => (
+            <div className="wf-mcp-row" key={s.id}>
+              <input
+                className="wf-mcp-name"
+                value={s.name}
+                disabled={!canEdit}
+                maxLength={GRAPH_LIMITS.mcpNameChars}
+                placeholder="Name"
+                onChange={(e) =>
+                  onPatch({
+                    mcpServers: mcpServers.map((x) =>
+                      x.id === s.id ? { ...x, name: e.target.value } : x,
+                    ),
+                  })
+                }
+              />
+              <input
+                className="wf-mcp-url"
+                value={s.url}
+                disabled={!canEdit}
+                maxLength={GRAPH_LIMITS.mcpUrlChars}
+                placeholder="https://…"
+                onChange={(e) =>
+                  onPatch({
+                    mcpServers: mcpServers.map((x) =>
+                      x.id === s.id ? { ...x, url: e.target.value } : x,
+                    ),
+                  })
+                }
+              />
+              {canEdit && (
+                <button
+                  className="wf-danger"
+                  onClick={() =>
+                    onPatch({ mcpServers: mcpServers.filter((x) => x.id !== s.id) })
                   }
-                />
-                <input
-                  className="wf-mcp-url"
-                  value={s.url}
-                  disabled={!canEdit}
-                  maxLength={GRAPH_LIMITS.mcpUrlChars}
-                  placeholder="https://…"
-                  onChange={(e) =>
-                    onPatch({
-                      mcpServers: mcpServers.map((x) =>
-                        x.id === s.id ? { ...x, url: e.target.value } : x,
-                      ),
-                    })
-                  }
-                />
-                {canEdit && (
-                  <button
-                    className="wf-danger"
-                    onClick={() =>
-                      onPatch({ mcpServers: mcpServers.filter((x) => x.id !== s.id) })
-                    }
-                  >
-                    Remove
-                  </button>
-                )}
-                {canEdit &&
-                  (savedServerIds.has(s.id) ? (
-                    <McpTokenField
-                      hasToken={mcpTokensSet.includes(`${node.id}:${s.id}`)}
-                      onSave={(token) => onSetMcpToken(node.id, s.id, token)}
-                    />
-                  ) : (
-                    <span className="field-note">Apply the workflow to set a token here.</span>
-                  ))}
-              </div>
-            ))}
-          </div>
-          {canEdit && mcpServers.length < GRAPH_LIMITS.mcpServersPerNode && (
-            <button
-              onClick={() =>
-                onPatch({
-                  mcpServers: [...mcpServers, { id: newId(), name: "", url: "" }],
-                })
-              }
-            >
-              Add MCP Server
-            </button>
-          )}
-          <span className="field-note">
-            Remote MCP servers only — this agent calls their tools directly when it runs as a
-            delegate. Tools from a connected server run without a room vote, so only add servers
-            you trust.
-          </span>
+                >
+                  Remove
+                </button>
+              )}
+              {canEdit &&
+                (savedServerIds.has(s.id) ? (
+                  <McpTokenField
+                    hasToken={mcpTokensSet.includes(`${node.id}:${s.id}`)}
+                    onSave={(token) => onSetMcpToken(node.id, s.id, token)}
+                  />
+                ) : (
+                  <span className="field-note">Apply the workflow to set a token here.</span>
+                ))}
+            </div>
+          ))}
         </div>
-      )}
+        {canEdit && mcpServers.length < GRAPH_LIMITS.mcpServersPerNode && (
+          <button
+            onClick={() =>
+              onPatch({
+                mcpServers: [...mcpServers, { id: newId(), name: "", url: "" }],
+              })
+            }
+          >
+            Add MCP Server
+          </button>
+        )}
+        <span className="field-note">
+          Remote MCP servers only — this agent calls their tools directly. Tools from a
+          connected server run without a room vote, so only add servers you trust.
+        </span>
+      </div>
 
       {canEdit && (
         <button onClick={onStartLink}>Draw a link from {node.name}</button>

@@ -38,7 +38,8 @@ export type AgentNode = {
   x: number;
   y: number;
   /**
-   * Remote MCP servers this agent can call tools on, when it runs as a
+   * Remote MCP servers this agent can call tools on — whether it's talking
+   * to the room directly as the lead (see `room.ts#advance`) or running as a
    * delegate (see `room.ts#delegate`). Never carries a credential — a bearer
    * token lives in the room's own storage, keyed by (node id, server id),
    * because this type is synced to every connected client.
