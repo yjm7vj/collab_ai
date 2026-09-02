@@ -278,6 +278,15 @@ const GITHUB_WORKING_KEY = "github:working";
  */
 const GITHUB_SIGNED_OUT_KEY = "github:signed-out";
 
+/**
+ * The uid a room-wide MCP token is filed under in `mcp_credentials`.
+ *
+ * `*` cannot collide with a real member: uids are hex digests matched by
+ * UID_RE, so no person can ever be filed here and no personal token can be
+ * mistaken for the shared one.
+ */
+export const SHARED_MCP_UID = "*";
+
 export class Room extends Agent<Env, RoomState> {
   initialState: RoomState = INITIAL_ROOM_STATE;
 
@@ -402,19 +411,38 @@ export class Room extends Agent<Env, RoomState> {
       installation_id TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )`;
-    // Bearer tokens for the MCP servers wired to a custom-workflow agent
-    // (see workflow.ts's AgentNode#mcpServers, which carries no credential
-    // for exactly this reason). Keyed by (node id, server id) rather than by
-    // room, since a graph can carry several agents each with their own
-    // servers. Read fresh in #delegate and handed straight to the model
-    // call — never put in RoomState, which syncs to every connected client.
-    this.sql`CREATE TABLE IF NOT EXISTS mcp_tokens (
+    // Bearer tokens for the MCP servers wired to an agent (see workflow.ts's
+    // AgentNode#mcpServers, which carries no credential for exactly this
+    // reason). Keyed by (node id, server id, uid) rather than by room: a graph
+    // can carry several agents each with their own servers, and a server set to
+    // `personal` credentials holds one token per member. SHARED_MCP_UID is the
+    // uid a room-wide token is filed under, so both kinds live in one table
+    // instead of two that can disagree. Read fresh at turn time and handed
+    // straight to the model call — never put in RoomState, which syncs to every
+    // connected client.
+    this.sql`CREATE TABLE IF NOT EXISTS mcp_credentials (
       node_id TEXT NOT NULL,
       server_id TEXT NOT NULL,
+      uid TEXT NOT NULL,
       token TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
-      PRIMARY KEY (node_id, server_id)
+      PRIMARY KEY (node_id, server_id, uid)
     )`;
+    // The first cut of this shipped as mcp_tokens, keyed by (node, server) with
+    // no uid. SQLite cannot widen a primary key in place, so rows are lifted
+    // across as shared tokens — which is what they were — and the old table is
+    // dropped rather than left holding a second copy of live credentials.
+    try {
+      const legacy = this.sql<{ name: string }>`
+        SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'mcp_tokens'`;
+      if (legacy.length > 0) {
+        this.sql`INSERT OR IGNORE INTO mcp_credentials (node_id, server_id, uid, token, updated_at)
+                 SELECT node_id, server_id, ${SHARED_MCP_UID}, token, updated_at FROM mcp_tokens`;
+        this.sql`DROP TABLE mcp_tokens`;
+      }
+    } catch {
+      /* nothing to lift */
+    }
     this.#schemaReady = true;
   }
 
@@ -438,46 +466,77 @@ export class Room extends Agent<Env, RoomState> {
     this.sql`DELETE FROM kv WHERE k = ${key}`;
   }
 
-  /** Store (or, given an empty string, clear) one MCP server's bearer token. */
-  #setMcpToken(nodeId: string, serverId: string, token: string) {
+  /**
+   * Store (or, given an empty string, clear) one MCP token.
+   *
+   * `uid` is the member the token belongs to, or SHARED_MCP_UID for the
+   * room-wide one. Who is allowed to pass which uid is decided in
+   * #onSetMcpToken — this just writes what it is told.
+   */
+  #setMcpToken(nodeId: string, serverId: string, uid: string, token: string) {
     if (token === "") {
-      this.sql`DELETE FROM mcp_tokens WHERE node_id = ${nodeId} AND server_id = ${serverId}`;
+      this.sql`DELETE FROM mcp_credentials
+               WHERE node_id = ${nodeId} AND server_id = ${serverId} AND uid = ${uid}`;
       return;
     }
-    this.sql`INSERT INTO mcp_tokens (node_id, server_id, token, updated_at)
-             VALUES (${nodeId}, ${serverId}, ${token}, ${Date.now()})
-             ON CONFLICT(node_id, server_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`;
+    this.sql`INSERT INTO mcp_credentials (node_id, server_id, uid, token, updated_at)
+             VALUES (${nodeId}, ${serverId}, ${uid}, ${token}, ${Date.now()})
+             ON CONFLICT(node_id, server_id, uid)
+             DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`;
   }
 
-  /** This node's stored tokens, server id -> token. Read fresh; never cached. */
-  #mcpTokensFor(nodeId: string): Map<string, string> {
-    const rows = this.sql<{ server_id: string; token: string }>`
-      SELECT server_id, token FROM mcp_tokens WHERE node_id = ${nodeId}`;
-    return new Map(rows.map((r) => [r.server_id, r.token] as const));
+  /** One stored token, or "" when that member has not connected this server. */
+  #mcpToken(nodeId: string, serverId: string, uid: string): string {
+    const rows = this.sql<{ token: string }>`
+      SELECT token FROM mcp_credentials
+      WHERE node_id = ${nodeId} AND server_id = ${serverId} AND uid = ${uid}`;
+    return rows[0]?.token ?? "";
   }
 
   /**
-   * Which (node, server) pairs have a token stored, as `"nodeId:serverId"`
-   * keys — safe to put in RoomState because it carries no token value, only
-   * whether one exists.
+   * Which credentials exist, as `"nodeId:serverId:uid"` keys — safe to put in
+   * RoomState because it carries no token value, only the fact that one is
+   * stored. A member reading this can tell "I have connected this" apart from
+   * "the room has a shared connection" without either token being on the wire.
    */
   #mcpTokensSet(): string[] {
-    const rows = this.sql<{ node_id: string; server_id: string }>`SELECT node_id, server_id FROM mcp_tokens`;
-    return rows.map((r) => `${r.node_id}:${r.server_id}`);
+    const rows = this.sql<{ node_id: string; server_id: string; uid: string }>`
+      SELECT node_id, server_id, uid FROM mcp_credentials`;
+    return rows.map((r) => `${r.node_id}:${r.server_id}:${r.uid}`);
   }
 
-  /** A node's MCP servers, each resolved with its stored token (if any). */
-  #mcpServersFor(node: AgentNode): WorkerMcpServer[] {
+  /**
+   * A node's MCP servers, each resolved with the token this turn should use.
+   *
+   * `asUid` is whoever's turn this is. A `personal` server with no token from
+   * that person is dropped rather than falling back to anyone else's — acting
+   * as the wrong person is worse than not acting. Dropped servers come back in
+   * `missing` so the room can be told which connection is needed and by whom.
+   */
+  #mcpServersFor(
+    node: AgentNode,
+    asUid: string,
+  ): { servers: WorkerMcpServer[]; missing: string[] } {
     // `?? []`: a graph persisted before mcpServers existed has nodes without
     // it — this reads straight off stored state, not sanitizeGraph's output.
-    const servers = node.mcpServers ?? [];
-    if (servers.length === 0) return [];
-    const tokens = this.#mcpTokensFor(node.id);
-    return servers.map((s) => ({
-      name: s.name,
-      url: s.url,
-      ...(tokens.get(s.id) ? { authorizationToken: tokens.get(s.id) } : {}),
-    }));
+    const refs = node.mcpServers ?? [];
+    const servers: WorkerMcpServer[] = [];
+    const missing: string[] = [];
+
+    for (const s of refs) {
+      const personal = s.credentials === "personal";
+      const token = this.#mcpToken(node.id, s.id, personal ? asUid : SHARED_MCP_UID);
+      if (personal && token === "") {
+        missing.push(s.name);
+        continue;
+      }
+      servers.push({
+        name: s.name,
+        url: s.url,
+        ...(token ? { authorizationToken: token } : {}),
+      });
+    }
+    return { servers, missing };
   }
 
   #convo(): MessageParam[] {
@@ -2536,21 +2595,49 @@ export class Room extends Agent<Env, RoomState> {
     await this.#settleIfDecided();
   }
 
+  /**
+   * Store one member's MCP token, or the room's shared one.
+   *
+   * The two cases carry different permissions, and this is the only place that
+   * distinction is enforced:
+   *
+   *   - a *personal* token is your own credential, so anyone who may speak in
+   *     the room may set theirs, and nobody can write, read or clear anyone
+   *     else's — the uid is taken from the socket, never from the message.
+   *   - the *shared* token acts for the whole room, so setting it is a change
+   *     to how the room's agent behaves, and needs the `workflow` capability
+   *     like any other change to the graph.
+   */
   async #onSetMcpToken(connection: Connection, nodeId: string, serverId: string, token: string) {
-    if (
-      !this.#allow(
-        connection,
-        "workflow",
-        "You need to be an editor or above to change an agent's MCP servers.",
-      )
-    )
-      return;
+    const uid = this.#uidOf(connection);
+    if (!uid || !this.#memberName(uid)) return;
 
     const node = this.#graph().nodes.find((n) => n.id === nodeId);
     const server = node?.mcpServers?.find((s) => s.id === serverId);
     if (!server) return; // stale UI — the server was removed from the graph already
 
-    this.#setMcpToken(nodeId, serverId, token);
+    const personal = server.credentials === "personal";
+
+    if (personal) {
+      if (
+        !this.#allow(
+          connection,
+          "speak",
+          "You're a viewer in this room, so you can't connect your own account.",
+        )
+      )
+        return;
+    } else if (
+      !this.#allow(
+        connection,
+        "workflow",
+        "You need to be an editor or above to set this room's shared credential.",
+      )
+    ) {
+      return;
+    }
+
+    this.#setMcpToken(nodeId, serverId, personal ? uid : SHARED_MCP_UID, token);
     this.setState({ ...this.state, mcpTokensSet: this.#mcpTokensSet() });
   }
 
@@ -2829,6 +2916,11 @@ export class Room extends Agent<Env, RoomState> {
         }
 
         try {
+          // Whoever's turn this is. A teammate's personal-credential servers
+          // run as them, so a delegated task inherits the asker's connections.
+          const asUid = this.#turn()?.authorUid ?? "";
+          const mcp = node && graph ? this.#mcpServersFor(node, asUid) : null;
+
           const r = await runWorker(
             this.#config(),
             settings,
@@ -2839,7 +2931,7 @@ export class Room extends Agent<Env, RoomState> {
               ? {
                   model: node.model,
                   system: workerSystemFor(graph, node),
-                  mcpServers: this.#mcpServersFor(node),
+                  mcpServers: mcp?.servers ?? [],
                 }
               : null,
           );
@@ -2850,7 +2942,16 @@ export class Room extends Agent<Env, RoomState> {
 
           stage(id, undefined);
           settle(id, "done");
-          return `${heading}\n\n${text}`;
+          // Said in the result rather than swallowed: the task ran without a
+          // tool the room thought it had, and the reason is fixable by one
+          // named person connecting their account.
+          const note =
+            mcp && mcp.missing.length > 0
+              ? `\n\n(ran without ${mcp.missing.join(", ")} — ${
+                  this.#turn()?.authorName ?? "whoever asked"
+                } has not connected ${mcp.missing.length === 1 ? "that server" : "those servers"} yet.)`
+              : "";
+          return `${heading}\n\n${text}${note}`;
         } catch (err) {
           settle(id, "failed");
           const msg = err instanceof Error ? err.message : String(err);
@@ -3016,6 +3117,18 @@ export class Room extends Agent<Env, RoomState> {
         if (conversation.repaired) this.#setConvo(conversation.messages);
 
         const graph = this.#activeGraph();
+        // The lead's own servers, resolved as whoever's turn this is: a
+        // personal-credential server acts for the person who spoke, not for
+        // whoever happened to configure it.
+        const leadMcp = graph ? this.#mcpServersFor(leadOf(graph), stored.authorUid ?? "") : null;
+        if (leadMcp && leadMcp.missing.length > 0 && round === 0) {
+          this.#system(
+            `The agent is running without ${leadMcp.missing.join(", ")} — ` +
+              `${stored.authorName} has not connected ${
+                leadMcp.missing.length === 1 ? "that server" : "those servers"
+              } yet.`,
+          );
+        }
         const maxOutputTokens = stored.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
         const { message, usage } = await runModel(
           this.#config(),
@@ -3050,7 +3163,7 @@ export class Room extends Agent<Env, RoomState> {
             },
           },
           maxOutputTokens,
-          graph ? this.#mcpServersFor(leadOf(graph)) : undefined,
+          leadMcp?.servers,
         );
 
         this.#recordUsage(usage, true);

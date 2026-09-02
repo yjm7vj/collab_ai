@@ -963,6 +963,7 @@ export function RoomView({
           onChatReset={resetWorkflowChat}
           mcpTokensSet={state.mcpTokensSet}
           onSetMcpToken={setMcpToken}
+          me={me}
         />
       )}
 

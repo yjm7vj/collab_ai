@@ -52,7 +52,21 @@ export type McpServerRef = {
   id: string;
   name: string;
   url: string;
+  /**
+   * Whose credential this server runs on.
+   *
+   * `shared` is one token for the whole room — right for a team's own
+   * account, and the default because it is what every server configured
+   * before this field existed already was.
+   *
+   * `personal` is a token per member, and the agent uses the token of
+   * whoever's turn it is. Right for anything that should act as the
+   * individual asking rather than as the room.
+   */
+  credentials: McpCredentialMode;
 };
+
+export type McpCredentialMode = "shared" | "personal";
 
 /**
  * How one agent relates to another. Work always flows from -> to, so the arrow
@@ -545,8 +559,12 @@ function sanitizeMcpServers(value: unknown): McpServerRef[] {
     const url = text(r.url, GRAPH_LIMITS.mcpUrlChars).trim();
     if (!url.startsWith("https://")) continue;
     const name = text(r.name, GRAPH_LIMITS.mcpNameChars).trim() || "MCP Server";
+    // Anything unrecognised — including the field being absent, which is every
+    // server configured before it existed — is the shared token this server
+    // already had. Never silently promote one to per-member credentials.
+    const credentials: McpCredentialMode = r.credentials === "personal" ? "personal" : "shared";
     seen.add(id);
-    out.push({ id, name, url });
+    out.push({ id, name, url, credentials });
   }
   return out;
 }

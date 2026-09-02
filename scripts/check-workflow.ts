@@ -181,6 +181,38 @@ check(
   "a server missing an id is rejected",
   mcpNode.mcpServers.every((s) => s.id !== ""),
 );
+// A server stored before the credentials field existed must not be promoted to
+// per-member credentials by the upgrade — it had one room-wide token, and that
+// is what "shared" means.
+check(
+  "a server with no credentials field defaults to shared",
+  mcpNode.mcpServers.every((s) => s.credentials === "shared"),
+);
+
+const mcpModes = sanitizeGraph({
+  leadId: "a",
+  nodes: [
+    {
+      id: "a",
+      name: "A",
+      model: "claude-opus-5",
+      prompt: "",
+      x: 0,
+      y: 0,
+      mcpServers: [
+        { id: "p", name: "personal", url: "https://p.example/mcp", credentials: "personal" },
+        { id: "j", name: "junk", url: "https://j.example/mcp", credentials: "nonsense" },
+      ],
+    },
+  ],
+  edges: [],
+});
+const modes = mcpModes.nodes[0]!.mcpServers;
+check("an explicit personal mode survives", modes.find((s) => s.id === "p")?.credentials === "personal");
+check(
+  "an unrecognised mode falls back to shared, never personal",
+  modes.find((s) => s.id === "j")?.credentials === "shared",
+);
 
 const withoutServer = sanitizeGraph({
   leadId: "a",

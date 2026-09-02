@@ -37,6 +37,7 @@ import {
   saveWorkflow,
   summarizeGraph,
   type AgentNode,
+  type McpCredentialMode,
   type Relation,
   type RelationKind,
   type SavedWorkflow,
@@ -79,6 +80,7 @@ export function WorkflowPanel({
   onChatReset,
   mcpTokensSet,
   onSetMcpToken,
+  me,
 }: {
   graph: WorkflowGraph;
   /** Whether the room is currently running on this graph. */
@@ -94,9 +96,11 @@ export function WorkflowPanel({
   chat: WorkflowChatState;
   onChatSend: (text: string, graph: WorkflowGraph) => void;
   onChatReset: () => void;
-  /** `"nodeId:serverId"` keys with a stored MCP token — see room.ts#mcpTokensSet. */
+  /** `"nodeId:serverId:uid"` keys with a stored MCP token — see room.ts#mcpTokensSet. */
   mcpTokensSet: string[];
   onSetMcpToken: (nodeId: string, serverId: string, token: string) => void;
+  /** This person's uid, for telling "I connected this" from "the room did". */
+  me: string | null;
 }) {
   const [draft, setDraft] = useState<WorkflowGraph>(graph);
   const [useCustom, setUseCustom] = useState(active);
@@ -759,6 +763,7 @@ export function WorkflowPanel({
               }
               mcpTokensSet={mcpTokensSet}
               onSetMcpToken={onSetMcpToken}
+              me={me}
             />
           )}
           {selEdge && (
@@ -961,6 +966,7 @@ function NodeInspector({
   savedServerIds,
   mcpTokensSet,
   onSetMcpToken,
+  me,
 }: {
   node: AgentNode;
   graph: WorkflowGraph;
@@ -973,6 +979,8 @@ function NodeInspector({
   savedServerIds: Set<string>;
   mcpTokensSet: string[];
   onSetMcpToken: (nodeId: string, serverId: string, token: string) => void;
+  /** This person's uid, for telling "I connected this" from "the room did". */
+  me: string | null;
 }) {
   const isLead = node.id === graph.leadId;
   // `?? []`: a graph applied before mcpServers existed synced nodes without
@@ -1082,6 +1090,25 @@ function NodeInspector({
                 }
               />
               {canEdit && (
+                <select
+                  className="wf-mcp-mode"
+                  value={s.credentials ?? "shared"}
+                  aria-label="Whose credential this server uses"
+                  onChange={(e) =>
+                    onPatch({
+                      mcpServers: mcpServers.map((x) =>
+                        x.id === s.id
+                          ? { ...x, credentials: e.target.value === "personal" ? "personal" : "shared" }
+                          : x,
+                      ),
+                    })
+                  }
+                >
+                  <option value="shared">Shared by the room</option>
+                  <option value="personal">Each person's own</option>
+                </select>
+              )}
+              {canEdit && (
                 <button
                   className="wf-danger"
                   onClick={() =>
@@ -1091,15 +1118,23 @@ function NodeInspector({
                   Remove
                 </button>
               )}
-              {canEdit &&
-                (savedServerIds.has(s.id) ? (
-                  <McpTokenField
-                    hasToken={mcpTokensSet.includes(`${node.id}:${s.id}`)}
-                    onSave={(token) => onSetMcpToken(node.id, s.id, token)}
-                  />
-                ) : (
+              {savedServerIds.has(s.id) ? (
+                <McpTokenField
+                  mode={s.credentials ?? "shared"}
+                  // A personal server asks about *your* token; a shared one
+                  // about the room's. Neither ever carries a value, only whether
+                  // the row exists.
+                  hasToken={mcpTokensSet.includes(
+                    `${node.id}:${s.id}:${(s.credentials ?? "shared") === "personal" ? me ?? "" : "*"}`,
+                  )}
+                  canEdit={canEdit}
+                  onSave={(token) => onSetMcpToken(node.id, s.id, token)}
+                />
+              ) : (
+                canEdit && (
                   <span className="field-note">Apply the workflow to set a token here.</span>
-                ))}
+                )
+              )}
               <McpServerNote url={s.url} />
             </div>
           ))}
@@ -1115,8 +1150,8 @@ function NodeInspector({
                   mcpServers: [
                     ...mcpServers,
                     entry
-                      ? { id: newId(), name: entry.label, url: entry.url }
-                      : { id: newId(), name: "", url: "" },
+                      ? { id: newId(), name: entry.label, url: entry.url, credentials: "shared" as const }
+                      : { id: newId(), name: "", url: "", credentials: "shared" as const },
                   ],
                 });
                 // Snap back to the prompt so the same server can be picked twice
@@ -1166,15 +1201,45 @@ function McpServerNote({ url }: { url: string }) {
   );
 }
 
-/** A password-style input that only sends its value on explicit Save — never on every keystroke. */
-function McpTokenField({ hasToken, onSave }: { hasToken: boolean; onSave: (token: string) => void }) {
+/**
+ * A password-style input that only sends its value on explicit Save — never on
+ * every keystroke.
+ *
+ * A personal token is the person's own, so anyone who can speak may set theirs
+ * even without permission to edit the workflow; the shared one acts for the
+ * whole room, so it follows the same permission as the graph itself. The server
+ * enforces both — this only decides what to show.
+ */
+function McpTokenField({
+  mode,
+  hasToken,
+  canEdit,
+  onSave,
+}: {
+  mode: McpCredentialMode;
+  hasToken: boolean;
+  canEdit: boolean;
+  onSave: (token: string) => void;
+}) {
   const [draft, setDraft] = useState("");
+  const personal = mode === "personal";
+  if (!personal && !canEdit) return null;
+
   return (
     <span className="wf-mcp-token">
       <input
         type="password"
         value={draft}
-        placeholder={hasToken ? "Token set — replace" : "Token (optional)"}
+        aria-label={personal ? "Your token for this server" : "The room's shared token"}
+        placeholder={
+          hasToken
+            ? personal
+              ? "You're connected — replace"
+              : "Room token set — replace"
+            : personal
+              ? "Connect your account"
+              : "Room token"
+        }
         onChange={(e) => setDraft(e.target.value)}
       />
       <button
@@ -1187,11 +1252,8 @@ function McpTokenField({ hasToken, onSave }: { hasToken: boolean; onSave: (token
         Save
       </button>
       {hasToken && (
-        <button
-          className="wf-danger"
-          onClick={() => onSave("")}
-        >
-          Clear
+        <button className="wf-danger" onClick={() => onSave("")}>
+          {personal ? "Disconnect" : "Clear"}
         </button>
       )}
     </span>
