@@ -20,7 +20,8 @@
     "check:oauth": "esbuild scripts/check-oauth.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-oauth.mjs --log-level=warning && node node_modules/.cache/check-oauth.mjs",
     "check:markdown": "esbuild scripts/check-markdown.ts --bundle --format=esm --platform=node --jsx=automatic --outfile=node_modules/.cache/check-markdown.mjs --log-level=warning && node node_modules/.cache/check-markdown.mjs",
     "check:docx": "esbuild scripts/check-docx.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-docx.mjs --log-level=warning && node node_modules/.cache/check-docx.mjs",
-    "check:backend": "esbuild scripts/check-backend-schema.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-backend.mjs --log-level=warning && node node_modules/.cache/check-backend.mjs"
+    "check:backend": "esbuild scripts/check-backend-schema.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-backend.mjs --log-level=warning && node node_modules/.cache/check-backend.mjs",
+    "check:terminal": "esbuild scripts/check-terminal.ts --bundle --format=esm --platform=node --outfile=node_modules/.cache/check-terminal.mjs --log-level=warning && node node_modules/.cache/check-terminal.mjs"
   },
   "repository": {
     "type": "git",
@@ -42,6 +43,8 @@
   "homepage": "https://github.com/yjm7vj/collab_ai#readme",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "agents": "^0.20.1",
     "docx": "^9.7.1",
     "react": "^19.2.8",

@@ -75,6 +75,7 @@ const TOOL_LABELS: Record<string, string> = {
   write_file: "Create File",
   edit_file: "Edit File",
   delete_file: "Delete File",
+  run_terminal: "Run Terminal Command",
   ask_room: "Ask The Room",
   mcp: "MCP Server Tools",
 };
@@ -1520,6 +1521,10 @@ function ChangeDetails({ name, input }: { name: string; input: Record<string, un
     return <div className="change-details change-delete">File to permanently delete: <code>{path}</code></div>;
   }
 
+  if (name === "run_terminal") {
+    return <div className="change-details"><div className="change-label">Command on the connected local terminal</div><pre className="proposed">{String(input.command ?? "")}</pre></div>;
+  }
+
   return null;
 }
 
@@ -2911,22 +2916,29 @@ export type WorkspaceView = "connections" | "ide";
 
 export function WorkspaceActions({
   visible,
+  terminalVisible = false,
   onWorkspace,
   onIde,
+  onTerminal,
 }: {
   visible: boolean;
+  terminalVisible?: boolean;
   onWorkspace: () => void;
   onIde: () => void;
+  onTerminal?: () => void;
 }) {
-  if (!visible) return null;
+  if (!visible && !terminalVisible) return null;
   return (
     <>
-      <button type="button" className="chat-action" onClick={onWorkspace}>
-        Workspace
-      </button>
-      <button type="button" className="chat-action" onClick={onIde}>
-        IDE
-      </button>
+      {visible && <>
+        <button type="button" className="chat-action" onClick={onWorkspace}>
+          Workspace
+        </button>
+        <button type="button" className="chat-action" onClick={onIde}>
+          IDE
+        </button>
+      </>}
+      {terminalVisible && onTerminal && <button type="button" className="chat-action" onClick={onTerminal}>Terminal</button>}
     </>
   );
 }

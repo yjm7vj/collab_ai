@@ -18,6 +18,14 @@ import { DEFAULT_POLICY, type AccessPolicy, type Role } from "./access";
 import { DEFAULT_GRAPH, type WorkflowGraph } from "./workflow";
 import { NO_WORKSPACE, type FsRequest, type FsResponse, type WorkspaceInfo, type WorkspaceKind } from "./workspace";
 import type { IdeActivity, IdeCursor } from "./ide";
+import type {
+  TerminalCommandRequest,
+  TerminalControlRequest,
+  TerminalOutput,
+  TerminalRemoteInput,
+  TerminalSession,
+  TerminalSharing,
+} from "./terminal";
 
 /**
  * How a person can answer a gate. `grant` is an approval that also asks for
@@ -414,7 +422,15 @@ export type ServerMsg =
   /** Ephemeral IDE presence, never persisted in the transcript. */
   | { t: "ide.cursor"; cursor: IdeCursor }
   /** Recent IDE activity, broadcast to room members. */
-  | { t: "ide.activity"; activity: IdeActivity };
+  | { t: "ide.activity"; activity: IdeActivity }
+  /** Current ephemeral terminal sessions. No terminal output is persisted. */
+  | { t: "terminal.sessions"; sessions: TerminalSession[] }
+  | { t: "terminal.output"; output: TerminalOutput }
+  | { t: "terminal.control.request"; request: TerminalControlRequest }
+  /** Sent only to the browser hosting the local companion. */
+  | ({ t: "terminal.input" } & TerminalRemoteInput)
+  /** An approved agent command, sent only to the browser hosting the companion. */
+  | { t: "terminal.command"; request: TerminalCommandRequest };
 
 /**
  * Where a repository list came from, so the picker can say so.
@@ -527,7 +543,15 @@ export type ClientMsg =
   /** Publish a human-readable IDE event to the room. */
   | { t: "ide.activity"; kind: IdeActivity["kind"]; path: string; detail: string }
   /** Add one already-read file to the room's semantic index. */
-  | { t: "ide.index"; path: string; content: string };
+  | { t: "ide.index"; path: string; content: string }
+  | { t: "terminal.list" }
+  | { t: "terminal.host.open"; id: string; label: string; shell: string; sharing: TerminalSharing }
+  | { t: "terminal.host.close"; sessionId: string }
+  | { t: "terminal.output"; sessionId: string; data: string; seq: number }
+  | { t: "terminal.input"; sessionId: string; data: string }
+  | { t: "terminal.control.request"; sessionId: string }
+  | { t: "terminal.control.decide"; sessionId: string; uid: string; allow: boolean }
+  | { t: "terminal.command.result"; id: string; ok: boolean; output: string };
 
 /** Deterministic per-connection colour so the same person looks the same to everyone. */
 export const PALETTE = [

@@ -304,6 +304,24 @@ export const TOOL_DEFS = [
     },
   },
   {
+    name: "run_terminal",
+    description:
+      "Run one command in the room's connected local terminal. Use this for " +
+      "tests, diagnostics, builds, and repository commands that file tools cannot perform. " +
+      "Commands are shown to the room. A narrow set of read-only commands may run " +
+      "automatically; every other command requires approval.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        command: {
+          type: "string",
+          description: "One shell command. Do not chain commands or use interactive prompts.",
+        },
+      },
+      required: ["command"],
+    },
+  },
+  {
     name: "ask_room",
     description:
       "Ask the room to decide between options, when the direction genuinely " +
@@ -358,6 +376,7 @@ const WORKER_EXCLUDED = new Set([
   "write_file",
   "edit_file",
   "delete_file",
+  "run_terminal",
   // Workers report their findings back to the lead, not the room directly —
   // they have no channel to put a question to a vote.
   "ask_room",
@@ -554,6 +573,8 @@ export function summarize(name: string, input: any): string {
     }
     case "delete_file":
       return `Delete ${String(input?.path ?? "")}`;
+    case "run_terminal":
+      return `Run terminal command: ${preview(input?.command, 180)}`;
     case "ask_room": {
       const question = String(input?.question ?? "");
       return question ? `Ask the room: ${preview(question, 80)}` : "Ask the room";
