@@ -489,14 +489,39 @@ function DemoPanel({
 
 /* --------------------------------------------------- chapter 1: the merge */
 
+/**
+ * Three people who each own a different part of one sentence.
+ *
+ * The roles are the point of this fixture. Support owns what customers are
+ * asking, engineering owns what actually happened, legal owns what may not be
+ * said, and none of the three can settle the wording alone. The role is shown
+ * because it is how the room reads itself; the tag the model receives is the
+ * name alone, because `[${name}]: ${text}` is exactly what `Room#startTurn`
+ * writes.
+ */
 const MERGE_LINES = [
-  { who: "Ana", at: 0, text: "can we move the auth check into the middleware?" },
-  { who: "Ravi", at: 500, text: "and drop the duplicate one in the handler" },
-  { who: "Mia", at: 1100, text: "keep the 401 body identical though" },
+  {
+    who: "Priya",
+    role: "Support",
+    at: 0,
+    text: "customers are asking whether their data was affected",
+  },
+  {
+    who: "Sam",
+    role: "Engineering",
+    at: 500,
+    text: "it wasn't. cache config, nothing reached the data",
+  },
+  {
+    who: "Dana",
+    role: "Legal",
+    at: 1100,
+    text: "then say exactly that, and keep the word breach out of it",
+  },
 ];
 
 const MERGE_REPLY =
-  "One change, then. I'll lift the check into requireSession, delete the copy in the route handler, and leave the 401 body byte-for-byte the same.";
+  "One note, then. I'll say plainly that no customer data was accessed, name the cache misconfiguration as the cause, and leave the word breach out of it.";
 
 /**
  * The line somebody sends after the turn has already started.
@@ -505,7 +530,11 @@ const MERGE_REPLY =
  * behaviour: a message that arrives mid-turn is queued in the room's inbox and
  * drained into the next turn, rather than interrupting the one in flight.
  */
-const LATE_LINE = { who: "Ana", text: "also: a test that the 401 body is unchanged" };
+const LATE_LINE = {
+  who: "Priya",
+  role: "Support",
+  text: "also say when the next update goes out",
+};
 
 const FOLD_AT = 3200;
 const TURN_AT = 3600;
@@ -535,10 +564,11 @@ function ChapterMerge() {
         }
       >
         <p className="lp-sr">
-          Ana, Ravi and Mia each send a line at the same time. The three lines
-          reach the agent as one turn, tagged with each speaker&rsquo;s name, and
-          the agent answers the room once. A fourth line, sent while the agent is
-          still working, waits in the room&rsquo;s inbox and joins the next turn.
+          Priya from support, Sam from engineering and Dana from legal each send
+          a line at the same time. The three lines reach the agent as one turn,
+          tagged with each speaker&rsquo;s name, and the agent answers the room
+          once. A fourth line, sent while the agent is still working, waits in
+          the room&rsquo;s inbox and joins the next turn.
         </p>
         <div className="lp-merge" key={run} aria-hidden="true">
           {/* One column, reused rather than emptied: the three lines leave, and
@@ -551,7 +581,10 @@ function ChapterMerge() {
                 const shown = typed(line.text, t, line.at, 34);
                 return (
                   <div className="lp-msg" key={line.who} data-folded={folded}>
-                    <span className="lp-msg-who">{line.who}</span>
+                    <span className="lp-msg-who">
+                      {line.who}
+                      <span className="lp-msg-role">{line.role}</span>
+                    </span>
                     <span className="lp-msg-body">
                       {shown}
                       {!folded && shown.length < line.text.length && t > line.at && (
@@ -568,7 +601,10 @@ function ChapterMerge() {
                 Inbox · 1 waiting
               </span>
               <div className="lp-msg">
-                <span className="lp-msg-who">{LATE_LINE.who}</span>
+                <span className="lp-msg-who">
+                  {LATE_LINE.who}
+                  <span className="lp-msg-role">{LATE_LINE.role}</span>
+                </span>
                 <span className="lp-msg-body">{LATE_LINE.text}</span>
               </div>
               <p className="lp-inbox-note">
@@ -617,7 +653,7 @@ function ChapterMerge() {
               {t >= TOOL_AT && (
                 <span className="lp-tool">
                   <span className="lp-tool-name">Read File</span>
-                  <span className="lp-tool-sum">src/server/auth.ts</span>
+                  <span className="lp-tool-sum">incidents/api-latency.md</span>
                   <span
                     className="lp-pip"
                     data-status={t >= REPLY_AT ? "ok" : "running"}
@@ -696,8 +732,9 @@ function ChapterVote() {
   const cast = (kind: VoteKind) => {
     if (mine) return;
     setMine(kind);
-    // Ravi answers the same way, which takes it to the bar. Mia is still in the
-    // room and never votes: two agreeing is the whole decision.
+    // The second person answers the same way, which takes it to the bar. The
+    // third is still in the room and never votes: two agreeing is the whole
+    // decision.
     timer.current = window.setTimeout(() => setSecond(kind), 900);
   };
 
@@ -733,20 +770,23 @@ function ChapterVote() {
         <div className="lp-approval-top">
           <span className="lp-approval-tool">Edit File</span>
           <span className="lp-approval-sub">
-            Move the auth check into requireSession
+            Name the cause and rule out data access
           </span>
         </div>
         <div className="lp-approval-path">
-          File: <code>src/server/auth.ts</code>
+          File: <code>incidents/api-latency.md</code>
         </div>
+        {/* Prose, not code. What the room is being asked to approve is a
+            sentence a customer will read and a lawyer is accountable for, so
+            the change is legible to everyone whose approval it needs. */}
         <div className="lp-diff" data-state={state}>
           <div className="lp-diff-row lp-diff-old">
             <span className="lp-diff-sign">−</span>
-            <pre>if (!req.session) return json(401, {`{ error: "no session" }`});</pre>
+            <pre>We are investigating a possible breach affecting some accounts.</pre>
           </div>
           <div className="lp-diff-row lp-diff-new">
             <span className="lp-diff-sign">+</span>
-            <pre>await requireSession(req); // 401 body unchanged</pre>
+            <pre>A cache misconfiguration slowed API responses. No customer data was accessed.</pre>
           </div>
         </div>
         <div className="lp-votebar">
@@ -832,10 +872,10 @@ function ChapterVote() {
 /* -------------------------------------------- chapter 3: the durable turn */
 
 const TURN_NODES = [
-  { time: "14:02", label: "The agent asks to edit auth.ts.", quiet: false },
-  { time: "14:03", label: "Ravi approves. One short of the two it needs.", quiet: false },
-  { time: "", label: "Everyone goes to lunch. The room hibernates.", quiet: true },
-  { time: "16:41", label: "Mia opens the link and approves.", quiet: false },
+  { time: "14:02", label: "The agent asks to edit the incident note.", quiet: false },
+  { time: "14:03", label: "Priya approves. One short of the two it needs.", quiet: false },
+  { time: "", label: "Legal is six hours behind. The room hibernates.", quiet: true },
+  { time: "16:41", label: "Dana opens the link on a phone and approves.", quiet: false },
   { time: "16:41", label: "The same turn resumes and the edit lands.", quiet: false },
 ];
 
@@ -877,14 +917,30 @@ function ChapterDurable() {
 
   const lit = Math.round(progress * TURN_NODES.length);
 
+  /**
+   * What is happening to the room itself as the timeline advances.
+   *
+   * The quiet node is index 2, so it is lit at 3: that is the stretch where
+   * the object is gone and only the turn's saved state exists. Naming it while
+   * it happens is the point of the chapter, and it is the one claim on the
+   * page a held-open request could not make. The pip follows the app's own
+   * vocabulary, where an unmodified dot means nothing is happening here.
+   */
+  const phase = lit >= 4 ? "awake" : lit >= 3 ? "asleep" : "open";
+  const PHASE = {
+    open: { head: "turn open", foot: "nothing is being held open" },
+    asleep: { head: "hibernating", foot: "the object is evicted; the turn is on disk" },
+    awake: { head: "turn resumed", foot: "resumed in a different invocation" },
+  } as const;
+
   return (
     <div ref={ref}>
       <DemoPanel
         label="One turn · four hours"
         right={
           <span className="lp-presence">
-            <IconClock />
-            persisted state
+            <span className="lp-presence-dot" data-phase={phase} />
+            {PHASE[phase].head}
           </span>
         }
       >
@@ -913,7 +969,7 @@ function ChapterDurable() {
         </div>
         <div className="lp-panel-bar lp-panel-foot">
           <span>Saved state, not a held-open request</span>
-          <span className="lp-presence">resumed in a later invocation</span>
+          <span className="lp-presence">{PHASE[phase].foot}</span>
         </div>
       </DemoPanel>
     </div>
@@ -923,9 +979,9 @@ function ChapterDurable() {
 /* ---------------------------------------------- chapter 4: the workspace */
 
 const LOCAL_FILES = [
-  { name: "auth.ts", path: "src/server/", tag: "edit" },
-  { name: "session.test.ts", path: "test/", tag: "new" },
-  { name: "middleware.ts", path: "src/server/", tag: null },
+  { name: "api-latency.md", path: "incidents/", tag: "edit" },
+  { name: "next-update.md", path: "incidents/", tag: "new" },
+  { name: "components.yml", path: "status/", tag: null },
   { name: "README.md", path: "", tag: null },
 ];
 
@@ -989,7 +1045,7 @@ function ChapterWorkspace() {
             <div className="lp-ws-head">
               <span className="lp-ws-branch">
                 <IconBranch />
-                collab/auth-middleware
+                collab-ai
               </span>
               <span>opened as a pull request</span>
             </div>
@@ -1269,8 +1325,8 @@ function ChapterWorkflowBuilder() {
           <span className="lp-workflow-chat-label">Workflow chat</span>
           <h3>Describe the change instead of drawing it.</h3>
           <p>
-            The room can ask for a new teammate, a different model, or another
-            link in plain language, and the draft comes back for review.
+            Ask for a teammate, a different model, or another link. The draft
+            comes back for review.
           </p>
           <div className="lp-workflow-thread">
             {sent && <div className="lp-workflow-bubble">{asked}</div>}
@@ -1484,20 +1540,20 @@ function ChapterWorkflowBuilder() {
 const ANNOUNCEMENTS = [
   {
     time: "09:14",
-    who: "Ana",
+    who: "Priya",
     what: "changed the setup",
     detail: "manager · Opus 5 directing Haiku 4.5 · effort high · up to 5 workers (auto)",
   },
   {
     time: "09:31",
-    who: "Ravi",
+    who: "Dana",
     what: "changed what the agent may do",
     detail:
       "ask first · majority · votes on write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
   },
   {
     time: "11:02",
-    who: "Mia",
+    who: "Sam",
     what: "changed the workflow",
     detail:
       "custom · Lead on Opus 5 · 3 teammates (Researcher A, Researcher B, Critic) · 4 links",
@@ -1754,12 +1810,13 @@ export function LandingPage({
         <HeroCanvas reduced={reduced} />
         <div className="lp-hero-inner">
           <h1 className="lp-h1">
-            <span className="lp-h1-quiet">One agent.</span>
-            Shared by the whole room.
+            <span className="lp-h1-quiet">One agent, or eight.</span>
+            Shared by everyone who has to say yes.
           </h1>
           <p className="lp-lead">
-            Several people, one conversation, one history. When the agent wants
-            to change a file, it asks the room first.
+            Support, legal and engineering in one conversation. Describe the
+            team you want; what it writes lands in your repo once the room
+            approves. Nobody opens GitHub. Nobody wires a graph.
           </p>
           <div className="lp-hero-actions">
             <button
@@ -1775,7 +1832,7 @@ export function LandingPage({
           </div>
           <p className="lp-hero-meta">
             <span className="lp-hero-pip" />
-            Everyone talks at once · nothing is dropped · writes go to a vote
+            Everyone talks at once · nothing is dropped · the vote is the review
           </p>
         </div>
         <span className="lp-cue">
@@ -1788,13 +1845,11 @@ export function LandingPage({
         <section className="lp-act" id="merge">
           <div className="lp-inner lp-chapter">
             <Reveal className="lp-chapter-head">
-              <h2 className="lp-h2">Three people typed at once. The agent got one message.</h2>
+              <h2 className="lp-h2">Support, engineering and legal typed at once. The agent got one message.</h2>
               <p className="lp-body">
-                Every line is tagged with who said it and folded into one turn,
-                so the agent answers the room rather than the last person to
-                press enter. A line sent while it is still working waits in the
-                room&rsquo;s inbox and joins the next turn. No turn is split
-                down the middle, and nothing anyone says is quietly discarded.
+                Every line is tagged and folded into one turn, so the agent
+                answers the room rather than the last person to press enter.
+                Anything sent mid-turn waits in the inbox and joins the next.
               </p>
             </Reveal>
             <Reveal delay={1}>
@@ -1808,12 +1863,9 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">A write is a proposal.</h2>
               <p className="lp-body">
-                When the agent reaches for a file or the shared document, the
-                call stops and becomes something the room can see. There are
-                three answers, not two: approve it, deny it, or approve it and
-                stop being asked for a while. A room in a hurry can move the
-                whole policy to auto-accept, out loud, in the transcript, never
-                as a default it discovers afterwards.
+                The call stops and becomes something the room can see, in the
+                words a customer will read. A room in a hurry can switch to
+                auto-accept, announced in the transcript, never silently.
               </p>
               <p className="lp-note">
                 Cast a vote. Two of the three people here settle it either way.
@@ -1830,11 +1882,9 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">The turn waits. Even if you don't.</h2>
               <p className="lp-body">
-                A paused turn isn&rsquo;t a request held open somewhere hoping
-                you come back. It is saved state. The room can go quiet for
-                hours and hibernate, the deciding vote can arrive from someone
-                else&rsquo;s phone in a different invocation, and the same turn
-                picks up exactly where it stopped.
+                A paused turn isn&rsquo;t a request held open. It is saved
+                state, so the deciding vote can arrive hours later, from
+                someone else&rsquo;s phone, in a different invocation.
               </p>
             </Reveal>
             <Reveal delay={1}>
@@ -1846,22 +1896,19 @@ export function LandingPage({
         <section className="lp-act lp-act--stage lp-act--workflow" id="team">
           <div className="lp-inner lp-chapter">
             <Reveal className="lp-chapter-head">
-              <h2 className="lp-h2">Agents can work together in one workflow.</h2>
+              <h2 className="lp-h2">A team of agents, assembled in a sentence.</h2>
               <p className="lp-body">
-                Build a team for the room instead of relying on one agent to do
-                everything. A lead agent can break work into focused tasks,
-                coordinate teammates, and bring their results back into the
-                same shared conversation.
+                One drafts, one checks the wording, one pulls the timeline out
+                of the tools you already use. You ask for that team in plain
+                language instead of wiring a diagram.
               </p>
             </Reveal>
+            {/* No feature cards here. The canvas below already reports the
+                caps in its own header, and the two remaining claims were
+                restatements of the merge and durable chapters. A card grid
+                between a heading and a working demo of the same thing is the
+                clutter, not the density. */}
             <Reveal delay={1}>
-              <div className="lp-feature-grid">
-                <article className="lp-feature-card"><h3>One lead, several specialists</h3><p>Up to eight agents and sixteen links, or the two built-in shapes if the room would rather not draw one.</p></article>
-                <article className="lp-feature-card"><h3>Everyone sees the same turn</h3><p>Delegated work returns into the room&rsquo;s one conversation, with the reviewer&rsquo;s notes attached to the result the lead receives.</p></article>
-                <article className="lp-feature-card"><h3>Durable by default</h3><p>A turn is saved state, so a fan-out can pause on a vote and finish hours later in a different invocation.</p></article>
-              </div>
-            </Reveal>
-            <Reveal delay={2}>
               <ChapterWorkflowBuilder />
             </Reveal>
           </div>
@@ -1870,14 +1917,11 @@ export function LandingPage({
         <section className="lp-act lp-act--tint">
           <div className="lp-inner lp-chapter lp-chapter--split">
             <Reveal className="lp-chapter-head">
-              <h2 className="lp-h2">Point it at a folder. Or at a repo.</h2>
+              <h2 className="lp-h2">It ends as a pull request. You never open one.</h2>
               <p className="lp-body">
-                A room can work against a folder on one member's machine,
-                relayed live to everyone else, or against a GitHub repository
-                through a connected app with branches, contents, and pull requests. The
-                voting rule doesn't change with the provider. The built-in code
-                workspace lets the room browse and edit both public and private
-                repositories without leaving the conversation.
+                A folder on one member's machine, relayed live to everyone
+                else, or a GitHub repo. The branch and the commit are the
+                agent's job; the approval is the room's.
               </p>
             </Reveal>
             <Reveal delay={1}>
@@ -1891,17 +1935,15 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">See where the work is happening.</h2>
               <p className="lp-body">
-                When teammates use the IDE, the room can show the file they
-                opened, where their cursor is, and what they saved. It gives
-                everyone a shared sense of progress without taking control away
-                from the person doing the work.
+                The room sees the file someone opened, their cursor, and what
+                they saved. Everyone follows without opening anything.
               </p>
             </Reveal>
             <Reveal delay={1}>
               <div className="lp-activity-demo">
-                <div><span className="lp-activity-avatar">M</span><strong>Mia</strong><span>opened</span><code>src/server/room.ts</code></div>
-                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 148</span><code>src/client/RoomView.tsx</code></div>
-                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 code passages</span></div>
+                <div><span className="lp-activity-avatar">S</span><strong>Sam</strong><span>opened</span><code>incidents/api-latency.md</code></div>
+                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 12</span><code>incidents/next-update.md</code></div>
+                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 passages</span></div>
               </div>
             </Reveal>
           </div>
@@ -1912,18 +1954,16 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">More capability, with clear boundaries.</h2>
               <p className="lp-body">
-                Pick a server from the catalogue, hand it to one agent, and
-                decide whether it runs on the room&rsquo;s credential or on each
-                person&rsquo;s own. Nothing about that loosens the gate: the
-                room cannot tell a read from a write on somebody else&rsquo;s
-                server, so an MCP call is voted on like a file write.
+                Pick a server from the catalogue and hand it to one agent. The
+                room can&rsquo;t tell a read from a write on someone
+                else&rsquo;s server, so an MCP call is gated like a file write.
               </p>
             </Reveal>
             <Reveal delay={1}>
               <div className="lp-feature-grid">
-                <article className="lp-feature-card"><h3>A catalogue, not a URL you have to know</h3><p>Linear, Stripe, Sentry and Cloudflare&rsquo;s own servers, each listed with the credential it actually takes. A server this app cannot reach yet says so instead of failing quietly.</p></article>
-                <article className="lp-feature-card"><h3>Shared credential, or your own</h3><p>A server can run on one token for the whole room, or on a token per person so the agent acts as whoever asked. The token never leaves the room&rsquo;s storage.</p></article>
-                <article className="lp-feature-card"><h3>Standing approval that ends by itself</h3><p>Approving and asking to stop being asked gives the agent fifteen minutes and ten uses. The room can see it in the header, and anyone can take it back.</p></article>
+                <article className="lp-feature-card"><h3>A catalogue, not a URL</h3><p>Linear, Stripe, Sentry and Cloudflare, each listed with the credential it takes. One this app can&rsquo;t reach yet says so.</p></article>
+                <article className="lp-feature-card"><h3>Shared credential, or your own</h3><p>One token for the whole room, or one per person so the agent acts as whoever asked. Tokens never leave the room&rsquo;s storage.</p></article>
+                <article className="lp-feature-card"><h3>Approval that ends by itself</h3><p>Approve and stop being asked buys fifteen minutes and ten uses. Anyone can take it back.</p></article>
               </div>
             </Reveal>
           </div>
@@ -1934,10 +1974,9 @@ export function LandingPage({
             <Reveal className="lp-chapter-head">
               <h2 className="lp-h2">Settings belong to the room, not to you.</h2>
               <p className="lp-body">
-                The model, the permissions and the workflow belong to the room,
-                and every change is announced in the transcript with the name of
-                whoever made it and the setup it landed on. Changes only take
-                while the agent is idle, so nobody moves the floor mid-turn.
+                Every change is announced in the transcript with who made it,
+                and only takes while the agent is idle, so nobody moves the
+                floor mid-turn.
               </p>
             </Reveal>
             <Reveal delay={1}>

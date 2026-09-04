@@ -318,7 +318,7 @@ Responsive collapse happens at two breakpoints: 860px stacks the topbar controls
 
 **The landing (Persuade mode)** is the one route that scrolls the document — `html`, `body`, and `#root` drop their fixed height when they contain a `.lp`. Its spatial model is a single centred measure rather than a shell: content sits in a 1180px max-width column (`--lp-max`) with a fluid side gutter (`--lp-gutter`, `clamp(20px, 5vw, 72px)`), and vertical rhythm is carried by one act-padding step (`--lp-act-pad`, `clamp(84px, 11vw, 150px)`) applied to every section, so chapters are separated by air and by ground color rather than by rules. The hero is the exception: full-bleed and `100svh` minus the 64px nav, which it slides under. Chapters are two-column splits (`0.85fr / 1.15fr`, head then demo, alternating order) that collapse to one column at 900px; the merge demo's three-part grid collapses at 860px and the durable-turn timeline switches from a horizontal 5-node track to a vertical bordered list at 820px; 760px thins the scroll spine to a hairline in the gutter.
 
-Density is the clearest split between the two modes. The app is compact everywhere; the landing runs a 48px primary control height, 34px secondary, and 10–22px internal panel padding on fluid `clamp()` steps. Under `(pointer: coarse)` the landing's small controls grow to 42px and its text links to a 44px target — only the landing's, deliberately: the app's compact heights are correct at a desk and wrong under a thumb, and the two are allowed to differ.
+Density is the clearest split between the two modes. The app is compact everywhere; the landing runs a 48px primary control height, 34px secondary, and 10–22px internal panel padding on fluid `clamp()` steps. Under `(pointer: coarse)` the landing's small controls and its text links alike grow to a 44px target — only the landing's, deliberately: the app's compact heights are correct at a desk and wrong under a thumb, and the two are allowed to differ.
 
 ## Elevation & Depth
 
@@ -395,7 +395,7 @@ The room's header bar. It inverts with the theme like every other surface (`--to
 - **Primary button:** 48px tall, 0–22px padding, `--lp-r-md` (8px), 16px/600 text with −0.01em tracking. On pale acts it is `--accent` on `--accent-ink`; on the stage and in the hero it swaps to `--lp-stage-accent` on `--lp-on-stage-accent`. Hover deepens the fill and lifts the button 1px (`translateY(-1px)`), returning to 0 on `:active` — the one press affordance in the system, and the only place a control moves.
 - **Default button:** same shape and height, `--panel-2` fill with a `--line-strong` border, hovering to `--panel-3`. This is the app's default button grown to landing scale, unchanged in construction.
 - **Ghost button:** transparent, bordered in `--lp-stage-line`, `--lp-stage-ink` text; hover fills with `--lp-stage-fill` and turns the border accent. Stage-only — it depends on a dark ground to read.
-- **Small button:** 34px, `--lp-r-sm`, 13px text; used in the nav and inside demos. Grows to 42px under a coarse pointer.
+- **Small button:** 34px, `--lp-r-sm`, 13px text; used in the nav and inside demos. Grows to 44px under a coarse pointer, the accessibility floor for a touch target.
 - **Text link button:** no border or fill, 13px/600, underlined at 40% currentColor and going solid on hover, colored to `--accent` (or `--lp-stage-accent` on the stage). Minimum 24px target, 44px under a coarse pointer — the underline keeps its size, only the hit area grows.
 - **Focus:** a 2px `--accent` outline at 3px offset with a 6px corner, switching to `--lp-stage-accent` inside a stage act. The landing owns its browser surfaces deliberately: selection color, caret color, and scrollbar thinness are all set from tokens rather than left to the UA.
 
@@ -448,7 +448,7 @@ One easing token (`--lp-ease`, `cubic-bezier(0.16, 1, 0.3, 1)`) and one entrance
 - **Do** keep the topbar's `--on-topbar-*` translucency set to the topbar, and the `--lp-stage-*` set to the landing; each is a ground-specific vocabulary and neither travels.
 - **Do** declare a new landing value as a `--lp-*` token in the `.lp` block, next to the step it belongs beside, before using it anywhere in the file.
 - **Do** put every landing demo panel's dashed **Illustration** chip in its panel bar — the page has no evidence to show, and a fabricated room must label itself.
-- **Do** scale landing controls up under `(pointer: coarse)` (42px controls, 44px links) and leave the app's compact heights alone.
+- **Do** scale landing controls up under `(pointer: coarse)` (44px controls and links alike) and leave the app's compact heights alone.
 
 ### Don't:
 - **Don't** introduce a second typeface for code/mono content — the system deliberately reuses Inter everywhere, distinguishing "code-like" content by size and tint only.

@@ -193,6 +193,10 @@ html:has(.lp) {
   line-height: 0.98;
   letter-spacing: -0.04em;
   max-width: 15ch;
+  /* Both halves are short enough to strand a word on a line of their own at
+     this size. Balance applies to the quiet block and the loud one separately,
+     which is what keeps each reading as a whole phrase. */
+  text-wrap: balance;
 }
 .lp-h1 .lp-h1-quiet {
   display: block;
@@ -321,16 +325,6 @@ html:has(.lp) {
   min-height: 24px;
 }
 /* Touch gets a real target; the underline stays the same size. */
-@media (pointer: coarse) {
-  .lp-linkbtn { min-height: 44px; }
-  .lp-foot a { display: inline-flex; align-items: center; min-height: 44px; }
-  /* The app's compact control height is right at a desk and wrong under a
-     thumb; only the landing's controls grow. */
-  .lp-btn--small,
-  .lp-seg-btn,
-  .lp-vote,
-  .lp-nav .theme-toggle { height: 42px; }
-}
 .lp-linkbtn:hover {
   color: var(--accent);
   text-decoration-color: currentColor;
@@ -684,6 +678,13 @@ html:has(.lp) {
   height: 6px;
   border-radius: var(--lp-r-pill);
   background: var(--ok);
+  transition: background-color 420ms var(--lp-ease);
+}
+/* A hibernating room is not a degraded room, so the dot goes to the app's
+   plain unmodified state rather than to a warning colour. The text beside it
+   says the same thing, which is the rule the pip is held to everywhere. */
+.lp-presence-dot[data-phase="asleep"] {
+  background: var(--ink-faint);
 }
 .lp-act--stage .lp-presence-dot {
   background: var(--lp-stage-ok);
@@ -741,11 +742,28 @@ html:has(.lp) {
   filter: blur(6px);
   transform: translateX(26px) scale(0.96);
 }
+/* Name and role sit on one label row. The name is what the model is given;
+   the role is only ever for the people in the room, so it is set apart in the
+   app's own chip construction rather than merged into the name. Three of these
+   stacked is the chapter's whole argument: the sentence needs all three. */
 .lp-msg-who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
   font-size: var(--lp-fs-label);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.lp-msg-role {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--lp-r-pill);
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: var(--ink-faint);
 }
 .lp-msg-body {
@@ -1027,7 +1045,9 @@ html:has(.lp) {
   border-radius: var(--lp-r-xs);
   transition:
     opacity 380ms var(--lp-ease),
-    transform 380ms var(--lp-ease);
+    transform 380ms var(--lp-ease),
+    background-color 420ms var(--lp-ease),
+    color 420ms var(--lp-ease);
 }
 .lp-diff-row pre {
   margin: 0;
@@ -1038,6 +1058,7 @@ html:has(.lp) {
 .lp-diff-sign {
   color: currentColor;
   opacity: 0.75;
+  transition: opacity 420ms var(--lp-ease);
 }
 .lp-diff-old {
   background: color-mix(in srgb, var(--lp-diff-old) 16%, transparent);
@@ -1047,12 +1068,26 @@ html:has(.lp) {
   background: color-mix(in srgb, var(--lp-diff-new) 16%, transparent);
   color: var(--lp-diff-new-ink);
 }
-.lp-diff[data-state="denied"] .lp-diff-new {
+/* Once the room has decided, this stops being a diff.
+   The line that lost is struck and retires; the line that stands sheds its
+   tint AND its sign, because a diff sign means "proposed" and this is not a
+   proposal any more, it is what the file says. Deny resolves the same way in
+   the other direction: nothing was written, so the original is what stands.
+   Colour and opacity only, so the resolution still reads under reduced
+   motion, where every transition here collapses to an instant state change. */
+.lp-diff[data-state="denied"] .lp-diff-new,
+.lp-diff[data-state="applied"] .lp-diff-old {
   opacity: 0.3;
   text-decoration: line-through;
 }
-.lp-diff[data-state="applied"] .lp-diff-old {
-  opacity: 0.35;
+.lp-diff[data-state="applied"] .lp-diff-new,
+.lp-diff[data-state="denied"] .lp-diff-old {
+  background: transparent;
+  color: var(--lp-stage-ink);
+}
+.lp-diff[data-state="applied"] .lp-diff-new .lp-diff-sign,
+.lp-diff[data-state="denied"] .lp-diff-old .lp-diff-sign {
+  opacity: 0;
 }
 
 .lp-votebar {
@@ -2201,4 +2236,102 @@ html:has(.lp) {
   }
   .lp-reveal { opacity: 1; transform: none; }
   .lp-cue-rail::after { display: none; }
+}
+
+/* ------------------------------------------------------------ touch input
+
+   Last in the file on purpose. These selectors are the same specificity as
+   the component rules they override, so placing them earlier let every later
+   `height` win and the whole block did nothing under a thumb. Screen width
+   does not imply input method, so this keys off the pointer rather than a
+   breakpoint: a touch laptop gets the larger targets and a narrow desktop
+   window does not.
+
+   44px is the accessibility floor, not a style choice. Only the landing's
+   controls grow; the app's compact desk-side controls are untouched. */
+@media (pointer: coarse) {
+  .lp-linkbtn { min-height: 44px; }
+  .lp-foot a,
+  .lp-legal summary { display: inline-flex; align-items: center; min-height: 44px; }
+  .lp-btn--small,
+  .lp-seg-btn,
+  .lp-vote,
+  .lp-nav .theme-toggle { height: 44px; }
+  /* The vote bar is the one place three controls sit in a row inside a demo.
+     At a thumb's width they stack rather than wrap into a ragged two-and-one. */
+  .lp-votebar > .lp-vote { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ----------------------------------------------------------- narrow screens
+
+   Placed last for the same cascade reason as the touch block above. */
+
+@media (max-width: 760px) {
+  /* The convergence is composed for a wide hero, where the strands land in
+     the empty half beside the copy. There is no empty half at this width, so
+     they cross the lead instead. The vignette protects display type only, and
+     body text at 17px needs more help than that: the drawing stays, quieter,
+     as the texture it becomes when it cannot be the composition. */
+  .lp-hero-canvas { opacity: 0.42; }
+}
+
+@media (max-width: 560px) {
+  /* A panel bar is label + illustration chip + a status slot, sized for a
+     desk. Squeezed to a phone it breaks "Sample room" and "3 voters · 2 to
+     decide" across lines, which reads as a layout fault rather than a label.
+     Dropping the status slot to its own full-width line keeps every phrase
+     whole; the bar gets taller, which is the cheaper cost. */
+  .lp-panel-bar {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+  .lp-panel-bar > :not(.lp-panel-label) {
+    flex: 1 0 100%;
+  }
+
+  /* The pip belongs to the first line of the sentence, not to a line of its
+     own above it. */
+  .lp-hero-meta {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 9px;
+  }
+  .lp-hero-pip {
+    flex: none;
+    margin-top: 0.45em;
+  }
+
+  /* Nine acts at desk spacing is a very long thumb scroll. All three steps
+     shrink by roughly the same proportion, so the alternation that carries
+     the page's vertical rhythm survives the compression. */
+  .lp {
+    --lp-act-pad: 60px;
+    --lp-act-pad-wide: 72px;
+    --lp-act-pad-tight: 46px;
+  }
+}
+
+@media (max-width: 400px) {
+  /* The nav holds a wordmark, a theme switch and the primary action. Below
+     this the three stop fitting and the action is pushed past the right edge.
+     The switch keeps its track, which is the part carrying the state; only the
+     word beside it goes, and the button's aria-label already says the same
+     thing, so nothing is lost to a screen reader. Scoped to the landing nav:
+     the app's own toggle is unchanged. */
+  .lp-nav .theme-toggle > span:not(.theme-toggle-track) { display: none; }
+  .lp-nav .theme-toggle { padding-inline: 10px; }
+  .lp-nav-actions { gap: 8px; }
+}
+
+@media (max-width: 760px) {
+  /* The canvas is a static list at this width: cards are `position: static`
+     with `cursor: default`, and there is nothing to drag or arrow around. The
+     hint described a desktop affordance that does not exist here, which is
+     worse than no hint. */
+  .lp-workflow-drag-hint { display: none; }
+
+  /* Sized to hold the desktop file list. On a phone the rows are taller and
+     fewer fit the eye at once, so the floor only adds dead space between the
+     last file and the panel foot. */
+  .lp-ws { min-height: 0; }
 }

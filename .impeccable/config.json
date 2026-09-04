@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/client/styles.css"
+        ],
+        "createdAt": "2026-09-03T21:28:45.830Z",
+        "reason": "user confirmed: .reply-quote and .composer-reply are quoted-material rules, not card accents; the left rule is blockquote convention and the accent ties the quote to the reply affordance"
+      }
+    ]
+  }
+}
