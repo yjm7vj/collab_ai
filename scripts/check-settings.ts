@@ -226,17 +226,19 @@ check("ask marks edit_doc as ask", askDecisions.edit_doc === "ask", askDecisions
 
 const autoDecisions = resolveTools({ ...basePolicy, mode: "auto" });
 check(
-  // delete_file is the deliberate exception: deleting someone's file is not
-  // symmetric with editing it, so auto-accept does not extend to it.
-  "auto allows everything except delete_file",
-  Object.entries(autoDecisions).every(([name, d]) => (name === "delete_file" ? d === "ask" : d === "allow")),
+  // delete_file is irreversible, and terminal commands can execute arbitrary
+  // code on somebody's computer. Both stay gated even when ordinary edits are
+  // auto-accepted.
+  "auto keeps delete_file and run_terminal gated",
+  Object.entries(autoDecisions).every(([name, d]) =>
+    name === "delete_file" || name === "run_terminal" ? d === "ask" : d === "allow"),
   autoDecisions,
 );
 
 const gatedAuto = gatedFor({ ...basePolicy, mode: "auto" });
 check(
-  "gatedFor under auto is exactly delete_file",
-  gatedAuto.size === 1 && gatedAuto.has("delete_file"),
+  "gatedFor under auto is exactly delete_file and run_terminal",
+  gatedAuto.size === 2 && gatedAuto.has("delete_file") && gatedAuto.has("run_terminal"),
   [...gatedAuto],
 );
 check("gatedFor under auto does not include write_file", !gatedAuto.has("write_file"), [...gatedAuto]);
@@ -244,13 +246,14 @@ check("gatedFor under auto does not include edit_file", !gatedAuto.has("edit_fil
 
 const gatedAsk = gatedFor({ ...basePolicy, mode: "ask" });
 check(
-  "gatedFor under ask is exactly write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
-  gatedAsk.size === 6 &&
+  "gatedFor under ask includes document, file, terminal, and mcp mutation tools",
+  gatedAsk.size === 7 &&
     gatedAsk.has("write_doc") &&
     gatedAsk.has("edit_doc") &&
     gatedAsk.has("write_file") &&
     gatedAsk.has("edit_file") &&
     gatedAsk.has("delete_file") &&
+    gatedAsk.has("run_terminal") &&
     // A call to somebody else's server is gated for the same reason a write
     // is: the room cannot see what it does, so it decides first.
     gatedAsk.has("mcp"),

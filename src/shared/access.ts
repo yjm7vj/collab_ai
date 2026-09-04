@@ -102,6 +102,7 @@ export type ToolName =
   | "list_files" | "read_file" | "search_files"
   | "semantic_search"
   | "write_file" | "edit_file" | "delete_file"
+  | "run_terminal"
   | "mcp";
 
 export const TOOL_NAMES: readonly ToolName[] = [
@@ -109,6 +110,7 @@ export const TOOL_NAMES: readonly ToolName[] = [
   "list_files", "read_file", "search_files",
   "semantic_search",
   "write_file", "edit_file", "delete_file",
+  "run_terminal",
   "mcp",
 ] as const;
 
@@ -140,6 +142,7 @@ const ALL_ALLOW: Record<ToolName, ToolDecision> = {
   list_files: "allow", read_file: "allow", search_files: "allow",
   semantic_search: "allow",
   write_file: "allow", edit_file: "allow", delete_file: "allow",
+  run_terminal: "allow",
   mcp: "allow",
 };
 
@@ -159,6 +162,7 @@ export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<Tool
     ...ALL_ALLOW,
     write_doc: "deny", edit_doc: "deny",
     write_file: "deny", edit_file: "deny", delete_file: "deny",
+    run_terminal: "deny",
     mcp: "deny",
   },
   // A vote per file read would be unusable — the path policy is the real
@@ -171,6 +175,7 @@ export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<Tool
     ...ALL_ALLOW,
     write_doc: "ask", edit_doc: "ask",
     write_file: "ask", edit_file: "ask", delete_file: "ask",
+    run_terminal: "ask",
     mcp: "ask",
   },
   // Auto-accept skips the vote for routine writes so the agent doesn't stall
@@ -178,7 +183,7 @@ export const MODE_PRESETS: Record<Exclude<PermissionMode, "custom">, Record<Tool
   // it: an edit can be undone by another edit, a delete cannot. So delete_file
   // stays "ask" even in auto — auto-accept is about not interrupting a flow,
   // not about removing the last check on an irreversible action.
-  auto: { ...ALL_ALLOW, delete_file: "ask" },
+  auto: { ...ALL_ALLOW, delete_file: "ask", run_terminal: "ask" },
 };
 
 export const DEFAULT_POLICY: AccessPolicy = {

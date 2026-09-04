@@ -38,6 +38,7 @@ import {
   ThemeToggle,
   type ThemeMode,
 } from "./components";
+import { TerminalPanel } from "./TerminalPanel";
 import { SettingsPanel } from "./Settings";
 import { WorkflowPanel } from "./Workflow";
 import {
@@ -53,6 +54,14 @@ import {
 } from "./workspace";
 import { FS_LIMITS, type FsRequest, type FsResponse } from "../shared/workspace";
 import type { IdeActivity, IdeCursor } from "../shared/ide";
+import type {
+  TerminalCommandRequest,
+  TerminalControlRequest,
+  TerminalOutput,
+  TerminalRemoteInput,
+  TerminalSession,
+  TerminalSharing,
+} from "../shared/terminal";
 
 const CLIENT_FS_TIMEOUT_MS = FS_LIMITS.timeoutMs + 5_000;
 
@@ -145,6 +154,7 @@ export function RoomView({
   const [showConsentRecord, setShowConsentRecord] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [workspaceView, setWorkspaceView] = useState<"connections" | "ide">("connections");
   const pendingClientFs = useRef(new Map<string, { resolve: (res: FsResponse) => void; timer: number }>());
   // The repository list for the GitHub picker. `null` means "not fetched
@@ -176,6 +186,11 @@ export function RoomView({
   const [ideCursors, setIdeCursors] = useState<IdeCursor[]>([]);
   const [ideActivity, setIdeActivity] = useState<IdeActivity[]>([]);
   const [replyTo, setReplyTo] = useState<{ id: string; authorName: string; text: string } | null>(null);
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
+  const [terminalOutputs, setTerminalOutputs] = useState<TerminalOutput[]>([]);
+  const [terminalControlRequests, setTerminalControlRequests] = useState<TerminalControlRequest[]>([]);
+  const [terminalCommands, setTerminalCommands] = useState<TerminalCommandRequest[]>([]);
+  const [terminalRemoteInputs, setTerminalRemoteInputs] = useState<TerminalRemoteInput[]>([]);
 
   useEffect(() => {
     if (!showSettingsMenu && !showAccountMenu) return;
@@ -228,6 +243,25 @@ export function RoomView({
         break;
       case "ide.activity":
         setIdeActivity((current) => [...current, msg.activity].slice(-30));
+        break;
+      case "terminal.sessions":
+        setTerminalSessions(msg.sessions);
+        setTerminalControlRequests((current) => current.filter((request) => msg.sessions.some((session) => session.id === request.sessionId)));
+        break;
+      case "terminal.output":
+        setTerminalOutputs((current) => [...current, msg.output].slice(-1_000));
+        break;
+      case "terminal.control.request":
+        setTerminalControlRequests((current) => [
+          ...current.filter((request) => request.sessionId !== msg.request.sessionId || request.uid !== msg.request.uid),
+          msg.request,
+        ]);
+        break;
+      case "terminal.input":
+        setTerminalRemoteInputs((current) => [...current, msg].slice(-1_000));
+        break;
+      case "terminal.command":
+        setTerminalCommands((current) => [...current.filter((request) => request.id !== msg.request.id), msg.request].slice(-100));
         break;
       case "revisions":
         setRevisions(msg.revisions);
@@ -626,6 +660,14 @@ export function RoomView({
   const publishIdeCursor = useCallback((cursor: Omit<IdeCursor, "uid" | "name" | "color">) => send({ t: "ide.cursor", cursor }), [send]);
   const publishIdeActivity = useCallback((kind: IdeActivity["kind"], path: string, detail: string) => send({ t: "ide.activity", kind, path, detail }), [send]);
   const indexIdeFile = useCallback((path: string, content: string) => send({ t: "ide.index", path, content }), [send]);
+  const listTerminals = useCallback(() => send({ t: "terminal.list" }), [send]);
+  const hostTerminal = useCallback((session: { id: string; label: string; shell: string; sharing: TerminalSharing }) => send({ t: "terminal.host.open", ...session }), [send]);
+  const closeTerminal = useCallback((sessionId: string) => send({ t: "terminal.host.close", sessionId }), [send]);
+  const publishTerminalOutput = useCallback((sessionId: string, data: string, seq: number) => send({ t: "terminal.output", sessionId, data, seq }), [send]);
+  const sendTerminalInput = useCallback((sessionId: string, data: string) => send({ t: "terminal.input", sessionId, data }), [send]);
+  const requestTerminalControl = useCallback((sessionId: string) => send({ t: "terminal.control.request", sessionId }), [send]);
+  const decideTerminalControl = useCallback((sessionId: string, uid: string, allow: boolean) => send({ t: "terminal.control.decide", sessionId, uid, allow }), [send]);
+  const terminalCommandResult = useCallback((id: string, ok: boolean, output: string) => send({ t: "terminal.command.result", id, ok, output }), [send]);
   const authGithub = useCallback(() => send({ t: "github.auth" }), [send]);
   const listRepos = useCallback(() => {
     setReposLoading(true);
@@ -1065,6 +1107,27 @@ export function RoomView({
         />
       )}
 
+      {showTerminal && (
+        <TerminalPanel
+          me={me}
+          canHost={mayPolicy}
+          sessions={terminalSessions}
+          outputs={terminalOutputs}
+          controlRequests={terminalControlRequests}
+          commands={terminalCommands}
+          remoteInputs={terminalRemoteInputs}
+          onList={listTerminals}
+          onHostOpen={hostTerminal}
+          onHostClose={closeTerminal}
+          onHostOutput={publishTerminalOutput}
+          onInput={sendTerminalInput}
+          onRequestControl={requestTerminalControl}
+          onDecideControl={decideTerminalControl}
+          onCommandResult={terminalCommandResult}
+          onClose={() => setShowTerminal(false)}
+        />
+      )}
+
       {showInvites && (
         <InvitePanel
           invites={invites}
@@ -1190,6 +1253,8 @@ export function RoomView({
                   visible={mayPolicy}
                   onWorkspace={() => { setWorkspaceView("connections"); setShowWorkspace(true); }}
                   onIde={() => { setWorkspaceView("ide"); setShowWorkspace(true); }}
+                  terminalVisible={maySpeak}
+                  onTerminal={() => setShowTerminal(true)}
                 />
               </>
             }

@@ -48,6 +48,13 @@ import {
 } from "../shared/protocol";
 import type { IdeActivity, IdeCursor } from "../shared/ide";
 import {
+  TERMINAL_LIMITS,
+  classifyTerminalCommand,
+  sanitizeTerminalLabel,
+  sanitizeTerminalShell,
+  type TerminalSession,
+} from "../shared/terminal";
+import {
   DEFAULT_POLICY,
   approvalThreshold,
   asRole,
@@ -319,6 +326,7 @@ const MCP_TOOL_CACHE_MS = 10 * 60 * 1000;
  */
 const MUTATING_TOOLS = new Set([
   "write_doc", "edit_doc", "write_file", "edit_file", "delete_file", "delegate",
+  "run_terminal",
 ]);
 
 /**
@@ -362,6 +370,16 @@ export class Room extends Agent<Env, RoomState> {
    * why this lives in memory rather than storage.
    */
   #pending = new PendingRequests();
+  #terminalSessions = new Map<string, {
+    session: TerminalSession;
+    hostConnectionId: string;
+    controllers: Map<string, string>;
+  }>();
+  #terminalCommands = new Map<string, {
+    sessionId: string;
+    resolve: (outcome: ToolOutcome) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   #settling = false;
 
   // ---------------------------------------------------------------- storage
@@ -1707,6 +1725,7 @@ export class Room extends Agent<Env, RoomState> {
         entries: this.#entries().map((e) => redactEntry(e, allowed)),
       } satisfies ServerMsg),
     );
+    this.#sendTerminalSessions(connection);
 
     const exitKey = `presence:exited:${uid}`;
     if (this.#kvGet<boolean>(exitKey, false)) {
@@ -1752,6 +1771,15 @@ export class Room extends Agent<Env, RoomState> {
         this.setState({ ...this.state, workspace: { ...this.state.workspace, online: false } });
       }
     }
+
+    let terminalsChanged = false;
+    for (const [id, runtime] of this.#terminalSessions) {
+      if (runtime.hostConnectionId !== connection.id) continue;
+      this.#terminalSessions.delete(id);
+      this.#failTerminalCommands(id, "The local terminal disconnected before the command finished.");
+      terminalsChanged = true;
+    }
+    if (terminalsChanged) this.#broadcastTerminalSessions();
 
     await this.#refreshPresence(connection.id);
   }
@@ -1828,6 +1856,22 @@ export class Room extends Agent<Env, RoomState> {
         return this.#onIdeActivity(connection, msg.kind, msg.path, msg.detail);
       case "ide.index":
         return this.#onIdeIndex(connection, msg.path, msg.content);
+      case "terminal.list":
+        return this.#sendTerminalSessions(connection);
+      case "terminal.host.open":
+        return this.#onTerminalHostOpen(connection, msg);
+      case "terminal.host.close":
+        return this.#onTerminalHostClose(connection, msg.sessionId);
+      case "terminal.output":
+        return this.#onTerminalOutput(connection, msg.sessionId, msg.data, msg.seq);
+      case "terminal.input":
+        return this.#onTerminalInput(connection, msg.sessionId, msg.data);
+      case "terminal.control.request":
+        return this.#onTerminalControlRequest(connection, msg.sessionId);
+      case "terminal.control.decide":
+        return this.#onTerminalControlDecide(connection, msg.sessionId, msg.uid, msg.allow);
+      case "terminal.command.result":
+        return this.#onTerminalCommandResult(connection, msg.id, msg.ok, msg.output);
     }
   }
 
@@ -2192,6 +2236,7 @@ export class Room extends Agent<Env, RoomState> {
 
     this.sql`UPDATE members SET role = ${next} WHERE uid = ${targetUid}`;
     this.#rebind(targetUid, next);
+    if (!can(next, "policy")) this.#revokeTerminalSessionsFor(targetUid, "The terminal host no longer has permission to host a room terminal.");
     this.#system(
       `${this.#memberName(actorUid) ?? "someone"} made ` +
         `${this.#memberName(targetUid) ?? "someone"} a ${next}`,
@@ -2221,6 +2266,7 @@ export class Room extends Agent<Env, RoomState> {
 
     const name = this.#memberName(targetUid);
     this.sql`DELETE FROM members WHERE uid = ${targetUid}`;
+    this.#revokeTerminalSessionsFor(targetUid, "The terminal host was removed from the room.");
     // Close their sockets now. The membership check in onConnect would refuse a
     // reconnect anyway, but leaving a live socket open would let them keep
     // reading the room until they happened to disconnect.
@@ -2787,6 +2833,183 @@ export class Room extends Agent<Env, RoomState> {
       this.sql`INSERT INTO semantic_chunks (path, chunk, content, terms, updated_at) VALUES (${path}, ${chunk}, ${text}, ${terms}, ${Date.now()})`;
     }
     await this.#onIdeActivity(connection, "indexed", path, `Indexed ${chunks} passage${chunks === 1 ? "" : "s"}`);
+  }
+
+  #terminalSessionsVisibleTo(uid: string | null): TerminalSession[] {
+    return [...this.#terminalSessions.values()]
+      .filter(({ session }) => session.sharing === "room" || session.hostUid === uid)
+      .map(({ session, controllers }) => ({
+        ...session,
+        controllers: [...controllers].map(([controllerUid, name]) => ({ uid: controllerUid, name })),
+      }))
+      .sort((a, b) => a.startedAt - b.startedAt);
+  }
+
+  #sendTerminalSessions(connection: Connection) {
+    connection.send(JSON.stringify({
+      t: "terminal.sessions",
+      sessions: this.#terminalSessionsVisibleTo(this.#uidOf(connection)),
+    } satisfies ServerMsg));
+  }
+
+  #broadcastTerminalSessions() {
+    for (const connection of this.getConnections()) this.#sendTerminalSessions(connection);
+  }
+
+  #terminalHost(runtime: { hostConnectionId: string }): Connection | null {
+    for (const connection of this.getConnections()) {
+      if (connection.id === runtime.hostConnectionId) return connection;
+    }
+    return null;
+  }
+
+  #onTerminalHostOpen(
+    connection: Connection,
+    incoming: { id: string; label: string; shell: string; sharing: "private" | "room" },
+  ) {
+    if (!this.#allow(connection, "policy", "Only the room's owner or admins can host a local terminal.")) return;
+    const uid = this.#uidOf(connection);
+    const name = this.#nameOf(connection);
+    if (!uid || !name || !UID_RE.test(incoming.id)) return;
+    const existing = this.#terminalSessions.get(incoming.id);
+    if (existing && existing.hostConnectionId !== connection.id) return;
+
+    const session: TerminalSession = {
+      id: incoming.id,
+      hostUid: uid,
+      hostName: name,
+      label: sanitizeTerminalLabel(incoming.label),
+      shell: sanitizeTerminalShell(incoming.shell),
+      sharing: incoming.sharing === "private" ? "private" : "room",
+      controllers: [],
+      startedAt: existing?.session.startedAt ?? Date.now(),
+    };
+    this.#terminalSessions.set(incoming.id, {
+      session,
+      hostConnectionId: connection.id,
+      controllers: existing?.controllers ?? new Map(),
+    });
+    this.#broadcastTerminalSessions();
+  }
+
+  #onTerminalHostClose(connection: Connection, sessionId: string) {
+    const runtime = this.#terminalSessions.get(sessionId);
+    if (!runtime || runtime.hostConnectionId !== connection.id) return;
+    this.#terminalSessions.delete(sessionId);
+    this.#failTerminalCommands(sessionId, "The local terminal was closed before the command finished.");
+    this.#broadcastTerminalSessions();
+  }
+
+  #revokeTerminalSessionsFor(uid: string, reason: string) {
+    let changed = false;
+    for (const [id, runtime] of this.#terminalSessions) {
+      if (runtime.session.hostUid !== uid) continue;
+      this.#terminalSessions.delete(id);
+      this.#failTerminalCommands(id, reason);
+      changed = true;
+    }
+    if (changed) this.#broadcastTerminalSessions();
+  }
+
+  #onTerminalOutput(connection: Connection, sessionId: string, data: string, seq: number) {
+    const runtime = this.#terminalSessions.get(sessionId);
+    if (!runtime || runtime.hostConnectionId !== connection.id || runtime.session.sharing !== "room") return;
+    if (!can(asRole(this.#memberRole(runtime.session.hostUid)), "policy")) return;
+    if (typeof data !== "string" || new TextEncoder().encode(data).byteLength > TERMINAL_LIMITS.frameBytes) return;
+    const safeSeq = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(Number(seq) || 0)));
+    this.#send({ t: "terminal.output", output: { sessionId, data, seq: safeSeq } });
+  }
+
+  #onTerminalInput(connection: Connection, sessionId: string, data: string) {
+    const runtime = this.#terminalSessions.get(sessionId);
+    const uid = this.#uidOf(connection);
+    if (!runtime || !uid || runtime.session.sharing !== "room") return;
+    if (!can(asRole(this.#memberRole(uid)), "speak")) return;
+    if (runtime.session.hostUid !== uid && !runtime.controllers.has(uid)) return;
+    if (typeof data !== "string" || new TextEncoder().encode(data).byteLength > TERMINAL_LIMITS.inputBytes) return;
+    const host = this.#terminalHost(runtime);
+    if (!host) return;
+    host.send(JSON.stringify({
+      t: "terminal.input",
+      sessionId,
+      data,
+      fromUid: uid,
+      fromName: this.#memberName(uid) ?? "someone",
+    } satisfies ServerMsg));
+  }
+
+  #onTerminalControlRequest(connection: Connection, sessionId: string) {
+    if (!this.#allow(connection, "speak", "Viewers can watch a shared terminal but cannot request control.")) return;
+    const runtime = this.#terminalSessions.get(sessionId);
+    const uid = this.#uidOf(connection);
+    const name = this.#nameOf(connection);
+    if (!runtime || !uid || !name || runtime.session.sharing !== "room" || runtime.session.hostUid === uid) return;
+    const host = this.#terminalHost(runtime);
+    if (!host) return;
+    host.send(JSON.stringify({
+      t: "terminal.control.request",
+      request: { sessionId, uid, name },
+    } satisfies ServerMsg));
+  }
+
+  #onTerminalControlDecide(connection: Connection, sessionId: string, targetUid: string, allow: boolean) {
+    const runtime = this.#terminalSessions.get(sessionId);
+    if (!runtime || runtime.hostConnectionId !== connection.id || !UID_RE.test(targetUid)) return;
+    if (!can(asRole(this.#memberRole(runtime.session.hostUid)), "policy")) return;
+    const targetName = this.#memberName(targetUid);
+    if (!targetName || !can(asRole(this.#memberRole(targetUid)), "speak")) return;
+    if (allow) runtime.controllers.set(targetUid, targetName);
+    else runtime.controllers.delete(targetUid);
+    this.#broadcastTerminalSessions();
+  }
+
+  #onTerminalCommandResult(connection: Connection, id: string, ok: boolean, rawOutput: string) {
+    const pending = this.#terminalCommands.get(id);
+    if (!pending) return;
+    const runtime = this.#terminalSessions.get(pending.sessionId);
+    if (!runtime || runtime.hostConnectionId !== connection.id) return;
+    if (!can(asRole(this.#memberRole(runtime.session.hostUid)), "policy")) return;
+    clearTimeout(pending.timer);
+    this.#terminalCommands.delete(id);
+    const output = typeof rawOutput === "string" ? rawOutput.slice(0, TERMINAL_LIMITS.resultBytes) : "";
+    pending.resolve({ ok: ok === true, text: output || (ok ? "Command completed." : "Command failed without output.") });
+  }
+
+  #failTerminalCommands(sessionId: string, reason: string) {
+    for (const [id, pending] of this.#terminalCommands) {
+      if (pending.sessionId !== sessionId) continue;
+      clearTimeout(pending.timer);
+      this.#terminalCommands.delete(id);
+      pending.resolve({ ok: false, text: reason });
+    }
+  }
+
+  async #runTerminal(rawCommand: unknown): Promise<ToolOutcome> {
+    const command = typeof rawCommand === "string" ? rawCommand.trim() : "";
+    if (!command || new TextEncoder().encode(command).byteLength > TERMINAL_LIMITS.commandBytes) {
+      return { ok: false, text: "run_terminal requires one command of at most 2,000 bytes." };
+    }
+    const runtime = [...this.#terminalSessions.values()].find(({ session }) => session.sharing === "room");
+    if (!runtime) return { ok: false, text: "No room-visible local terminal is connected." };
+    if (!can(asRole(this.#memberRole(runtime.session.hostUid)), "policy")) {
+      return { ok: false, text: "The terminal host no longer has permission to run a room terminal." };
+    }
+    const host = this.#terminalHost(runtime);
+    if (!host) return { ok: false, text: "The local terminal host is offline." };
+
+    const id = crypto.randomUUID();
+    const outcome = new Promise<ToolOutcome>((resolve) => {
+      const timer = setTimeout(() => {
+        this.#terminalCommands.delete(id);
+        resolve({ ok: false, text: "The local terminal command timed out." });
+      }, TERMINAL_LIMITS.commandTimeoutMs);
+      this.#terminalCommands.set(id, { sessionId: runtime.session.id, resolve, timer });
+    });
+    host.send(JSON.stringify({
+      t: "terminal.command",
+      request: { id, sessionId: runtime.session.id, command },
+    } satisfies ServerMsg));
+    return outcome;
   }
 
   #semanticSearch(rawQuery: unknown, rawMax: unknown): FsResponse {
@@ -3863,6 +4086,7 @@ export class Room extends Agent<Env, RoomState> {
             }
           } else if (
             gatedNames.has(call.name) &&
+            !(call.name === "run_terminal" && classifyTerminalCommand((call.input as { command?: unknown })?.command) === "low") &&
             !grantFor(this.state.grants, call.name, Date.now())
           ) {
             const sensitive = isFileContentTool(call.name);
@@ -3883,6 +4107,8 @@ export class Room extends Agent<Env, RoomState> {
             let outcome: ToolOutcome;
             if (call.name === "delegate") {
               outcome = await this.#delegate((call.input as { tasks?: unknown })?.tasks, docs);
+            } else if (call.name === "run_terminal") {
+              outcome = await this.#runTerminal((call.input as { command?: unknown })?.command);
             } else if (call.name === "semantic_search") {
               const input = (call.input ?? {}) as Record<string, unknown>;
               const res = this.#semanticSearch(input.query, input.max);
@@ -4184,6 +4410,8 @@ export class Room extends Agent<Env, RoomState> {
               "The room voted against this action, so it did not run. Do not " +
               "retry the same call — ask the room what they would prefer.",
           };
+        } else if (p.name === "run_terminal") {
+          outcome = await this.#runTerminal((p.input as { command?: unknown })?.command);
         } else if (p.name === "write_file" || p.name === "edit_file" || p.name === "delete_file") {
           // These are workspace tools, not document tools: they have no
           // synchronous form, so approval resolves them with a round trip to

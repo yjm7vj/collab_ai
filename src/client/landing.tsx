@@ -504,19 +504,19 @@ const MERGE_LINES = [
     who: "Priya",
     role: "Support",
     at: 0,
-    text: "customers are asking whether their data was affected",
+    text: "Customers are asking whether their data was affected",
   },
   {
     who: "Sam",
     role: "Engineering",
     at: 500,
-    text: "it wasn't. cache config, nothing reached the data",
+    text: "It wasn't. Cache config, nothing reached the data",
   },
   {
     who: "Dana",
     role: "Legal",
     at: 1100,
-    text: "then say exactly that, and keep the word breach out of it",
+    text: "Then say exactly that, and keep the word breach out of it",
   },
 ];
 
@@ -533,7 +533,7 @@ const MERGE_REPLY =
 const LATE_LINE = {
   who: "Priya",
   role: "Support",
-  text: "also say when the next update goes out",
+  text: "Also say when the next update goes out",
 };
 
 const FOLD_AT = 3200;
@@ -598,7 +598,7 @@ function ChapterMerge() {
             <div className="lp-inbox" data-in={queued}>
               <span className="lp-inbox-head">
                 <IconClock />
-                Inbox · 1 waiting
+                Inbox · 1 Waiting
               </span>
               <div className="lp-msg">
                 <span className="lp-msg-who">
@@ -677,7 +677,7 @@ function ChapterMerge() {
           </div>
         </div>
         <div className="lp-panel-bar lp-panel-foot">
-          <span>Four messages · two turns · none dropped</span>
+          <span>Four messages · two turns · None dropped</span>
           <button
             type="button"
             className="lp-linkbtn"
@@ -755,8 +755,8 @@ function ChapterVote() {
 
   const outcomeText = settled
     ? approve >= BAR
-      ? `Approved ${approve} of ${BAR} · the edit was applied`
-      : `Denied ${deny} of ${BAR} · nothing was written`
+      ? `Approved ${approve} of ${BAR} · The edit was applied`
+      : `Denied ${deny} of ${BAR} · Nothing was written`
     : mine
       ? `Waiting on the room · 1 of ${BAR}`
       : `Open · ${BAR} of ${VOTERS} decides it`;
@@ -928,15 +928,15 @@ function ChapterDurable() {
    */
   const phase = lit >= 4 ? "awake" : lit >= 3 ? "asleep" : "open";
   const PHASE = {
-    open: { head: "turn open", foot: "nothing is being held open" },
-    asleep: { head: "hibernating", foot: "the object is evicted; the turn is on disk" },
-    awake: { head: "turn resumed", foot: "resumed in a different invocation" },
+    open: { head: "Turn open", foot: "Nothing is being held open" },
+    asleep: { head: "Hibernating", foot: "The object is evicted; the turn is on disk" },
+    awake: { head: "Turn resumed", foot: "Resumed in a different invocation" },
   } as const;
 
   return (
     <div ref={ref}>
       <DemoPanel
-        label="One turn · four hours"
+          label="One turn · Four hours"
         right={
           <span className="lp-presence">
             <span className="lp-presence-dot" data-phase={phase} />
@@ -1036,7 +1036,7 @@ function ChapterWorkspace() {
         right={
           <span className="lp-presence">
             <span className="lp-presence-dot" />
-            {kind === "local" ? "host online" : "app installed"}
+            {kind === "local" ? "Host online" : "App installed"}
           </span>
         }
       >
@@ -1047,7 +1047,7 @@ function ChapterWorkspace() {
                 <IconBranch />
                 collab-ai
               </span>
-              <span>opened as a pull request</span>
+              <span>Opened as a pull request</span>
             </div>
           )}
           {LOCAL_FILES.map((file) => (
@@ -1059,7 +1059,7 @@ function ChapterWorkspace() {
               </span>
               {file.tag && (
                 <span className="lp-ws-tag" data-kind={file.tag}>
-                  {file.tag === "new" ? "added" : "edited"}
+                  {file.tag === "new" ? "Added" : "Edited"}
                 </span>
               )}
             </div>
@@ -1069,7 +1069,7 @@ function ChapterWorkspace() {
             room's transcript being shared does not make its contents shared. */}
         <div className="lp-panel-bar lp-panel-foot">
           <span>Owners and admins see contents</span>
-          <span className="lp-presence">editors and viewers see the path</span>
+          <span className="lp-presence">Editors and viewers see the path</span>
         </div>
       </DemoPanel>
     </div>
@@ -1178,10 +1178,10 @@ const WORKFLOW_CARDS: WorkflowCard[] = [
  * reworded a prompt would be a lie about the system.
  */
 const WF_KINDS = [
-  { kind: "delegates", label: "delegates to" },
-  { kind: "reviews", label: "is reviewed by" },
-  { kind: "handoff", label: "hands off to" },
-  { kind: "custom", label: "relates to", prose: true },
+  { kind: "delegates", label: "Delegates to" },
+  { kind: "reviews", label: "Is reviewed by" },
+  { kind: "handoff", label: "Hands off to" },
+  { kind: "custom", label: "Relates to" },
 ];
 
 const WF_EDGES = [
@@ -1208,7 +1208,7 @@ function ChapterWorkflowBuilder() {
   const t = useTimeline(seen, WF_END, reduced, run);
 
   const [cards, setCards] = useState(WORKFLOW_CARDS);
-  const [selected, setSelected] = useState("research");
+  const [selected, setSelected] = useState("lead");
   const [typedPrompt, setTypedPrompt] = useState("");
   // Once the visitor takes the field, the script stops driving it.
   const [manual, setManual] = useState(false);
@@ -1272,7 +1272,7 @@ function ChapterWorkflowBuilder() {
 
   const replay = () => {
     setCards(WORKFLOW_CARDS);
-    setSelected("research");
+    setSelected("lead");
     setTypedPrompt("");
     setManual(false);
     setSentByHand(false);
@@ -1473,6 +1473,14 @@ function ChapterWorkflowBuilder() {
               )}
             </button>
           ))}
+          <div className="lp-workflow-legend" aria-label="Workflow link colors">
+            {WF_KINDS.map((k) => (
+              <span className="lp-workflow-legend-item" key={k.kind}>
+                <span className={`lp-workflow-swatch lp-wire-${k.kind}`} />
+                {k.label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1485,7 +1493,7 @@ function ChapterWorkflowBuilder() {
           <p>{active.detail}</p>
         </div>
         <div className="lp-workflow-inspect-servers">
-          <span className="lp-workflow-inspect-label">MCP servers</span>
+          <span className="lp-workflow-inspect-label">MCP Servers</span>
           {active.servers.length === 0 ? (
             <p className="lp-workflow-empty">
               None on this agent. Pick the researcher to see two.
@@ -1505,19 +1513,6 @@ function ChapterWorkflowBuilder() {
             </ul>
           )}
         </div>
-      </div>
-
-      <div className="lp-workflow-legend">
-        {WF_KINDS.map((k) => (
-          <span className="lp-workflow-legend-item" key={k.kind}>
-            <span className={`lp-workflow-swatch lp-wire-${k.kind}`} />
-            {k.label}
-            {k.prose && <em>prompt only</em>}
-          </span>
-        ))}
-        <span className="lp-workflow-drag-hint">
-          Drag a card, or move it with the arrow keys
-        </span>
       </div>
 
       <p className="lp-note">
@@ -1541,28 +1536,28 @@ const ANNOUNCEMENTS = [
   {
     time: "09:14",
     who: "Priya",
-    what: "changed the setup",
-    detail: "manager · Opus 5 directing Haiku 4.5 · effort high · up to 5 workers (auto)",
+    what: "Changed the setup",
+    detail: "Manager · Opus 5 directing Haiku 4.5 · Effort high · Up to 5 workers (auto)",
   },
   {
     time: "09:31",
     who: "Dana",
-    what: "changed what the agent may do",
+    what: "Changed what the agent may do",
     detail:
-      "ask first · majority · votes on write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
+      "Ask first · Majority · Votes on write_doc, edit_doc, write_file, edit_file, delete_file, mcp",
   },
   {
     time: "11:02",
     who: "Sam",
-    what: "changed the workflow",
+    what: "Changed the workflow",
     detail:
-      "custom · Lead on Opus 5 · 3 teammates (Researcher A, Researcher B, Critic) · 4 links",
+      "Custom · Lead on Opus 5 · 3 teammates (Researcher A, Researcher B, Critic) · 4 links",
   },
   {
     time: "14:20",
     who: null,
     what: "Compacted 32 earlier messages",
-    detail: "the conversation passed 120,000 tokens. The last 12 are kept verbatim.",
+    detail: "The conversation passed 120,000 tokens. The last 12 are kept verbatim.",
   },
 ];
 
@@ -1832,7 +1827,7 @@ export function LandingPage({
           </div>
           <p className="lp-hero-meta">
             <span className="lp-hero-pip" />
-            Everyone talks at once · nothing is dropped · the vote is the review
+            Everyone talks at once · Nothing is dropped · The vote is the review
           </p>
         </div>
         <span className="lp-cue">
@@ -1914,6 +1909,27 @@ export function LandingPage({
           </div>
         </section>
 
+        <section className="lp-act lp-act--tint lp-act--mcp">
+          <div className="lp-inner lp-chapter">
+            <Reveal className="lp-chapter-head">
+              <h2 className="lp-h2">Give workflows the tools they need.</h2>
+              <p className="lp-body">
+                MCP servers stay in their own section so the workflow stays easy
+                to read. Pick an approved server from the catalogue, grant it to
+                an agent, and decide whether it uses a shared credential or each
+                person's own. MCP calls still go through the room's vote.
+              </p>
+            </Reveal>
+            <Reveal delay={1}>
+              <div className="lp-feature-grid lp-mcp-box">
+                <article className="lp-feature-card"><h3>MCP catalogue</h3><p>Browse approved servers such as Linear, Stripe, Sentry, and Cloudflare without memorizing connection URLs.</p></article>
+                <article className="lp-feature-card"><h3>Scoped grants</h3><p>Grant a server to a specific agent and keep access limited to the user and room that approved it.</p></article>
+                <article className="lp-feature-card"><h3>Visible and reviewable</h3><p>Tool calls, approvals, and outcomes remain in the room history, with access that can be taken back.</p></article>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+
         <section className="lp-act lp-act--tint">
           <div className="lp-inner lp-chapter lp-chapter--split">
             <Reveal className="lp-chapter-head">
@@ -1941,29 +1957,9 @@ export function LandingPage({
             </Reveal>
             <Reveal delay={1}>
               <div className="lp-activity-demo">
-                <div><span className="lp-activity-avatar">S</span><strong>Sam</strong><span>opened</span><code>incidents/api-latency.md</code></div>
-                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>editing line 12</span><code>incidents/next-update.md</code></div>
-                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>indexed 42 passages</span></div>
-              </div>
-            </Reveal>
-          </div>
-        </section>
-
-        <section className="lp-act lp-act--tint">
-          <div className="lp-inner lp-chapter">
-            <Reveal className="lp-chapter-head">
-              <h2 className="lp-h2">More capability, with clear boundaries.</h2>
-              <p className="lp-body">
-                Pick a server from the catalogue and hand it to one agent. The
-                room can&rsquo;t tell a read from a write on someone
-                else&rsquo;s server, so an MCP call is gated like a file write.
-              </p>
-            </Reveal>
-            <Reveal delay={1}>
-              <div className="lp-feature-grid">
-                <article className="lp-feature-card"><h3>A catalogue, not a URL</h3><p>Linear, Stripe, Sentry and Cloudflare, each listed with the credential it takes. One this app can&rsquo;t reach yet says so.</p></article>
-                <article className="lp-feature-card"><h3>Shared credential, or your own</h3><p>One token for the whole room, or one per person so the agent acts as whoever asked. Tokens never leave the room&rsquo;s storage.</p></article>
-                <article className="lp-feature-card"><h3>Approval that ends by itself</h3><p>Approve and stop being asked buys fifteen minutes and ten uses. Anyone can take it back.</p></article>
+                <div><span className="lp-activity-avatar">S</span><strong>Sam</strong><span>Opened</span><code>incidents/api-latency.md</code></div>
+                <div><span className="lp-activity-avatar lp-activity-avatar--alt">J</span><strong>Jordan</strong><span>Editing line 12</span><code>incidents/next-update.md</code></div>
+                <div><span className="lp-activity-dot" /><strong>Huddle.AI</strong><span>Indexed 42 passages</span></div>
               </div>
             </Reveal>
           </div>

@@ -1610,6 +1610,16 @@ html:has(.lp) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
+.lp-mcp-box {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--lp-r-xl);
+  background: color-mix(in srgb, var(--panel) 72%, var(--bg));
+}
+.lp-act--mcp .lp-h2 {
+  font-size: clamp(2.4rem, 4.2vw, 3.6rem);
+  max-width: 16ch;
+}
 
 /* The room's workflow editor at page scale. It lives only on a stage act, so
    it speaks the stage vocabulary throughout; on a pale ground its ink would be
@@ -2030,6 +2040,11 @@ html:has(.lp) {
 }
 
 .lp-workflow-legend {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 20px;
@@ -2046,10 +2061,6 @@ html:has(.lp) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-.lp-workflow-legend-item em {
-  font-style: normal;
-  color: var(--lp-stage-dim);
 }
 .lp-workflow-swatch {
   width: 18px;
@@ -2324,12 +2335,6 @@ html:has(.lp) {
 }
 
 @media (max-width: 760px) {
-  /* The canvas is a static list at this width: cards are `position: static`
-     with `cursor: default`, and there is nothing to drag or arrow around. The
-     hint described a desktop affordance that does not exist here, which is
-     worse than no hint. */
-  .lp-workflow-drag-hint { display: none; }
-
   /* Sized to hold the desktop file list. On a phone the rows are taller and
      fewer fit the eye at once, so the floor only adds dead space between the
      last file and the panel foot. */
