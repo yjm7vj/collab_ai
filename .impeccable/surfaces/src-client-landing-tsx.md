@@ -27,10 +27,24 @@ Visitor mode: **Persuade**.
 
 ## Audience and job
 
-Small groups — friends, teams — who have never seen this and are deciding
-whether to open a room. They arrive knowing the category (AI chat) and not
-knowing the difference (one agent shared by a room, writes voted on). The
-action is: create a room, or sign in and then create one.
+A cross-functional group who own files in a repository they cannot operate:
+support, legal, marketing, compliance, People Ops, plus the one engineer they
+currently have to borrow. They arrive knowing the category (AI chat) and not
+knowing the two differences that matter: one agent shared by a room with writes
+voted on, and a team of agents they can ask for in a sentence instead of
+building. The action is: create a room, or sign in and then create one.
+
+The page's two claims are halves of one idea — **the room never operates the
+machinery**. Git is machinery, and so is the agent graph; both are described in
+plain language and executed by the agent. The hero carries both
+(`Nobody opens GitHub. Nobody wires a graph.`) because either one alone reads as
+a feature rather than as the product's shape.
+
+Necessity is shown, never argued. It lives in the cast (legal is in the room),
+in one flat line in the lead, in a heading (`It ends as a pull request. You
+never open one.`), and in the durable chapter's approver six hours behind. It is
+never restated as a claim in body copy — a body paragraph that re-explains a
+heading's thesis is the failure mode here.
 
 ## Proof and content
 
@@ -38,7 +52,28 @@ PRODUCT.md records **no evidence on hand** — no testimonials, logos, metrics,
 case studies or press. Nothing of that kind may be invented here. The page
 persuades by running the mechanism instead of claiming it: both demo rooms are
 labelled "Sample room · illustration" in their own chrome, and the people in
-them (Ana, Ravi, Mia) are authored fixtures, not customers.
+them (Priya · Support, Sam · Engineering, Dana · Legal) are authored fixtures,
+not customers.
+
+The demo runs **one scenario end to end**: a status-page incident note that
+support, engineering and legal each own part of. It was chosen because approval
+is mandatory there whether or not an agent exists, which is the test PRODUCT.md
+sets for any use case. Every chapter draws from it — the merged turn, the
+approval card's file, the durable timeline, the workspace file list, the
+activity rows — so the page shows one group finishing one thing rather than
+five unrelated screenshots.
+
+**The approval card's diff is prose, not code, and must stay that way.** It is
+the single detail that says who this is for: a sentence a customer will read and
+a lawyer is accountable for, legible to every approver without a diff tool. A
+code diff there would silently restore the audience PRODUCT.md excludes. The
+row's `pre` inherits the page face (`font: inherit`), so prose does not render
+as monospace.
+
+Roles are shown on the message chrome and never inside the merged turn's tag:
+`Room#startTurn` writes `[${name}]: ${text}`, so the tag the model receives is
+the name alone. The role is how the room reads itself; the name is what the
+model is given.
 
 Every product fact on the page is read off the code, not paraphrased from the
 category: tagged `[Name]:` merges and the inbox drain (`Room#startTurn`), gated
